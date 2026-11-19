@@ -53,7 +53,9 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   to a thousand characters of arguments, such as the command it asks you to approve), and for Pi and omp the agent's last
   words before it asked are sent to the service you chose, after best-effort redaction, to say in a sentence
   what it asks. For Pi and omp, which tool call a prompt belongs to is a best guess, so another tool's arguments can be
-  sent; for a bb thread it is the request bb itself is waiting on, along with a question's options or a plan's text. When an agent finishes an instruction you
+  sent; for a bb thread it is the request bb itself is waiting on, along with a question's options or a plan's text.
+  A Codex conversation's prompt is handled the same way: what can be sent is the tool and command an approval is
+  for, or the question's text. When an agent finishes an instruction you
   dictated, or work you asked it to have KeyScribe read aloud, a longer final reply is sent to the service you chose
   under Replies, only to be summarized into a sentence or two to read aloud or show, together with the words you
   dictated when the reply came right after them, so the summary can open by naming what you asked; a short reply is read without it,
@@ -213,10 +215,10 @@ in the same `Application Support` folder:
   alone, because another app may be using it; delete it yourself if nothing else needs it.
 - **Agent connection** under `agents/`, only if you turn on the experimental Agent
   feature: an access token the agent connectors use to reach KeyScribe on your Mac, the Claude Code
-  connector's files, `connectors.json`, the agent folders you connected and which connector installation
+  connector's files, the Codex plugin's files, `connectors.json`, the agent folders you connected and which connector installation
   may connect from each, and `names.json`, the names you chose for conversations along with their agent
   session ids and the conversations you disconnected. A conversation's name, whether you chose it or it came
-  from its folder, a terminal tab or pane label, or a bb thread's title, may also be remembered there, and
+  from its folder, a terminal tab or pane label, or a bb thread's or Codex conversation's title, may also be remembered there, and
   appears in Settings, in History lines about that conversation, and in KeyScribe's logs on this Mac. The Pi and omp
   connectors' files live in the extensions folder of each folder you connected, because that is where the agent loads
   them from; they hold the same connection settings and nothing else. To find the conversations on your Mac and the
@@ -265,6 +267,24 @@ in the same `Application Support` folder:
   and uses it only while bb is the app in front. While KeyScribe isn't running the plugin sends nothing and drops what it would have sent, and for a thread
   you disconnected it sends nothing but that thread's identity. To show whether the plugin is running,
   KeyScribe reads bb's list of installed plugins while bb is connected.
+  If you install KeyScribe's plugin in Codex, KeyScribe connects, as a local client over a socket on your Mac, to
+  the app server Codex conversations share; it adds no network connection of its own, and what Codex itself sends
+  is up to Codex. From the app server it reads each conversation's id, folder, status, name and start time, and to
+  confirm a message it sent, it reads that conversation's latest turns looking only for its own message, keeping
+  nothing it read. It holds a message you dictate to a busy conversation in memory only, until it sends or drops it.
+  Installing, checking and uninstalling the plugin run Codex's own `codex plugin` commands, and installing adds an
+  item to the terminal title in Codex's `config.toml`, which uninstalling removes. The plugin's hooks report to
+  KeyScribe, over the same local connection the connectors use, when a conversation starts and finishes a turn,
+  with the reply to that turn and the prompt you typed, of which KeyScribe keeps only a short fingerprint, in
+  memory, to tell your typed prompts from its own. KeyScribe uses a reply only to read aloud the answer to what you
+  dictated or asked to hear, under the same rules as a connector's. When a conversation stops for your approval or
+  an answer, the hooks also report the tool and command it asks about, or the question's text. The plugin also gives
+  the agent a tool for asking KeyScribe to read its reply aloud; it sends KeyScribe nothing but that request. While
+  KeyScribe isn't running the hooks send nothing. To tell which conversation is in front of you and which terminal to
+  bring forward, KeyScribe looks for your running `codex` processes and reads the title of the terminal tab or pane
+  each one runs in, and the focused window's title; it uses a title only to find a Codex thread id in it and keeps
+  nothing else it read. When a conversation stops for your approval or an answer, KeyScribe also reads the agent's
+  latest message in that turn from the app server, in memory only, to describe the prompt.
   The Claude Code connector reports a short fingerprint of the prompt each turn starts with, never the prompt
   itself, so KeyScribe can tell which turn answers what you dictated. The fingerprint stays in memory and is
   not stored.

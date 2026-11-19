@@ -65,6 +65,20 @@ struct TmuxRoute: PaneRoute, PlaceRoute {
         return (PlaceLayer(labels: labels, containers: containers), client)
     }
 
+    static let titleFormat = "#{pane_tty}\t#{pane_title}"
+
+    func titleRead(_ server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> TitleRead? {
+        guard let value = TerminalRoutes.nearest(Self.key, in: inner)?.environment[Self.key] else { return nil }
+        let parts = value.split(separator: ",", omittingEmptySubsequences: false)
+        guard parts.count >= 2, Int(parts[1]) == server.pid else { return nil }
+        let argv = [server.executable, "-S", String(parts[0]), "list-panes", "-a", "-F", Self.titleFormat]
+        return TitleRead(route: name, source: .command(argv), pane: TerminalRoutes.ttys(of: inner))
+    }
+
+    func title(answer: String, pane: [String]) -> String? {
+        TerminalTitles.keyed(answer, among: pane)
+    }
+
     static func socket(_ arguments: [String]) -> [String] {
         for flag in ["-L", "-S"] {
             if let index = arguments.firstIndex(of: flag), index + 1 < arguments.count { return [flag, arguments[index + 1]] }

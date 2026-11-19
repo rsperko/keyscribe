@@ -106,6 +106,9 @@ public enum DevCLI {
                                       whether a document is reported, title) with per-app read latency, then
                                       exit. Read-only; prints window titles to this terminal only.
                 --focus <pid>:cg:<id>   Instead, bring that one window forward the way a voice command does.
+              --title-probe           List every running agent process with the title of the terminal tab or
+                                      pane it runs in, as Open and in front read it, then exit. Read-only;
+                                      never asks for Automation access.
               --front-probe           Print the terminal pane in front (app, tty, multiplexers, the processes on
                                       that pane) and how long the read took, then exit. Read-only; may ask for
                                       Automation access to the front terminal.
@@ -313,6 +316,16 @@ public enum DevCLI {
                 let reader = AgentRuntime.places(surfaces: surfaces, sources: sources.map { $0() })
                 for line in lines where line != RouteProbe.skipped { print(line) }
                 for line in await PlaceProbe.lines(pid: pid, agent: agent, session: session ?? "", reader: reader) { print(line) }
+                exit(0)
+            }
+            dispatchMain()
+        }
+
+        if CommandLine.arguments.contains("--title-probe") {
+            let surfaces = resolvedSurfaces()
+            let rules = agentIntegrations.agents.compactMap(\.rule) + agentIntegrations.hosts.compactMap(\.processRule)
+            Task { @MainActor in
+                for line in await TitleProbe.run(rules: rules, surfaces: surfaces) { print(line) }
                 exit(0)
             }
             dispatchMain()

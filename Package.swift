@@ -53,7 +53,7 @@ let package = Package(
             path: "Sources/KeyScribe",
             resources: [
                 .copy("Resources/ClaudeConnector/register.js"), .copy("Resources/PiConnector/index.ts"),
-                .copy("Resources/AgentGuide"), .copy("Resources/BBPlugin"),
+                .copy("Resources/AgentGuide"), .copy("Resources/BBPlugin"), .copy("Resources/CodexConnector"),
             ]
         ),
         .target(

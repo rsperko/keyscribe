@@ -47,6 +47,11 @@ public struct AgentHostCopy: Equatable, Sendable {
     }
 }
 
+public enum AgentHostChange: Equatable, Sendable {
+    case listing
+    case event(AgentEvent)
+}
+
 public enum AgentHostFront: Equatable, Sendable {
     case shown(AgentHostLocation, in: AgentHostApp)
     case unknown
@@ -74,8 +79,12 @@ public protocol AgentHost: AnyObject {
     func copyInFront() -> AgentHostCopy?
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery
     func rename(_ location: AgentHostLocation, to name: String) async -> Bool
-    func watch(_ listChanged: @escaping @MainActor () -> Void)
+    func observe(_ event: AgentEvent)
+    func reportsTurns(at location: AgentHostLocation) -> Bool
+    func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void)
     func unwatch()
+    var queuesInHub: Bool { get }
+    func confirm(request: String, at location: AgentHostLocation) async -> Bool?
 }
 
 extension AgentHost {
@@ -92,8 +101,12 @@ extension AgentHost {
         .unsupported
     }
     public func rename(_ location: AgentHostLocation, to name: String) async -> Bool { false }
-    public func watch(_ listChanged: @escaping @MainActor () -> Void) {}
+    public func observe(_ event: AgentEvent) {}
+    public func reportsTurns(at location: AgentHostLocation) -> Bool { false }
+    public func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void) {}
     public func unwatch() {}
+    public var queuesInHub: Bool { false }
+    public func confirm(request: String, at location: AgentHostLocation) async -> Bool? { nil }
 }
 
 public struct AgentHostIntegration: Sendable {
@@ -101,17 +114,23 @@ public struct AgentHostIntegration: Sendable {
     public var make: @MainActor @Sendable () -> any AgentHost
     var connector: (@MainActor @Sendable (_ agentsDir: URL, _ pluginName: String) -> any AgentConnector)?
     var withSetups: (@MainActor @Sendable (ConnectorSetupRegistry) -> any AgentHost)?
+    var withSurfaces: (@MainActor @Sendable (ConnectorSetupRegistry, ResolvedSurfaces) -> any AgentHost)?
     public var folderVariable: String?
+    var processRule: AgentProcesses.Rule?
+    var report: (@Sendable (_ body: Data, _ folder: String) -> [AgentEvent]?)?
 
     public init(kind: AgentKind, make: @escaping @MainActor @Sendable () -> any AgentHost) {
         self.kind = kind
         self.make = make
     }
 
-    func bound(to setups: ConnectorSetupRegistry) -> AgentHostIntegration {
-        guard let withSetups else { return self }
+    func bound(to setups: ConnectorSetupRegistry, surfaces: ResolvedSurfaces? = nil) -> AgentHostIntegration {
         var bound = self
-        bound.make = { withSetups(setups) }
+        if let surfaces, let withSurfaces {
+            bound.make = { withSurfaces(setups, surfaces) }
+        } else if let withSetups {
+            bound.make = { withSetups(setups) }
+        }
         return bound
     }
 }
@@ -145,6 +164,7 @@ final class HostDiscovery: AgentDiscovery {
     func want() { wanted = true }
 
     func observe(_ event: AgentEvent) {
+        host.observe(event)
         switch event {
         case .hello(let hello):
             prompt(hello.session, open: hello.waiting != nil)
@@ -238,7 +258,6 @@ final class HostDiscovery: AgentDiscovery {
                 var owned = session
                 owned.agent = kind.id
                 owned.id = location.conversationKey
-                owned.pid = nil
                 let title = titles[location.conversationKey] ?? titles[location.native]
                 let instead = shownInstead[location.conversationKey] ?? shownInstead[location.native]
                 let labels = [

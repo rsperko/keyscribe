@@ -33,7 +33,7 @@ final class BBHost: AgentHost {
     typealias StopWatching = @Sendable () -> Void
     private let appsChanging: @MainActor (@escaping @MainActor (_ app: String, _ launched: Bool) -> Void) -> StopWatching
     nonisolated(unsafe) private var stopWatching: StopWatching?
-    private var listChanged: (@MainActor () -> Void)?
+    private var listChanged: (@MainActor (AgentHostChange) -> Void)?
     private let launchRetries: Int
     private let launchRetryDelay: Duration
     private var launching: [String: Int] = [:]
@@ -95,7 +95,7 @@ final class BBHost: AgentHost {
 
     deinit { stopWatching?() }
 
-    func watch(_ listChanged: @escaping @MainActor () -> Void) {
+    func watch(_ listChanged: @escaping @MainActor (AgentHostChange) -> Void) {
         unwatch()
         self.listChanged = listChanged
         stopWatching = appsChanging { [weak self] app, launched in
@@ -103,7 +103,7 @@ final class BBHost: AgentHost {
             let copies = self.folders(of: app)
             guard !copies.isEmpty else { return }
             if launched { for folder in copies { self.launching[folder] = self.launchRetries } }
-            self.listChanged?()
+            self.listChanged?(.listing)
         }
     }
 
@@ -135,7 +135,7 @@ final class BBHost: AgentHost {
         let delay = launchRetryDelay
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
-            self?.listChanged?()
+            self?.listChanged?(.listing)
         }
     }
 

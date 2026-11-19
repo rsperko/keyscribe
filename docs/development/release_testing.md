@@ -171,12 +171,16 @@ without that smoke coverage.
 Then **spot-checks you run only for the subsystem you changed** (Enter past the rest): the trigger
 matrix (modifier / chord / mouse) if you touched hotkey code, Qwen loading + the `--raw` silence guard
 if you touched STT, edit-in-place if you touched insertion, and the agents if you touched agent
-delivery, a connector, or the bb plugin. The agent check gives each agent you ship a long-running
+delivery, a connector, or a host's plugin. The agent check gives each agent you ship a long-running
 task and dictates to it mid-turn. It confirms that Claude Code in front takes the dictation as your own
 queued prompt, that Pi, omp and bb take it while not in front, and that a dictation never answers an open
 approval or, in omp, its model's own question. For omp it also checks that a dictation to an idle conversation
 starts a turn at once. For bb it also checks that an idle thread starts a turn and that a spoken rename sets the thread's
-bb title. A routine release with no subsystem change is just the two dictations.
+bb title. With Codex connected, it checks that an idle conversation takes a dictation, that a working one takes it
+into the running turn, that one waiting on an approval holds it and sends it once the approval is answered, that
+interrupting the turn drops a held message, that “open” brings the conversation's terminal forward, that the reply is read aloud,
+that Settings shows when the hooks still need trust in `/hooks`, that removing the `thread-id` title item shows
+the plugin needs repair, and that uninstalling leaves `config.toml` as it was before the install. A routine release with no subsystem change is just the two dictations.
 
 `scripts/verify-live.sh` remains the standalone companion — the same on-disk artifact checks plus the
 Settings commit-on-blur check — for when you want to exercise these outside a release.

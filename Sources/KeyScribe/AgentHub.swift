@@ -141,6 +141,8 @@ final class AgentHub {
     private let discoveries: [any AgentDiscovery]
     private let hosts: [HostDiscovery]
     private let hostDeadline: Duration
+    private let hostConfirmDelay: Duration
+    private var hostQueued: Set<String> = []
     private let processEnvironment: (_ pid: Int, _ keys: Set<String>) -> [String: String]
     private let processParent: (_ pid: Int) -> Int?
     private let accessibilityTrusted: @MainActor () -> Bool
@@ -198,7 +200,7 @@ final class AgentHub {
         disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
         places: (any AgentPlaceReading)? = nil, hosts: [AgentHostIntegration] = [],
         hostAllowed: @escaping @MainActor (String) -> Bool = { _ in false },
-        hostDeadline: Duration = AgentHub.defaultHostDeadline,
+        hostDeadline: Duration = AgentHub.defaultHostDeadline, hostConfirmDelay: Duration = .seconds(3),
         processEnvironment: @escaping (_ pid: Int, _ keys: Set<String>) -> [String: String] = { _, _ in [:] },
         processParent: @escaping (_ pid: Int) -> Int? = { _ in nil },
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
@@ -209,6 +211,7 @@ final class AgentHub {
         self.processParent = processParent
         self.hosts = hosts.map { host in HostDiscovery(host, allowed: { hostAllowed(host.kind.id) }, now: now) }
         self.hostDeadline = hostDeadline
+        self.hostConfirmDelay = hostConfirmDelay
         self.exclusions = exclusions
         self.transport = transport
         self.disconnectGrace = disconnectGrace
@@ -233,10 +236,16 @@ final class AgentHub {
     }
 
     private func watch(_ source: HostDiscovery) {
-        source.host.watch { [weak self, weak source] in
+        let agent = source.kind.id
+        source.host.watch { [weak self, weak source] change in
             guard let self, let source, !self.stopped else { return }
-            source.expect()
-            Task { [weak self] in await self?.rescan(rereadingTitles: false) }
+            switch change {
+            case .listing:
+                source.expect()
+                Task { [weak self] in await self?.rescan(rereadingTitles: false) }
+            case .event(let event):
+                self.handle(event.renamingSession { AgentSessionID.make(agent: agent, native: $0) })
+            }
         }
     }
 
@@ -667,6 +676,7 @@ final class AgentHub {
         saveExclusions()
         for message in outbox.withdraw(conversation: id) {
             retries[message.id] = nil
+            hostQueued.remove(message.id)
             report(.notSent(handle(of: id), reason: .disconnected), for: message.id, in: id)
         }
         for (request, entry) in requests where entry.message.conversation == id && !entry.timedOut {
@@ -1141,8 +1151,20 @@ final class AgentHub {
         let handle = conversation.handle
         if let (source, location) = host(of: conversation) {
             let request = request ?? makeId()
+            let queuing = source.host.queuesInHub
+            let message = AgentOutbox.Message(id: request, conversation: id, text: text, images: images)
+            if queuing {
+                switch outbox.send(message, state: state(of: id), canSteer: true) {
+                case .queue(let reason):
+                    hostQueued.insert(request)
+                    return .queued(handle, waitingOn: reason)
+                case .needsReview(let reason): return .kept(handle, reason: Self.kept(reason))
+                case .disconnected: return .notSent(handle, reason: .hostTakesNoMessages(source.kind.displayName))
+                case .handOff, .enterPromptBox: break
+                }
+            }
             remember(asked: text, for: request)
-            let follows = conversation.connectorLive && features[id]?.contains("promptDigest") == true
+            let follows = conversation.connectorLive && features[id]?.contains("promptDigest") == true || source.host.reportsTurns(at: location)
             if follows {
                 delivering[request] = id
                 hostFollows[id, default: []].append(HostFollow(prompt: AgentPromptDigest.of(text), request: request, expires: nil))
@@ -1182,6 +1204,11 @@ final class AgentHub {
                 settleHostDelivery(request, in: id, expires: waitEnds)
                 if follows, running[id] != nil, let turn = turns[id] { follow(turn, of: id, for: request) }
                 return .sent(handle)
+            case .queued where queuing:
+                stopFollowingHosted(request, in: id)
+                hostQueued.insert(request)
+                if case .queue(let reason) = outbox.send(message, state: .working) { return .queued(handle, waitingOn: reason) }
+                return .queued(handle)
             case .queued:
                 settleHostDelivery(request, in: id, expires: nil)
                 let waiting = (directory.conversations.first { $0.id == id }?.state ?? .working).named(by: waitingPrompts[id])
@@ -1193,6 +1220,7 @@ final class AgentHub {
             case .uncertain:
                 if follows { uncertainHosted[request] = (handle, id, false) }
                 settleHostDelivery(request, in: id, expires: waitEnds)
+                confirmLater(request, handle: handle, in: id, through: source, at: location, following: follows)
                 return .uncertain(handle)
             case .refused(let why):
                 stopFollowingHosted(request, in: id)
@@ -1735,7 +1763,9 @@ final class AgentHub {
     }
 
     private func state(of id: String) -> AgentLiveState? {
-        guard let conversation = directory.conversations.first(where: { $0.id == id }), conversation.connectorLive else { return nil }
+        guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return nil }
+        if let (source, _) = host(of: conversation), source.host.queuesInHub { return conversation.state.named(by: waitingPrompts[id]) }
+        guard conversation.connectorLive else { return nil }
         if handingOff[id] != nil { return .working }
         if running[id] != nil, conversation.state == .idle { return .working }
         return conversation.state.named(by: waitingPrompts[id])
@@ -1921,7 +1951,10 @@ final class AgentHub {
     }
 
     private func steers(_ id: String) -> Bool {
-        features[id]?.contains("steer") == true && busyAndFree(id)
+        if let conversation = directory.conversations.first(where: { $0.id == id }), let (source, _) = host(of: conversation), source.host.queuesInHub {
+            return true
+        }
+        return features[id]?.contains("steer") == true && busyAndFree(id)
     }
 
     private func busyAndFree(_ id: String) -> Bool {
@@ -2084,6 +2117,25 @@ final class AgentHub {
     private func releaseHeld() {
         for release in outbox.release(state: state(of:), canSteer: steers) {
             let handle = handle(of: release.message.conversation)
+            if hostQueued.remove(release.message.id) != nil {
+                let message = release.message
+                switch release.decision {
+                case .handOff, .enterPromptBox:
+                    Task { [weak self] in
+                        guard let self else { return }
+                        let receipt = await self.deliver(message.text, to: message.conversation, request: message.id, images: message.images)
+                        if case .queued = receipt { return }
+                        self.report(receipt, for: message.id, in: message.conversation)
+                    }
+                case .needsReview(let reason):
+                    report(.kept(handle ?? "", reason: Self.kept(reason)), for: message.id, in: message.conversation)
+                case .disconnected:
+                    report(.notSent(handle, reason: .conversationEnded), for: message.id, in: message.conversation)
+                case .queue:
+                    hostQueued.insert(message.id)
+                }
+                continue
+            }
             switch release.decision {
             case .handOff, .enterPromptBox:
                 handOff(release.message, handle: handle ?? "")
@@ -2096,6 +2148,21 @@ final class AgentHub {
             case .queue:
                 break
             }
+        }
+    }
+
+    private func confirmLater(
+        _ request: String, handle: String, in id: String, through source: HostDiscovery, at location: AgentHostLocation, following: Bool
+    ) {
+        let delay = hostConfirmDelay
+        let stillUncertain = { [weak self] in !following || self?.uncertainHosted[request] != nil }
+        Task { [weak self, weak source] in
+            try? await Task.sleep(for: delay)
+            guard let source, self?.stopped == false, stillUncertain(), await source.host.confirm(request: request, at: location) == true,
+                  let self, !self.stopped, stillUncertain()
+            else { return }
+            self.uncertainHosted[request] = nil
+            self.onNotice?(.sent(handle), request, id)
         }
     }
 
@@ -2151,6 +2218,18 @@ final class AgentRuntime {
         CombinedPlaceReader(readers: sources + [TerminalPlaceReader(surfaces: surfaces)])
     }
 
+    nonisolated static func reports(
+        hosts: [AgentHostIntegration], setups: ConnectorSetupRegistry
+    ) -> @Sendable (_ agent: String, _ installation: String, _ body: Data) -> AgentBridgeServer.Report {
+        let decoders = Dictionary(hosts.compactMap { host in host.report.map { (host.kind.id, $0) } }, uniquingKeysWith: { first, _ in first })
+        return { agent, installation, body in
+            guard let decode = decoders[agent],
+                  let folder = setups.setups?.enrolled(agent: agent).first(where: { $0.installation == installation })?.folder
+            else { return .refused }
+            return decode(body, folder).map(AgentBridgeServer.Report.events) ?? .malformed
+        }
+    }
+
     static func bridgeDirectory(supportDir: URL) -> URL {
         supportDir.appendingPathComponent("agents", isDirectory: true)
     }
@@ -2182,7 +2261,8 @@ final class AgentRuntime {
                     guard case .notify(let session, let turn, let on) = event else { return answer(false) }
                     answer(box.hub?.notify(session: session, turn: turn, on: on) ?? false)
                 }
-            }
+            },
+            onReport: Self.reports(hosts: hosts, setups: setups)
         ) { event in
             Task { @MainActor in box.hub?.handle(event) }
         }
@@ -2194,7 +2274,7 @@ final class AgentRuntime {
                 noun: AgentTerminalFocus.noun(surfaces)),
             front: AgentFront(surfaces: surfaces), glance: AgentFront.confirmingWithoutAsking(surfaces), exclusions: exclusions,
             places: Self.places(surfaces: surfaces, sources: placeSources),
-            hosts: hosts.map { $0.bound(to: setups) }, hostAllowed: hostAllowed,
+            hosts: hosts.map { $0.bound(to: setups, surfaces: surfaces) }, hostAllowed: hostAllowed,
             processEnvironment: { pid, keys in SystemTerminalFacts.arguments(of: pid, keeping: keys)?.environment ?? [:] },
             processParent: { SystemTerminalFacts.parent(of: $0) })
         box.hub = hub

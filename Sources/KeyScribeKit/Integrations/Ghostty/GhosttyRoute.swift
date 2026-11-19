@@ -25,10 +25,25 @@ extension ScriptedTerminalRoute {
             end repeat
         end repeat
         return out
-        """, placesFrom: GhosttyPlaces.layer)
+        """, placesFrom: GhosttyPlaces.layer, titleScript: """
+        set sep to character id 9
+        set out to ""
+        repeat with s in terminals
+            set out to out & (tty of s) & sep & (name override of s) & sep & (name of s) & linefeed
+        end repeat
+        return out
+        """, titleFrom: GhosttyPlaces.title)
 }
 
 enum GhosttyPlaces {
+    @Sendable static func title(answer: String, ttys: [String]) -> String? {
+        let rows = TerminalTitles.rows(answer, fields: 3)
+        guard let row = ttys.lazy.compactMap({ tty in rows.first { $0[0] == tty } }).first,
+              let title = TerminalTitles.shown(row[2]), title != TerminalTitles.shown(row[1])
+        else { return nil }
+        return title
+    }
+
     @Sendable static func layer(answer: String, ttys: [String], surface: String) -> PlaceLayer? {
         var tabs: [String: (id: String, override: String)] = [:]
         var terminals: [String: (id: String, override: String)] = [:]

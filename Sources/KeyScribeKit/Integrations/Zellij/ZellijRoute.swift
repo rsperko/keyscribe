@@ -54,6 +54,29 @@ struct ZellijRoute: PaneRoute, PlaceRoute {
         return (PlaceLayer(labels: labels, containers: containers), client)
     }
 
+    func titleRead(_ server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> TitleRead? {
+        guard server.name == processName, let flag = server.arguments.firstIndex(of: "--server"), flag + 1 < server.arguments.count,
+              let pane = TerminalRoutes.nearest(Self.paneKey, in: inner),
+              let id = pane.environment[Self.paneKey].flatMap({ Int($0.replacingOccurrences(of: "terminal_", with: "")) }),
+              let session = Self.session(server: server.pid, socket: server.arguments[flag + 1], facts: facts)
+        else { return nil }
+        let argv = [server.executable, "--session", session, "action", "list-panes", "-t", "-j"]
+        return TitleRead(route: name, source: .command(argv), pane: [String(id)])
+    }
+
+    private struct Titled: Decodable {
+        var id: Int
+        var is_plugin: Bool
+        var title: String?
+    }
+
+    func title(answer: String, pane: [String]) -> String? {
+        guard let id = pane.first.flatMap(Int.init),
+              let panes = try? JSONDecoder().decode([Titled].self, from: Data(answer.utf8))
+        else { return nil }
+        return TerminalTitles.shown(panes.first { !$0.is_plugin && $0.id == id }?.title)
+    }
+
     private struct Named: Decodable {
         var id: Int
         var is_plugin: Bool

@@ -15,7 +15,25 @@ enum KittyRoute {
         front: { terminal, socket, facts in
             guard let socket else { return .unknown(.unreported(name)) }
             return front(terminal, socket: socket, facts: facts)
-        })
+        },
+        titleCommand: { terminal, socket in socket.map { remote(terminal, socket: $0) + ["ls"] } },
+        titleFrom: title)
+
+    private struct TitledOSWindow: Decodable {
+        struct Tab: Decodable { var windows: [Window] }
+        struct Window: Decodable {
+            var id: Int
+            var title: String?
+        }
+        var tabs: [Tab]
+    }
+
+    @Sendable static func title(answer: String, pane: [String]) -> String? {
+        guard let window = pane.first.flatMap(Int.init),
+              let windows = try? JSONDecoder().decode([TitledOSWindow].self, from: Data(answer.utf8))
+        else { return nil }
+        return TerminalTitles.shown(windows.flatMap(\.tabs).flatMap(\.windows).first { $0.id == window }?.title)
+    }
 
     static func remote(_ terminal: TerminalProcess, socket: String) -> [String] {
         let kitten = ((terminal.executable as NSString).deletingLastPathComponent as NSString).appendingPathComponent("kitten")

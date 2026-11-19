@@ -176,11 +176,14 @@ final class ToolEnvironment: @unchecked Sendable {
         return (newestFirst(mine) + newestFirst(all)).compactMap { candidate in candidate.tool.map { ($0, candidate.runtime) } }
     }
 
-    func search(program: String, agent: String, setup: String?, chosen: String?, extra: [String]) -> ToolSearch.Result {
+    func search(
+        program: String, agent: String, setup: String?, chosen: String?, extra: [String], accepting: (String) -> Bool = { _ in true }
+    ) -> ToolSearch.Result {
         let sessions = sessionTools(agent: agent, setup: setup).map(\.tool)
         let places = ToolSearch.places(
             program: program, chosen: chosen, sessions: sessions, shellPath: shellPath, appPath: appPath, home: home, extra: extra)
-        return ToolSearch.find(places, isExecutable: isExecutable)
+        let isExecutable = self.isExecutable
+        return ToolSearch.find(places) { isExecutable($0) && accepting($0) }
     }
 
     func runEnvironment(tool: String, agent: String, base: [String: String]) -> [String: String] {

@@ -19,7 +19,20 @@ enum WezTermRoute {
         front: { terminal, socket, facts in
             guard let socket else { return .unknown(.unreported(name)) }
             return front(terminal, socket: socket, facts: facts)
-        })
+        },
+        titleCommand: { terminal, socket in socket.map { cli(terminal, socket: $0) + ["list", "--format", "json"] } },
+        titleFrom: title)
+
+    private struct TitledPane: Decodable {
+        var tty_name: String?
+        var title: String?
+    }
+
+    @Sendable static func title(answer: String, pane: [String]) -> String? {
+        guard let panes = try? JSONDecoder().decode([TitledPane].self, from: Data(answer.utf8)) else { return nil }
+        let ttys = pane.dropFirst()
+        return ttys.lazy.compactMap { tty in panes.first { $0.tty_name == tty } }.first.flatMap { TerminalTitles.shown($0.title) }
+    }
 
     static func cli(_ terminal: TerminalProcess, socket: String) -> [String] {
         let wezterm = ((terminal.executable as NSString).deletingLastPathComponent as NSString).appendingPathComponent("wezterm")

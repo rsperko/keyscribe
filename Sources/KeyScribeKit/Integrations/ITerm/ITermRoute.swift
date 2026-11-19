@@ -20,7 +20,28 @@ extension ScriptedTerminalRoute {
             end repeat
         end repeat
         return out
-        """, placesFrom: ITermPlaces.layer)
+        """, placesFrom: ITermPlaces.layer, titleScript: """
+        set sep to character id 9
+        set out to ""
+        repeat with w in windows
+            repeat with t in tabs of w
+                repeat with s in sessions of t
+                    set shown to ""
+                    try
+                        tell s to set shown to (variable named "terminalWindowName")
+                    end try
+                    if shown is missing value or shown is "" then
+                        try
+                            tell s to set shown to (variable named "terminalIconName")
+                        end try
+                    end if
+                    if shown is missing value then set shown to ""
+                    set out to out & (tty of s) & sep & shown & linefeed
+                end repeat
+            end repeat
+        end repeat
+        return out
+        """, titleFrom: { answer, ttys in TerminalTitles.keyed(answer, among: ttys) })
 
     static let itermBody = """
         set found to missing value

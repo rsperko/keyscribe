@@ -43,6 +43,8 @@
     bridge.sock            #   the local socket the connector talks to
     ready.json             #   present only while KeyScribe is listening on bridge.sock
     claude-connector/      #   one local marketplace per Claude Code setup the connector is installed in
+    codex/                 #   the Codex plugin's hook and tool command (keyscribe-codex), and one local
+      home-<digest>/       #     marketplace per Codex home, with title-item.json (what install added to its title)
     connectors.json        #   each setup a connector is installed in, and the installation that may connect from it
     names.json             #   names you chose, the names open conversations were given, and disconnected conversations
   lkg/                     # last-known-good mode copies + seed-ledger.toml (design.md §5.1)
@@ -314,6 +316,25 @@ a hello on any other protocol is refused with `426` and is never registered or s
   not that setting) leaves the connector installed but unconfirmed, shown as failed with omp's reason and **Try Again**, which asks again; it is never shown
   as ready, and startup never reinstalls the connector over it. KeyScribe never
   parses omp's `config.yml`.
+- **The Codex plugin is installed into a Codex home with Codex's own commands.** A setup is a Codex home
+  (`~/.codex`, or the folder `CODEX_HOME` names). Each gets its own local marketplace under
+  `codex/home-<digest>/`, registered and installed with `codex plugin marketplace add` and `codex plugin add`
+  run with that home's `CODEX_HOME`. The plugin's hooks and its tool all run one executable,
+  `codex/keyscribe-codex`, kept outside the plugin so the plugin's content stays the same across KeyScribe
+  updates and Codex's trust in its hooks survives them; Codex runs the hooks only once the user trusts them with
+  `/hooks`, which Settings reads from Codex's app server. Installing also adds the `thread-id` item to
+  `[tui] terminal_title` in that home's `config.toml` and records what it changed in `title-item.json`; a
+  `config.toml` KeyScribe cannot read stops the install before anything changes. Uninstalling runs
+  `codex plugin remove` and `codex plugin marketplace remove`, removes only the item it added, and deletes the
+  marketplace folder. An item the user removed is reported as needing repair and put back only by Update.
+- **A report is an event-only path for a host's hooks.** A hook that cannot hold a connection (Codex's) posts
+  the agent's own hook payload, at most `AgentBridgeCodec.maxFrameBytes`, to `POST /report` with
+  `Authorization: Bearer <token>`, `X-KeyScribe-Agent` and `X-KeyScribe-Installation`; there is no hello and no
+  poll. Missing headers or a body the host cannot read answer `400`, a wrong token `401`, and an installation that
+  is not enrolled `403`. Events are filed under the installation's enrolled folder, never one the payload names,
+  and only turn started, turn complete, waiting and `notify` are accepted, so a report never settles, refuses or
+  confirms a request, opens a connection, or moves focus. The bridge keeps no state for it: a disconnected
+  conversation is answered `{"ok":true,"quiet":true}`, and `notify` `{"ok":true,"spoken":<bool>}`.
 - **Updates keep setups as they are.** When KeyScribe starts, it updates the connector in each enrolled setup
   whose installed copy differs from the bundled one, and never in a setup that is not enrolled or whose
   connector the agent has turned off. Open conversations keep the connector they loaded, which keeps working,

@@ -5,6 +5,12 @@ import KeyScribeKit
 final class AgentBridgeServer: @unchecked Sendable {
     enum StartError: Error { case pathTooLong, socket(Int32) }
 
+    enum Report: Sendable {
+        case events([AgentEvent])
+        case refused
+        case malformed
+    }
+
     private struct Member: Equatable {
         var session: String
         var instance: String
@@ -31,6 +37,7 @@ final class AgentBridgeServer: @unchecked Sendable {
     private let onEvent: @Sendable (AgentEvent) -> Void
     private let onHello: @Sendable (AgentEvent.Hello, @escaping @Sendable (_ filedUnder: String?) -> Void) -> Void
     private let onNotify: @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void
+    private let onReport: @Sendable (_ agent: String, _ installation: String, _ body: Data) -> Report
     private let queue = DispatchQueue(label: "com.keyscribe.agent-bridge")
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
@@ -53,10 +60,12 @@ final class AgentBridgeServer: @unchecked Sendable {
         activeWindow: TimeInterval = AgentCommandQueue.activeWindow,
         onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable (_ filedUnder: String?) -> Void) -> Void = { $1(nil) },
         onNotify: @escaping @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void = { $1(false) },
+        onReport: @escaping @Sendable (_ agent: String, _ installation: String, _ body: Data) -> Report = { _, _, _ in .refused },
         onEvent: @escaping @Sendable (AgentEvent) -> Void
     ) {
         self.onHello = onHello
         self.onNotify = onNotify
+        self.onReport = onReport
         commands = AgentCommandQueue(activeWindow: activeWindow)
         self.directory = directory
         self.token = token
@@ -317,7 +326,31 @@ final class AgentBridgeServer: @unchecked Sendable {
         switch request.path {
         case "/poll": handlePoll(request.body, on: fd)
         case "/event": handleEvent(request.body, on: fd)
+        case "/report": handleReport(request, on: fd)
         default: respond(fd, status: 404)
+        }
+    }
+
+    private func handleReport(_ request: AgentBridgeHTTP.Request, on fd: Int32) {
+        guard let agent = request.headers["x-keyscribe-agent"], !agent.isEmpty,
+              let installation = request.headers["x-keyscribe-installation"], !installation.isEmpty
+        else { return respond(fd, status: 400) }
+        guard admits(agent, installation) else { return respond(fd, status: 403) }
+        let decoded: [AgentEvent]
+        switch onReport(agent, installation, request.body) {
+        case .refused: return respond(fd, status: 403)
+        case .malformed: return respond(fd, status: 400)
+        case .events(let events): decoded = events
+        }
+        let reported = decoded.filter(\.isReport).map { $0.renamingSession { AgentSessionID.make(agent: agent, native: $0) } }
+        let heard = reported.filter { $0.session.map(quiets) != true }
+        guard !heard.isEmpty || reported.isEmpty else {
+            return respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))
+        }
+        for event in heard where !event.isNotify { onEvent(event) }
+        guard let notify = heard.first(where: \.isNotify) else { return respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8)) }
+        onNotify(notify) { [weak self] spoken in
+            self?.queue.async { [weak self] in self?.respond(fd, status: 200, body: Data(#"{"ok":true,"spoken":\#(spoken)}"#.utf8)) }
         }
     }
 
@@ -509,5 +542,19 @@ final class AgentBridgeServer: @unchecked Sendable {
         buffers[fd] = nil
         parked.removeAll { $0.fd == fd }
         close(fd)
+    }
+}
+
+private extension AgentEvent {
+    var isReport: Bool {
+        switch self {
+        case .turnStarted, .turnComplete, .waiting, .notify: true
+        default: false
+        }
+    }
+
+    var isNotify: Bool {
+        if case .notify = self { return true }
+        return false
     }
 }

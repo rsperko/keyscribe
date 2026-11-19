@@ -66,7 +66,8 @@ type. Each tool's adapter lives in its own `Integrations/<Tool>/` folder, and `R
 come back empty for every route a build registers (a route that opens a process not its own, reads or confirms
 a front it could not read, or needs a special start to come forward fails it). Check a new route live with `--route-probe <pid>` (the
 open plan and places for one agent; add `--read-places` to run its place script and place sources too) and
-`--front-probe` (what reads as in front). Full from-source build, prerequisites, and signing live
+`--front-probe` (what reads as in front). A route's pane title read (`titleRead`, used to join a Codex conversation
+to its terminal) is checked with `--title-probe`, which lists each running agent process with the title read for it. Full from-source build, prerequisites, and signing live
 in **`BUILD.md`**.
 
 ## Build variants

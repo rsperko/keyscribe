@@ -30,6 +30,19 @@ struct HerdrRoute: PaneRoute {
         return (PaneLayer(name, commands: [focus]), client)
     }
 
+    func titleRead(_ server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> TitleRead? {
+        guard server.name == processName, server.arguments.dropFirst().first == "server",
+              let carrier = TerminalRoutes.nearest(Self.socketKey, in: inner), let socket = carrier.environment[Self.socketKey],
+              !socket.isEmpty, let pane = carrier.environment[Self.paneKey], !pane.isEmpty
+        else { return nil }
+        let argv = HerdrPlaces.listCommands(socket: socket, executable: server.executable).panes
+        return TitleRead(route: name, source: .command(argv), pane: [pane])
+    }
+
+    func title(answer: String, pane: [String]) -> String? {
+        pane.first.flatMap { HerdrPlaces.programTitle(ofPane: $0, in: answer) }
+    }
+
     private struct Sessions: Decodable {
         struct Session: Decodable {
             var name: String

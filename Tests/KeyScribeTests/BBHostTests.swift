@@ -464,7 +464,7 @@ struct BBHostTests {
         let lab = "/Applications/bb Lab.app"
         let bb = watched(apps, builds: [Self.work], dataFolders: [lab: "/Users/a/.bb-lab"])
         let changes = Changes()
-        bb.watch { changes.count += 1 }
+        bb.watch { _ in changes.count += 1 }
         apps.changed?(Self.work.app!, false)
         apps.changed?(lab, false)
         apps.changed?("/Applications/Safari.app", true)
@@ -484,7 +484,7 @@ struct BBHostTests {
             return HostCLI.Output(status: 0, stdout: Data("[]".utf8), stderr: "", truncated: false)
         })
         let changes = Changes()
-        bb.watch { changes.count += 1 }
+        bb.watch { _ in changes.count += 1 }
         apps.changed?(work.app!, true)
         #expect(changes.count == 1)
         guard case .found(_, _, _, _, let problem) = await bb.scan() else { Issue.record("expected a listing"); return }
@@ -501,7 +501,7 @@ struct BBHostTests {
         let apps = Apps()
         let bb = watched(apps, builds: [Self.usual, Self.work], retries: 2)
         let changes = Changes()
-        bb.watch { changes.count += 1 }
+        bb.watch { _ in changes.count += 1 }
         apps.changed?(Self.work.app!, true)
         _ = await bb.scan()
         #expect(await Self.within { changes.count == 2 })
@@ -513,8 +513,8 @@ struct BBHostTests {
     @Test func watchingAgainOrStoppingRemovesTheEarlierObservers() {
         let apps = Apps()
         let bb = watched(apps, builds: [Self.work])
-        bb.watch {}
-        bb.watch {}
+        bb.watch { _ in }
+        bb.watch { _ in }
         #expect(apps.watches == 2)
         #expect(apps.cancelled == 1)
         bb.unwatch()

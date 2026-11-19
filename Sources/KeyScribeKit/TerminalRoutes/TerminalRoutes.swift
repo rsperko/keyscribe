@@ -185,10 +185,16 @@ public protocol Route: Sendable {
     var focusDefinitions: [FocusDefinition] { get }
     func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening?
     func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck
+    func titleRead(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> TitleRead?
+    func title(answer: String, pane: [String]) -> String?
 }
 
 extension Route {
     public var focusDefinitions: [FocusDefinition] { [] }
+
+    public func titleRead(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> TitleRead? { nil }
+
+    public func title(answer: String, pane: [String]) -> String? { nil }
 
     public func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck {
         .unknown(.unreported(name))

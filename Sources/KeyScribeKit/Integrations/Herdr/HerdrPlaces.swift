@@ -67,6 +67,20 @@ public enum HerdrPlaces {
         var result: Result
     }
 
+    private struct TitledPanes: Decodable {
+        struct Pane: Decodable {
+            var pane_id: String
+            var terminal_title: String?
+        }
+        struct Result: Decodable { var panes: [Pane] }
+        var result: Result
+    }
+
+    public static func programTitle(ofPane pane: String, in panes: String) -> String? {
+        guard let list = try? JSONDecoder().decode(TitledPanes.self, from: Data(panes.utf8)) else { return nil }
+        return TerminalTitles.shown(list.result.panes.first { $0.pane_id == pane }?.terminal_title)
+    }
+
     public static func listing(panes: String, tabs: String, workspaces: String, agents: String) -> Listing? {
         let decoder = JSONDecoder()
         guard let paneList = try? decoder.decode(PaneList.self, from: Data(panes.utf8)),

@@ -128,7 +128,7 @@ led_write()  { printf '%s\t%s\t%s\n' "$2" "$3" "$4" > "$LEDGER_DIR/$1"; }
 
 only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
-CONNECTOR_CHECKS="a-connector-tests a-pi-connector-tests a-omp-connector-tests a-bb-plugin-tests"
+CONNECTOR_CHECKS="a-connector-tests a-pi-connector-tests a-omp-connector-tests a-bb-plugin-tests a-codex-connector-tests"
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
 PRE_CHECKS=" a-deps a-swift-test $CONNECTOR_CHECKS a-release-tools a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
@@ -268,6 +268,17 @@ chk_a_bb_plugin_tests() {
   fi
 }
 guard a-bb-plugin-tests "$(sig_source)" chk_a_bb_plugin_tests
+
+chk_a_codex_connector_tests() {
+  timeout --foreground 300 ./scripts/test-codex-connector.sh >/tmp/preflight-codex-connector.log 2>&1
+  if [ "$?" = 0 ]; then
+    result pass "Codex connector tests — $(tail -1 /tmp/preflight-codex-connector.log | sed 's/^test-codex-connector: //')"
+  else
+    tail -20 /tmp/preflight-codex-connector.log
+    result fail "Codex connector tests — see /tmp/preflight-codex-connector.log"
+  fi
+}
+guard a-codex-connector-tests "$(sig_source)" chk_a_codex_connector_tests
 
 chk_a_cheatsheet() {
   # The printable desk reference renders through its own Python dependencies. A machine without uv can

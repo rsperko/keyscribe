@@ -73,10 +73,7 @@ struct AgentHostTests {
 
         func copyInFront() -> AgentHostCopy? { copy }
 
-        var changed: (@MainActor () -> Void)?
         private(set) var unwatched = 0
-
-        func watch(_ changed: @escaping @MainActor () -> Void) { self.changed = changed }
 
         func unwatch() { unwatched += 1 }
 
@@ -93,13 +90,33 @@ struct AgentHostTests {
         }
 
         var whileDelivering: (@MainActor () -> Void)?
+        var reportsTurns = false
+        private(set) var observed: [AgentEvent] = []
+
+        func observe(_ event: AgentEvent) { observed.append(event) }
+
+        func reportsTurns(at location: AgentHostLocation) -> Bool { reportsTurns }
+
+        private(set) var watcher: (@MainActor (AgentHostChange) -> Void)?
+
+        func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void) { watcher = changed }
+
+        var queuesInHub = false
+        var replies: [AgentHostDelivery] = []
+        var confirmation: Bool?
+        private(set) var confirmed: [String] = []
+
+        func confirm(request: String, at location: AgentHostLocation) async -> Bool? {
+            confirmed.append(request)
+            return confirmation
+        }
 
         func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
             delivered.append((text, request, location))
             deliveredImages.append(images)
             whileDelivering?()
             await stall()
-            return delivery
+            return replies.isEmpty ? delivery : replies.removeFirst()
         }
     }
 
@@ -113,21 +130,23 @@ struct AgentHostTests {
         AgentSessionID.make(agent: "example", native: location(native, instance: instance).conversationKey)
     }
 
-    static func thread(_ native: String, cwd: String = "/src/docs", instance: String = instance, startedAt: Int? = nil) -> AgentSession {
+    static func thread(_ native: String, cwd: String = "/src/docs", instance: String = instance, startedAt: Int? = nil, pid: Int? = nil) -> AgentSession {
         AgentSession(
-            agent: "example", id: native, pid: 77, cwd: cwd, state: .idle, startedAt: startedAt, host: location(native, instance: instance))
+            agent: "example", id: native, pid: pid, cwd: cwd, state: .idle, startedAt: startedAt, host: location(native, instance: instance))
     }
 
     private func makeHub(
         _ host: FakeHost, transport: FakeTransport = FakeTransport(), focus: FakeFocus? = nil, front: FakeFront? = nil,
         names: AgentNameStore? = nil, places: (any AgentPlaceReading)? = nil, allowed: @escaping @MainActor (String) -> Bool = { _ in true }, hostDeadline: Duration = .milliseconds(50),
         claude: FakeDiscovery = FakeDiscovery(kind: .claude), environments: [Int: [String: String]] = [:], handOffLimit: Duration = .seconds(30),
-        parents: [Int: Int] = [:], now: @escaping () -> Date = Date.init, accessibility: @escaping @MainActor () -> Bool = { true }
+        parents: [Int: Int] = [:], now: @escaping () -> Date = Date.init, accessibility: @escaping @MainActor () -> Bool = { true },
+        hostConfirmDelay: Duration = .seconds(3)
     ) -> AgentHub {
         AgentHub(
             transport: transport, discovery: [claude], names: names, focus: focus, front: front,
             receiptTimeout: .milliseconds(50), handOffLimit: handOffLimit, scanDeadline: .seconds(30), places: places,
             hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostAllowed: allowed, hostDeadline: hostDeadline,
+            hostConfirmDelay: hostConfirmDelay,
             processEnvironment: { pid, keys in (environments[pid] ?? [:]).filter { keys.contains($0.key) } },
             processParent: { parents[$0] }, now: now,
             makeId: { "r1" }, accessibilityTrusted: accessibility)
@@ -666,7 +685,7 @@ struct AgentHostTests {
         await hub.rescan()
         #expect(hub.directory.conversations.count == 1)
         let before = host.scans
-        host.changed?()
+        host.watcher?(.listing)
         #expect(await BBHostTests.within { host.scans > before })
         await hub.rescan(rereadingTitles: false)
         #expect(Set(hub.directory.conversations.map(\.id)) == [Self.id("t1"), Self.id("t2")])
@@ -833,6 +852,246 @@ struct AgentHostTests {
         hub.handle(.turnStarted(session: Self.id("t2"), turn: "a", prompt: AgentPromptDigest.of("plan the release")))
         hub.handle(.turnComplete(session: Self.id("t2"), reason: "complete", answer: "planned"))
         #expect(replies == [Self.id("t2")])
+    }
+
+    @Test func aHostThatReportsItsOwnTurnsHasTheReplyToADeliveryHeardWithNoConnectorSayingHello() async {
+        let host = FakeHost()
+        host.reportsTurns = true
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var replies: [(String, String, String?)] = []
+        hub.onResult = { conversation, _, reply, _, origin, _ in replies.append((conversation, reply, origin)) }
+        #expect(await hub.deliver("plan the release", to: Self.id("t1"), request: "q1") == .sent(hub.directory.conversations[0].handle))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("plan the release")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "planned"))
+        #expect(replies.map(\.1) == ["planned"])
+        #expect(replies.map(\.2) == ["q1"])
+        #expect(host.observed.contains(.turnStarted(session: Self.location("t1").conversationKey, turn: "a", prompt: AgentPromptDigest.of("plan the release"))))
+    }
+
+    @Test func aHostedConversationShownByATerminalProcessOpensThroughThatTerminalWhenTheHostCannotOpenIt() async {
+        let host = FakeHost()
+        host.opening = .unsupported
+        host.conversations = [Self.thread("t1", pid: 4242)]
+        let focus = FakeFocus()
+        let hub = makeHub(host, focus: focus)
+        await hub.rescan()
+        #expect(await hub.open(Self.id("t1")) == .exact)
+        #expect(focus.focused.map(\.1) == [4242])
+    }
+
+    @Test func aHostedConversationShownByATerminalProcessIsFoundInFrontThroughThatProcess() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1", pid: 4242), Self.thread("t2")]
+        let front = FakeFront()
+        front.answer = FrontSession(id: Self.id("t1"), app: FrontApp(bundle: "com.example.term", pid: 9, name: "Term"))
+        let hub = makeHub(host, front: front)
+        await hub.rescan()
+        #expect(await hub.sessionInFront()?.id == Self.id("t1"))
+        #expect(front.asked.last?.map(\.pid) == [4242])
+    }
+
+    @Test func aHostedConversationWithNoProcessIsNeverFocusedThroughATerminal() async {
+        let host = FakeHost()
+        host.opening = .unsupported
+        host.conversations = [Self.thread("t1")]
+        let focus = FakeFocus()
+        let hub = makeHub(host, focus: focus)
+        await hub.rescan()
+        #expect(await hub.open(Self.id("t1")) == AgentFocusResult.none)
+        #expect(focus.focused.isEmpty)
+    }
+
+    private func waiting(_ native: String, _ state: AgentLiveState) -> AgentSession {
+        var session = Self.thread(native)
+        session.state = state
+        return session
+    }
+
+    private func settled(_ condition: () -> Bool) async {
+        for _ in 0..<100 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    @Test func aHostQueuingInTheHubHasAMessageHeldWhileItWaitsOnTheUserAndSentWhenItIsFree() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        #expect(await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") == .queued(hub.directory.conversations[0].handle, waitingOn: .approval))
+        #expect(host.delivered.isEmpty)
+        host.conversations = [waiting("t1", .working)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        #expect(host.delivered.map(\.1) == ["q1"])
+        #expect(notices == [.sent(hub.directory.conversations[0].handle)])
+    }
+
+    @Test func aHostQueuingInTheHubSendsAtOnceToAWorkingConversationSoItCanSteer() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .working)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        #expect(await hub.deliver("also the docs", to: Self.id("t1"), request: "q1") == .sent(hub.directory.conversations[0].handle))
+        #expect(host.delivered.map(\.1) == ["q1"])
+    }
+
+    @Test func aHeldHostMessageThePromptTheUserTypedOvertakesIsKeptForReviewNeverSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingQuestion)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        hub.handle(.typed(session: Self.id("t1")))
+        host.conversations = [waiting("t1", .idle)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        #expect(host.delivered.isEmpty)
+        #expect(notices == [.kept(hub.directory.conversations[0].handle, reason: .typedSince)])
+    }
+
+    @Test func aHeldHostMessageWhoseTurnWasStoppedIsKeptForReviewNeverSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "aborted", answer: ""))
+        host.conversations = [waiting("t1", .idle)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        #expect(host.delivered.isEmpty)
+        #expect(notices == [.kept(hub.directory.conversations[0].handle, reason: .interrupted)])
+    }
+
+    @Test func aHeldHostMessageWhoseConversationIsGoneIsReportedNotSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        host.conversations = []
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        #expect(host.delivered.isEmpty)
+        #expect(notices.count == 1)
+        if case .notSent(_, reason: .conversationEnded) = notices.first {} else { Issue.record("not reported as ended") }
+    }
+
+    @Test func aMessageTheHostCouldNotTakeYetGoesBackIntoTheHubsQueue() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.replies = [.queued]
+        host.conversations = [waiting("t1", .idle)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        guard case .queued = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") else {
+            Issue.record("not queued")
+            return
+        }
+        host.conversations = [waiting("t1", .working)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        #expect(host.delivered.map(\.1) == ["q1", "q1"])
+        #expect(notices == [.sent(hub.directory.conversations[0].handle)])
+    }
+
+    @Test func anUncertainHostDeliveryTheHostLaterConfirmsIsReportedSentOnce() async {
+        let host = FakeHost()
+        host.delivery = .uncertain
+        host.confirmation = true
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host, hostConfirmDelay: .milliseconds(20))
+        await hub.rescan()
+        var notices: [(AgentReceipt, String)] = []
+        hub.onNotice = { receipt, request, _ in notices.append((receipt, request)) }
+        #expect(await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") == .uncertain(hub.directory.conversations[0].handle))
+        await settled { !notices.isEmpty }
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(host.confirmed == ["q1"])
+        #expect(notices.map(\.0) == [.sent(hub.directory.conversations[0].handle)])
+        #expect(notices.map(\.1) == ["q1"])
+    }
+
+    @Test func anUncertainHostDeliveryTheHostCannotConfirmStaysUncertain() async {
+        let host = FakeHost()
+        host.delivery = .uncertain
+        host.confirmation = false
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host, hostConfirmDelay: .milliseconds(20))
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        await settled { !host.confirmed.isEmpty }
+        await Task.yield()
+        withExtendedLifetime(hub) {
+            #expect(host.confirmed == ["q1"])
+            #expect(notices.isEmpty)
+        }
+    }
+
+    @Test func aHostThatSaysItsListChangedIsAskedAgainAtOnceNotAfterTheFallbackInterval() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state == .idle)
+        var working = Self.thread("t1")
+        working.state = .working
+        host.conversations = [working]
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state == .idle)
+        host.watcher?(.listing)
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state == .working)
+    }
+
+    @Test func anEventAHostReportsIsFiledUnderItsConversation() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        host.watcher?(.event(.waiting(session: Self.location("t1").conversationKey, prompt: AgentPrompt(kind: "confirm", said: "may I?"))))
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state == .userDialog)
+        #expect(host.observed.contains(.waiting(session: Self.location("t1").conversationKey, prompt: AgentPrompt(kind: "confirm", said: "may I?"))))
+        host.watcher?(.event(.waiting(session: Self.location("t1").conversationKey, prompt: nil)))
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state != .userDialog)
+    }
+
+    @Test func aHostThatDoesNotReportTurnsLeavesTheReplyToADeliveryUnheard() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
+        _ = await hub.deliver("plan the release", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("plan the release")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "planned"))
+        #expect(replies.isEmpty)
     }
 
     @Test func anUncertainNewConversationWhoseTurnArrivesIsReportedSent() async {

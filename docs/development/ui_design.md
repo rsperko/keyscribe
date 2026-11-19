@@ -369,7 +369,7 @@ deliberate name for one conversation beats a place that can hold several. The sa
 other places a conversation can run in, closest first: a tmux window the user renamed and a tmux session
 the user named (only while tmux shows its status line, and a window name only while tmux does not let
 programs rename windows), a Zellij tab the user renamed (a Zellij pane title follows the program's own
-title, so it is not a name), a bb thread's title as bb shows it, a Ghostty
+title, so it is not a name), a bb thread's title as bb shows it, a Codex conversation's title, a Ghostty
 terminal or tab name the user set (a tab only in a window without splits, since Ghostty does not say which
 split belongs to which tab), and an iTerm tab title the user set. A title a program writes into its
 terminal is never a name, and a terminal app is read only when it already allows the app to script it,
@@ -756,7 +756,11 @@ conversation. Nothing sent. Open or click in one in bb Work, then try again.”;
 yet. Nothing sent. Try again in a moment.”, or “bb Work’s plugin can’t start conversations. Nothing sent. Agent
 settings can update it.” The plugin-missing, not-connected, and can't-start lines have **Open Agent
 Settings**, where the plugin's check says why; the Accessibility line has **Open Accessibility Settings**; the others
-have no button. Any other bb page that shows no thread, such as its settings, has no conversation in front. Being in front also means its reply is not read aloud while you look
+have no button. Any other bb page that shows no thread, such as its settings, has no conversation in front. A Codex
+conversation is in front when the terminal pane of the `codex` process whose title holds its thread id is in front,
+as for other agents, or, in a terminal whose pane titles cannot be read, when the focused window's title holds the
+start of exactly one listed Codex thread id; the `thread-id` item the plugin's install adds to Codex's terminal title
+puts it there. Being in front also means its reply is not read aloud while you look
 at it, as for a terminal. Unknown, no terminal in front, a different app or window, or a
 front view that could belong to another session leaves the take with nothing focused. Recording still
 starts, since the take may name a conversation or be a command that needs none. The read runs beside the
@@ -2297,7 +2301,9 @@ with its title. bb names the exact request, so no attribution guess is involved,
 plugin asks bb whether the prompt is still open only while it is, every few seconds for the first minute and
 then less often, and clears it when it is answered or the turn ends; until bb's own list is read again, the
 thread then reads as working. A list read after the prompt opened that shows the thread idle ends it too, so a clear
-that was lost never outlives the turn; the plugin also resends a prompt report that did not land. A Pi prompt, and a
+that was lost never outlives the turn; the plugin also resends a prompt report that did not land. A Codex
+conversation's prompt comes from the plugin's hooks: a permission request as a confirm naming its tool and command,
+and the plan-mode question tool as a select titled with its first question; no last words are sent. A Pi prompt, and a
 bb thread's, shows in the session list as a dialog. Each is spoken once when the state begins; a notice whose state ends (the
 approval was given, the connector or the conversation came back, the turn finished) before it is audible is withdrawn rather than
 played late, even while the voice is still preparing it, and a finished turn's summary replaces it. A new
@@ -2400,7 +2406,12 @@ running app's launch environment, or from `BB_DATA_DIR` in the user's login shel
 (the app whose launch environment names the folder, when there is one, even after that app quits),
 as Finder shows it, beside its folder, so two copies of one app read apart. **Add Folder…** accepts a folder only when it holds bb's command and its runtime record or
 thread storage, and is otherwise refused as not a bb data folder. The folder a build that is
-open uses is the default, which **Connect…** offers; otherwise the usual folder. The host is on exactly while any of
+open uses is the default, which **Connect…** offers; otherwise the usual folder. For Codex, one row per Codex home: `~/.codex`
+and any folder `CODEX_HOME` names in the login shell, with **Add Folder…** for others. Its consent sheet says the
+install adds the `thread-id` item to the home's terminal title (the connector copy's `installNote`). Its row reads
+broken, with the reason, while Codex has not trusted the plugin's hooks (type `/hooks` in Codex), while the title
+item the install added is missing (**Update** puts it back; nothing else does), or while `config.toml` cannot be
+read; Codex's app server not running reads as that, never as no conversations. The host is on exactly while any of
 its setups is enrolled; its id in `agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host
 integration does, that it installs the plugin and keeps it up to date, and that uninstalling stops all of it);
 **Connect {host}** turns the host on and installs, and Cancel leaves it off. While the host is off, a caption under

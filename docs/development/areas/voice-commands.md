@@ -859,6 +859,44 @@ every rule above applies to it, with these sharpenings:
   listed or disconnected when it
   was sent (`AgentHub.startFollows`, bounded like host follows), within `AgentHub.hostTurnWait`. The plugin reports
   a turn that started before its thread's hello landed once the hello does, and never one that ended first.
+- **Codex is a host reached through its shared app server** (`CodexHost`, `CodexDaemonClient`). Each enrolled Codex
+  home (`~/.codex`, or the folder `CODEX_HOME` names) is its own instance. KeyScribe connects as a local client to
+  that home's control socket (`app-server-control/app-server-control.sock`) and never starts, restarts or stops the
+  server; a socket that does not answer reads as the app server not running (`CodexHost.daemonDown`), never as no
+  conversations. A Codex started with settings flags that keep it off the app server, and conversations in the
+  ChatGPT app, are not listed, and the codex bundled in that app is never used or counted as an install
+  (`CodexInstall.find`). Auto-generated naming threads are not listed. A conversation's title is its name, like a
+  tab label, and a rename sets the Codex thread name (`thread/name/set`).
+- **Codex delivery starts a turn on an idle conversation and steers a working one** (`CodexDelivery.precheck`,
+  `CodexHost.send`). Idle sends `turn/start`; working reads the running turn and sends `turn/steer` with that
+  `expectedTurnId`, so a turn that ended in between is refused rather than joined, and is then sent as a new turn
+  only when the conversation reads idle. Every send carries a `clientUserMessageId` KeyScribe chose, with pasted
+  images as `localImage` inputs, and settles as sent once that id appears in the conversation's latest turns,
+  re-read for a bounded moment because Codex records it shortly after answering; anything unread is uncertain. A message
+  for a conversation waiting on an approval, a question or an unknown state is held in the hub's own queue
+  (`AgentHost.queuesInHub`, `AgentOutbox`), under the same rules as a connector's: released when the prompt is
+  answered or the turn ends, kept for review when the user typed (Codex's own prompts arrive as `typed`) or stopped
+  the turn (the hooks' `Interrupt`, or an interrupted last turn the host reads when the conversation goes idle), and
+  reported not sent when the conversation is gone. A host that answers `queued` (a prompt typed a moment ago) puts
+  the message back in that queue. An uncertain send is checked once more after `hostConfirmDelay` through
+  `AgentHost.confirm`, which looks for KeyScribe's own message id. KeyScribe never answers
+  an approval or a question and never uses Codex's own message queue, and a held message cannot be withdrawn from
+  the HUD, as with bb.
+- **Codex's plugin reports through hooks, not a connection** (`CodexPlugin`, `CodexHookReport`, sources in
+  `Resources/CodexConnector`). Its hooks (prompt submitted, turn stopped, interrupted, permission request, and the
+  plan-mode question tool) each run `agents/codex/keyscribe-codex`, which posts the payload to `POST /report` and
+  exits 0, sending nothing when KeyScribe is not running (config_schema.md, Agent bridge); a payload over the bridge's
+  frame limit is cut to the fields KeyScribe reads, with long text shortened. A waiting prompt
+  is the approval's tool and command or the question's text. The same executable serves the plugin's
+  `tell_me_when_done` tool as an auto-approved MCP server; its one wait is bounded and a timeout promises nothing.
+  On the default Codex model when the tool was added, it is called when the user names the app; "tell me out loud"
+  alone may make the model reach for another tool. Codex runs the hooks only after the user trusts them with
+  `/hooks`, and Settings reads that trust from the app server. Status changes, a cleared approval and the agent's
+  last words for a prompt reach the hub as they happen (`AgentHost.watch`). Each conversation is joined to the
+  `codex` process whose terminal pane title carries its thread id, through the `thread-id` title item the install
+  adds (`CodexPaneTitle`, `TerminalTitleReader`), so Open and in front use the same terminal routes agents use;
+  the focused window's title is the fallback for a terminal without a pane title read. Check `CodexHost` for Stop
+  before documenting it for Codex.
 - **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
   process group, with content on standard input rather than in the arguments. Standard output (the only
   output parsed) and standard error are kept apart, each capped, and cut output is marked. A deadline or a

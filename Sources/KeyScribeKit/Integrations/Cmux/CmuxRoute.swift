@@ -26,6 +26,25 @@ struct CmuxRoute: TerminalRoute {
         return Opening([.select(.script(app: Self.app, pid: process.pid, body: body)), activate])
     }
 
+    static let titleScript = """
+        set sep to character id 9
+        set out to ""
+        repeat with s in terminals
+            set out to out & (id of s) & sep & (name of s) & linefeed
+        end repeat
+        return out
+        """
+
+    func titleRead(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> TitleRead? {
+        guard process.app == Self.app, let surface = TerminalRoutes.nearest(Self.surfaceKey, in: inner)?.environment[Self.surfaceKey]
+        else { return nil }
+        return TitleRead(route: name, source: .script(app: Self.app, pid: process.pid, body: Self.titleScript), pane: [surface])
+    }
+
+    func title(answer: String, pane: [String]) -> String? {
+        TerminalTitles.keyed(answer, among: pane)
+    }
+
     func front(answer id: String, appPid: Int, facts: TerminalFacts) -> FrontStep {
         guard let children = facts.children(of: appPid) else { return .unknown(.processesUnreadable) }
         var matches: Set<String> = []

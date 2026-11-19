@@ -3,6 +3,8 @@ import Foundation
 public struct KeyedSurfaceRoute: TerminalRoute {
     public typealias Command = @Sendable (_ terminal: TerminalProcess, _ value: String, _ socket: String?) -> PaneCommand?
     public typealias FrontReader = @Sendable (_ terminal: TerminalProcess, _ socket: String?, _ facts: TerminalFacts) -> FrontStep
+    public typealias TitleCommand = @Sendable (_ terminal: TerminalProcess, _ socket: String?) -> [String]?
+    public typealias TitleParser = @Sendable (_ answer: String, _ pane: [String]) -> String?
 
     public enum Focus: Sendable {
         case url(prefix: String)
@@ -16,11 +18,13 @@ public struct KeyedSurfaceRoute: TerminalRoute {
     public let noun: String
     public let focus: Focus
     public let front: FrontReader?
+    public let titleCommand: TitleCommand?
+    public let titleFrom: TitleParser?
     public let frontScript: String? = nil
 
     public init(
         name: String, apps: Set<String>, key: String, socket: String? = nil, noun: String = "tab", focus: Focus,
-        front: FrontReader? = nil
+        front: FrontReader? = nil, titleCommand: TitleCommand? = nil, titleFrom: TitleParser? = nil
     ) {
         self.name = name
         self.apps = apps
@@ -29,6 +33,8 @@ public struct KeyedSurfaceRoute: TerminalRoute {
         self.noun = noun
         self.focus = focus
         self.front = front
+        self.titleCommand = titleCommand
+        self.titleFrom = titleFrom
     }
 
     public var environmentKeys: [String] { [key] + (socket.map { [$0] } ?? []) }
@@ -43,19 +49,33 @@ public struct KeyedSurfaceRoute: TerminalRoute {
             }
             return Opening([.select(.url(url)), activate])
         case .command(let command):
-            guard Self.isPath(process.executable), let carrier = TerminalRoutes.nearest(key, in: inner), let value = carrier.environment[key], Self.usable(value) else {
-                return Opening([activate])
-            }
-            var owned: String?
-            if let socket {
-                guard let path = carrier.environment[socket].map(Self.path), Self.owns(path, pid: process.pid, facts: facts) else {
-                    return Opening([activate])
-                }
-                owned = path
-            }
-            guard let focus = command(process, value, owned), !focus.arguments.isEmpty else { return Opening([activate]) }
+            guard let located = located(process, inner: inner, facts: facts),
+                  let focus = command(process, located.value, located.socket), !focus.arguments.isEmpty
+            else { return Opening([activate]) }
             return Opening([.select(.command(focus)), activate])
         }
+    }
+
+    public func titleRead(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> TitleRead? {
+        guard let titleCommand, titleFrom != nil, bundle(of: process) != nil, let located = located(process, inner: inner, facts: facts),
+              let argv = titleCommand(process, located.socket), !argv.isEmpty
+        else { return nil }
+        return TitleRead(route: name, source: .command(argv), pane: [located.value] + TerminalRoutes.ttys(of: inner))
+    }
+
+    public func title(answer: String, pane: [String]) -> String? {
+        titleFrom?(answer, pane)
+    }
+
+    private func located(
+        _ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts
+    ) -> (value: String, socket: String?)? {
+        guard Self.isPath(process.executable), let carrier = TerminalRoutes.nearest(key, in: inner), let value = carrier.environment[key],
+              Self.usable(value)
+        else { return nil }
+        guard let socket else { return (value, nil) }
+        guard let path = carrier.environment[socket].map(Self.path), Self.owns(path, pid: process.pid, facts: facts) else { return nil }
+        return (value, path)
     }
 
     public func readFront(appPid: Int, facts: TerminalFacts, reported: [[String: String]]) -> FrontStep? {

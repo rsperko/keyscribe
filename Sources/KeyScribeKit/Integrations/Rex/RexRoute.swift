@@ -49,6 +49,20 @@ struct RexRoute: PaneRoute {
         return active[0].focused_block_id == located.block ? .shown : .elsewhere
     }
 
+    func titleRead(_ server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> TitleRead? {
+        guard Self.isServer(server), let address = Self.listenAddress(server.arguments),
+              let located = Self.locate(server: server, address: address, inner: inner)
+        else { return nil }
+        let argv = located.rex + ["block", "call", "-s", located.session, "-b", located.block, "title"]
+        return TitleRead(route: name, source: .command(argv), pane: [])
+    }
+
+    private struct Title: Decodable { var title: String }
+
+    func title(answer: String, pane: [String]) -> String? {
+        TerminalTitles.shown((try? JSONDecoder().decode(Title.self, from: Data(answer.utf8)))?.title)
+    }
+
     func isClient(_ process: TerminalProcess) -> Bool { false }
 
     func front(client: TerminalProcess, tty: String, facts: TerminalFacts) -> FrontStep { .unknown(.multiplexer(name)) }

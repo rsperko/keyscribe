@@ -14,5 +14,14 @@ extension ScriptedTerminalRoute {
             end repeat
         end repeat
         return false
-        """)
+        """, titleScript: """
+        set sep to character id 9
+        set out to ""
+        repeat with w in windows
+            repeat with t in tabs of w
+                set out to out & (tty of t) & sep & (custom title of t) & linefeed
+            end repeat
+        end repeat
+        return out
+        """, titleFrom: { answer, ttys in TerminalTitles.keyed(answer, among: ttys) })
 }

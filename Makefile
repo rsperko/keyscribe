@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-omp-connector test-bb-plugin check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
+.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-omp-connector test-bb-plugin test-codex-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -67,6 +67,9 @@ publish-voice-kit: ## Upload every study's kit to the fixed-link `voice-kit` Git
 
 test-voice-kit: ## Check the voice kit's recorder and packager without an app or a microphone
 	zsh voice-kit/test.sh
+
+test-codex-connector: ## Run the Codex plugin's hook and read-aloud executable tests (never needed to build)
+	./scripts/test-codex-connector.sh
 
 check-deps: ## Detect upstream dependency mutation (moved tags, re-uploaded binary assets)
 	./scripts/check-binary-artifacts.py

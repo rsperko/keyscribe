@@ -576,6 +576,8 @@ each is connected on its own. Open a copy of bb once if it is missing, or choose
 folder. If you dictate to a copy of bb that isn't connected, KeyScribe names that copy and tells you whether its
 plugin is missing or not connected, so you know which row to fix. When the copy is connected but nothing can be
 sent yet, KeyScribe says what is still missing and what to do about it.
+For Codex, each Codex home is listed: `~/.codex`, and a folder `CODEX_HOME` names in your shell's startup
+files; choose **Add Folder…** for another.
 
 ### How do I choose which conversation hears me?
 
@@ -691,6 +693,43 @@ page before it is sent, nothing is sent.
 
 KeyScribe turns off bb's usage reporting for the commands it runs.
 
+### Can I talk to agents running in Codex?
+
+Yes. In **Settings ▸ Modes ▸ Agent**, choose **Connect…** beside **Codex** under **Connections** to install the
+plugin. Each Codex home is connected on its own: `~/.codex`, or the folder `CODEX_HOME` names. KeyScribe uses the
+Codex command line tool it finds on your Mac, for example one installed with Homebrew, never the copy inside the
+ChatGPT app.
+
+Installing asks once, then installs a small KeyScribe plugin with Codex's own `codex plugin` commands. It also adds
+the `thread-id` item to Codex's terminal title (`[tui] terminal_title` in that home's `config.toml`), so KeyScribe can
+tell which conversation a terminal shows; Settings says so before installing. Codex runs the plugin's hooks only
+after you trust them: in Codex, type `/hooks` and trust the KeyScribe hooks. Settings says when they still need it.
+If you remove the title item yourself, Settings says the plugin needs repair and **Update** puts it back; KeyScribe
+never adds it back on its own. Uninstalling removes the plugin from Codex and only the title item KeyScribe added;
+the rest of your `config.toml`, and other tools' hooks, stay as they were.
+
+KeyScribe lists the conversations Codex's app server holds, the one Codex conversations started the usual way in a
+terminal share. It never starts or stops that server: when it isn't running, Settings says so rather than showing no
+conversations. A Codex started with its own settings flags that keep it off the app server, and conversations in the
+ChatGPT app, are not listed. A conversation is named by its Codex title, unless you give it a KeyScribe name;
+renaming it in KeyScribe also sets its name in Codex.
+
+What you dictate to an idle conversation starts its next turn, and what you dictate while it is working joins the
+turn that is running, the way Codex takes a message you type mid-turn; any image you pasted goes with it. While a
+conversation waits on your approval or an answer, or you have just typed a prompt there, KeyScribe holds your message
+and sends it once the approval is answered or the turn ends, the same way it holds a message for Claude Code and Pi.
+If you stop the turn or type a prompt yourself before it is sent, KeyScribe keeps your message for you to review
+rather than sending it, and if the conversation closes it is not sent; either way KeyScribe tells you. KeyScribe never
+answers an approval or a question for you.
+
+The reply to what you dictate is read aloud, and you hear what a conversation asks when it stops for your approval
+or an answer. To hear the reply to something you typed, ask the agent to have KeyScribe tell you when it's done;
+naming KeyScribe works best, since "tell me out loud" alone may make the agent reach for something else. While the
+terminal showing a Codex conversation is in front, dictation without a name goes to that conversation, and “open”
+brings a Codex conversation's terminal forward, in the same terminals and multiplexers it works in for other
+agents. Both find the conversation's terminal from the thread id the `thread-id` item puts in its title, so a pane
+whose title shows something else (for example a zellij pane started as `zellij run -- codex`) is not found.
+
 ### How do I rename a conversation?
 
 In the Agent mode, switch to the conversation, then say **“rename this conversation to”** and the new
@@ -793,7 +832,8 @@ its tool approvals, plan reviews and the questions its model asks, but not a dia
 that a prompt is open and what kind it is, and with an AI service chosen, what is known about it is sent to that service,
 after best-effort redaction, to say what it asks: the prompt's kind and title, the tool call it seems to be
 about (such as the command to approve, or a question and its options), and for Pi and omp the agent's last words before it
-asked. For Pi and omp, which tool call a prompt is about is a best guess; bb names it exactly. Without a service you hear "Waiting for approval." or "Waiting for an answer." when the prompt's kind says which, and "Waiting for you." otherwise. For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
+asked. For Pi and omp, which tool call a prompt is about is a best guess; bb names it exactly. Codex reports the same way,
+with the tool and command an approval is for, or the question's text. Without a service you hear "Waiting for approval." or "Waiting for an answer." when the prompt's kind says which, and "Waiting for you." otherwise. For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
 name and a short summary of the agent's final reply: a longer reply goes to that service, after its
 best-effort redaction, to be summarized; a reply of a few words is read as it is without any service. When the reply
 came right after what you dictated, your words go with it, so the summary opens with a few words naming what you asked.
@@ -864,7 +904,7 @@ shows "Reply will be reported." (or "Next reply will be reported.") on that conv
 In Claude Code the command runs while the agent works, and what it says is shown to you, not to the agent. In a bb
 thread, choose **Read this thread’s reply aloud** (or **Don’t read this thread’s reply aloud**) from the **+** menu
 beside the message box or from bb's command palette, where you can also give it a shortcut; it works the same way and
-shows its answer above the message box. A reply
+shows its answer above the message box. Codex has no such command; ask in your own words, naming KeyScribe. A reply
 you asked for is never dropped in favor of a later reply from the same conversation.
 
 A request is kept in memory only: quitting KeyScribe, turning **Read Agent Replies Aloud** off or disconnecting the

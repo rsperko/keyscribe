@@ -227,6 +227,13 @@ struct ToolEnvironmentTests {
         #expect(tools.search(program: "claude", agent: "claude", setup: nil, chosen: nil, extra: []).tool?.path == "/Users/a/.local/bin/claude")
     }
 
+    @Test func aCopyTheAgentDoesNotAcceptIsPassedOverForTheNextOne() {
+        let tools = make(Shell(), path: "/Users/a/bin:/usr/bin", existing: ["/Users/a/bin/codex", "/opt/homebrew/bin/codex"])
+        #expect(tools.search(program: "codex", agent: "codex", setup: nil, chosen: nil, extra: [], accepting: { !$0.hasPrefix("/Users/a/bin/") }).tool?.path
+            == "/opt/homebrew/bin/codex")
+        #expect(tools.search(program: "codex", agent: "codex", setup: nil, chosen: nil, extra: []).tool?.path == "/Users/a/bin/codex")
+    }
+
     @Test func aRunningConversationsCommandOfThatFolderComesFirst() {
         let tools = make(Shell(), existing: ["/nix/store/x/bin/claude", "/Users/a/.local/bin/claude"])
         tools.record(agent: "claude", candidates: [

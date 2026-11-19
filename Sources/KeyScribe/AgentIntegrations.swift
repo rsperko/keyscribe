@@ -60,7 +60,7 @@ public struct AgentIntegrations: Sendable {
 
     public static var builtIn: AgentIntegrations {
         var integrations = AgentIntegrations(surfaces: .builtIn, placeSources: [{ HerdrPlaceReader() }])
-        integrations.hosts = [BBHost.integration]
+        integrations.hosts = [BBHost.integration, CodexHost.integration]
         return integrations
     }
 }

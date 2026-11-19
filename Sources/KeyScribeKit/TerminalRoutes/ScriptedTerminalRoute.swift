@@ -2,6 +2,7 @@ import Foundation
 
 public struct ScriptedTerminalRoute: TerminalRoute {
     public typealias PlacesParser = @Sendable (_ answer: String, _ ttys: [String], _ surface: String) -> PlaceLayer?
+    public typealias TitleParser = @Sendable (_ answer: String, _ ttys: [String]) -> String?
 
     public let name: String
     public let apps: Set<String>
@@ -10,12 +11,14 @@ public struct ScriptedTerminalRoute: TerminalRoute {
     public let body: String
     public let placeScript: String?
     public let placesFrom: PlacesParser?
+    public let titleScript: String?
+    public let titleFrom: TitleParser?
     public let environmentKeys: [String] = []
     public var frontScript: String? { front }
 
     public init(
         name: String, apps: Set<String>, helperPrefix: String? = nil, front: String, body: String,
-        placeScript: String? = nil, placesFrom: PlacesParser? = nil
+        placeScript: String? = nil, placesFrom: PlacesParser? = nil, titleScript: String? = nil, titleFrom: TitleParser? = nil
     ) {
         self.name = name
         self.apps = apps
@@ -24,6 +27,8 @@ public struct ScriptedTerminalRoute: TerminalRoute {
         self.body = body
         self.placeScript = placeScript
         self.placesFrom = placesFrom
+        self.titleScript = titleScript
+        self.titleFrom = titleFrom
     }
 
     public func bundle(of process: TerminalProcess) -> String? {
@@ -39,6 +44,15 @@ public struct ScriptedTerminalRoute: TerminalRoute {
 
     public func places(answer: String, ttys: [String]) -> PlaceLayer? {
         placesFrom?(answer, ttys, name)
+    }
+
+    public func titleRead(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> TitleRead? {
+        guard let titleScript, let app = bundle(of: process) else { return nil }
+        return TitleRead(route: name, source: .script(app: app, pid: process.pid, body: titleScript), pane: TerminalRoutes.ttys(of: inner))
+    }
+
+    public func title(answer: String, pane: [String]) -> String? {
+        titleFrom?(answer, pane)
     }
 
     public func open(app: String, pid: Int, ttys: [String]) -> [OpenAction] {
