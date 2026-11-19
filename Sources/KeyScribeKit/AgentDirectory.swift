@@ -173,13 +173,22 @@ public struct AgentDirectory: Sendable {
         let membersByKey = Dictionary(grouping: labelled, by: { "\($0.label.level == .agent) \($0.key)" }).mapValues { group in
             group.flatMap(\.members).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         }
+        func workspace(_ id: String, apartFrom base: String) -> String? {
+            known[id]?.labels.first { $0.level == .workspace }.flatMap { usable($0.text) }.flatMap {
+                AgentHandles.matchKey($0) == AgentHandles.matchKey(base) ? nil : $0
+            }
+        }
         for item in labelled {
             let id = conversationId(item.entry)
-            let qualifiedName = usable("\(item.base) \(item.entry.agent)")
-            let earlier = [nativeNameById[id], remembering[id]?.native].compactMap { $0 }.map(AgentHandles.matchKey)
-            let stays = qualifiedName.map { earlier.contains(AgentHandles.matchKey($0)) } ?? false
+            let byAgent = usable("\(item.base) \(item.entry.agent)")
             let members = membersByKey["\(item.label.level == .agent) \(item.key)"] ?? item.members
-            let qualifies = members.count > 1 || stays
+            let workspaces = members.map { workspace($0, apartFrom: item.base) }
+            let apart = workspaces.allSatisfy { $0 != nil } && Set(workspaces.compactMap { $0.map(AgentHandles.matchKey) }).count == members.count
+            let ownWorkspace = workspace(id, apartFrom: item.base).flatMap { usable("\($0) \(item.base)") }
+            let earlier = [nativeNameById[id], remembering[id]?.native].compactMap { $0 }.map(AgentHandles.matchKey)
+            let given = [byAgent, ownWorkspace].compactMap { $0 }.first { earlier.contains(AgentHandles.matchKey($0)) }
+            let qualifiedName = given ?? (apart ? ownWorkspace : nil) ?? byAgent
+            let qualifies = members.count > 1 || given != nil
             placed[id] = (qualifies ? qualifiedName ?? item.base : item.base,
                           AgentPlaceName(
                               surface: item.label.surface ?? item.place.surface, level: item.label.level, label: item.label.text, term: item.label.term))

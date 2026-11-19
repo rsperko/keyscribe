@@ -396,7 +396,11 @@ a pane never renamed give no name.
 A tab or workspace label that covers several conversations names each of them by the label and its agent
 (workspace `cos` holding a Claude and a Pi conversation gives `cos claude` and `cos pi`), and two of the
 same agent then gain a distinguishing word. A conversation whose pane has its own label still counts, so
-workspace `cos` with a pane named `pi` and one unnamed Claude pane gives `pi` and `cos claude`. Said bare,
+workspace `cos` with a pane named `pi` and one unnamed Claude pane gives `pi` and `cos claude`. A pane title,
+agent name or conversation title several conversations share is qualified first by the workspace label that
+tells them apart, and only by the agent when their workspaces don't (none, the same one, or the shared name
+itself): `marvin` in workspaces `cos` and `web` gives `cos marvin` and `web marvin`, while `marvin` twice in `cos`
+gives `marvin claude` and `marvin pi`. A name already given in one of these forms keeps it. Said bare,
 such a label never picks one: “tell cos to run the tests” and “cos, run the tests” are held and ask
 ““cos” could be “cos claude” or “cos pi”. Nothing sent.”, adding “Name the panes in herdr to tell them apart.”
 when only a distinguishing word separates them. This holds for messages, open, and questions alike. Two

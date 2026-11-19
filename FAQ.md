@@ -755,7 +755,9 @@ becomes something you have to say. After “tell” or “ask” you can say par
 singular or the plural matches either: “ask review manager …” reaches a pane named `reviews_manager_queue`.
 When one workspace holds more than one conversation, each is called by
 the workspace name and its agent, such as “cos claude” and “cos pi”, and saying just “cos” asks which one
-you meant. A conversation keeps its longer name after the other one closes, so what you learned to say
+you meant. When two conversations in different workspaces show the same name, such as two panes titled
+“marvin” in workspaces “cos” and “web”, each is called by its workspace and that name, “cos marvin” and
+“web marvin”. A conversation keeps its longer name after the other one closes, so what you learned to say
 keeps working. Name the panes in herdr to give each its own name. A new conversation started in a named pane
 gets that pane's name once the old one has closed. If you say a conversation's herdr tab or workspace name
 after “tell”, “ask” or “open” and that is not its name, nothing is sent: KeyScribe tells you the name to

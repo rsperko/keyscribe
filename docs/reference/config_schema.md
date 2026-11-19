@@ -643,7 +643,8 @@ state, and a write to it does not reload configuration.
 - Before the agent's own name come what herdr shows on the conversation's pane (the `title` a hook reports
   through `pane report-metadata`, else the pane's `label`) and then the name the user gave the agent in
   herdr (`herdr agent list`'s `name`). Names that normalize alike, including the same name on two herdr
-  servers, are qualified by their agents and the bare name asks. Herdr is read for the agent names on every
+  servers, are qualified by their workspaces when those tell them apart, else by their agents, and the bare
+  name asks. Herdr is read for the agent names on every
   place read; a read that cannot list them leaves every place unchecked, so the last names stay.
 - The pane label and the herdr agent name still reach a conversation whose shown name came from a higher
   source; a pane title, and the agent's own name when a herdr name outranks it, do so only when said in full

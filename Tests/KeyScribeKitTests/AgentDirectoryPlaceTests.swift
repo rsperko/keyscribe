@@ -227,6 +227,75 @@ struct AgentDirectoryPlaceTests {
         #expect(directory.sharedPlaceNames["cos"] == AgentRecipient.SharedName(names: ["cos claude", "cos claude blue"], tellApartIn: "herdr"))
     }
 
+    private func titled(_ title: String, workspace: String?, id: String) -> AgentPlace {
+        var labels: [AgentPlace.Label] = [.init(text: title, level: .title, container: "\(id)#conversation")]
+        var containers = ["\(id)#conversation"]
+        if let workspace {
+            labels.append(.init(text: workspace, level: .workspace, container: "#workspace:\(workspace)"))
+            containers.append("#workspace:\(workspace)")
+        }
+        return AgentPlace(surface: "Host", labels: labels, containers: containers)
+    }
+
+    @Test func oneAgentsConversationsSharingATitleInDifferentWorkspacesAreNamedByWorkspace() {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [session("ultimate", "a"), session("ultimate", "b", pid: 20)], live: [],
+            places: ["ultimate:a": titled("@ultimate", workspace: "app", id: "a"), "ultimate:b": titled("@ultimate", workspace: "web", id: "b")])
+        #expect(handles(directory) == ["ultimate:a": "app ultimate", "ultimate:b": "web ultimate"])
+        #expect(directory.sharedPlaceNames["ultimate"]?.names == ["app ultimate", "web ultimate"])
+    }
+
+    @Test func differentAgentsSharingAPaneTitleInDifferentWorkspacesAreNamedByWorkspace() {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [session("pi", "a"), session("claude", "b", pid: 20)], live: [],
+            places: ["pi:a": titled("marvin", workspace: "cos", id: "a"), "claude:b": titled("marvin", workspace: "web", id: "b")])
+        #expect(handles(directory) == ["pi:a": "cos marvin", "claude:b": "web marvin"])
+    }
+
+    @Test func conversationsSharingATitleInOneWorkspaceAreStillNamedByAgent() {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [session("pi", "a"), session("claude", "b", pid: 20)], live: [],
+            places: ["pi:a": titled("marvin", workspace: "cos", id: "a"), "claude:b": titled("marvin", workspace: "cos", id: "b")])
+        #expect(handles(directory) == ["pi:a": "marvin pi", "claude:b": "marvin claude"])
+    }
+
+    @Test func aNameGivenByAgentBeforeWorkspacesWereKnownStays() {
+        var directory = AgentDirectory()
+        let entries = [session("pi", "a"), session("claude", "b", pid: 20)]
+        directory.update(
+            entries: entries, live: [],
+            places: ["pi:a": titled("marvin", workspace: nil, id: "a"), "claude:b": titled("marvin", workspace: nil, id: "b")])
+        #expect(handles(directory) == ["pi:a": "marvin pi", "claude:b": "marvin claude"])
+        directory.update(
+            entries: entries, live: [],
+            places: ["pi:a": titled("marvin", workspace: "cos", id: "a"), "claude:b": titled("marvin", workspace: "web", id: "b")])
+        #expect(handles(directory) == ["pi:a": "marvin pi", "claude:b": "marvin claude"])
+    }
+
+    @Test func aThirdConversationJoiningAWorkspaceLeavesTheWorkspaceNamesAlreadyGiven() {
+        var directory = AgentDirectory()
+        let two = [session("pi", "a"), session("claude", "b", pid: 20)]
+        var places = ["pi:a": titled("marvin", workspace: "cos", id: "a"), "claude:b": titled("marvin", workspace: "web", id: "b")]
+        directory.update(entries: two, live: [], places: places)
+        #expect(handles(directory) == ["pi:a": "cos marvin", "claude:b": "web marvin"])
+        places["omp:c"] = titled("marvin", workspace: "cos", id: "c")
+        directory.update(entries: two + [session("omp", "c", pid: 30)], live: [], places: places)
+        #expect(handles(directory)["pi:a"] == "cos marvin")
+        #expect(handles(directory)["claude:b"] == "web marvin")
+        #expect(handles(directory)["omp:c"] == "marvin omp")
+    }
+
+    @Test func aConversationWithoutATitleIsNamedByItsWorkspaceLikeAPaneWithoutALabel() {
+        var directory = AgentDirectory()
+        let place = AgentPlace(
+            surface: "Host", labels: [.init(text: "app", level: .workspace, container: "#workspace:app")], containers: ["#workspace:app"])
+        directory.update(entries: [session("ultimate", "a")], live: [], places: ["ultimate:a": place])
+        #expect(directory.handles == ["app"])
+    }
+
     @Test func aQualifiedNameStaysAfterTheSiblingClosesSoTheFullNameKeepsWorking() {
         var directory = AgentDirectory()
         let places = ["claude:a": place(), "pi:b": place(paneId: "p2")]
