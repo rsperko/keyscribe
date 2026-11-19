@@ -26,6 +26,8 @@ struct AgentHostTests {
         var front = AgentHostFront.unknown
         var identityKeys = ["EXAMPLE_THREAD"]
         var delivery = AgentHostDelivery.accepted
+        var route = AgentHostDeliveryRoute.host
+        func deliveryRoute(at location: AgentHostLocation) -> AgentHostDeliveryRoute { route }
         private(set) var retitled: [(AgentHostLocation, String)] = []
         private(set) var scans = 0
         private(set) var opened: [AgentHostLocation] = []
@@ -399,6 +401,107 @@ struct AgentHostTests {
         #expect(host.delivered.map(\.0) == ["fix the test"])
         #expect(host.delivered.map(\.1) == ["q1"])
         #expect(transport.sent.allSatisfy { if case .status = $0.0 { true } else { false } })
+    }
+
+    private func connected(_ host: FakeHost, _ transport: FakeTransport, features: [String], receiptTimeout: Duration = .seconds(5)) async -> AgentHub {
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host, transport: transport, receiptTimeout: receiptTimeout)
+        await hub.rescan()
+        var hello = Self.hello(Self.id("t1"), features: features)
+        hello.agent = "example"
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(hello))
+        await hub.rescan()
+        return hub
+    }
+
+    private func submitted(_ transport: FakeTransport) async -> (id: String, text: String)? {
+        for _ in 0..<400 {
+            for (command, session) in transport.sent where session == Self.id("t1") {
+                if case .submit(let id, _, let text, _, _, _, _, _) = command { return (id, text) }
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return nil
+    }
+
+    @Test func aHostWhoseConnectorDeliversSendsOverTheBridgeAndFollowsTheReply() async throws {
+        let host = FakeHost()
+        host.route = .connector
+        let transport = FakeTransport()
+        let hub = await connected(host, transport, features: ["promptDigest", "readiness", "notify", "steer"])
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        let delivery = Task { await hub.deliver("fix the test", to: Self.id("t1"), request: "q1") }
+        let sent = try #require(await submitted(transport))
+        #expect(sent.text == "fix the test")
+        hub.handle(.submitted(request: sent.id, turn: "t-1"))
+        #expect(await delivery.value == .sent("docs"))
+        #expect(host.delivered.isEmpty)
+        let prompt = AgentPromptDigest.of("fix the test")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "t-1", prompt: prompt))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Fixed the flaky test.", after: AgentTurnInput(from: nil, prompt: prompt)))
+        #expect(origins == ["q1"])
+    }
+
+    @Test func aMessageHeldForAnApprovalInAConversationItsConnectorDeliversIsReleasedThroughTheConnector() async throws {
+        let host = FakeHost()
+        host.route = .connector
+        host.queuesInHub = true
+        let transport = FakeTransport()
+        let hub = await connected(host, transport, features: ["promptDigest", "readiness", "notify", "steer"])
+        hub.handle(.waiting(session: Self.id("t1"), prompt: AgentPrompt(kind: "confirm", title: "Run it?")))
+        await hub.rescan(rereadingTitles: false)
+        guard case .queued = await hub.deliver("also run lint", to: Self.id("t1"), request: "q1") else {
+            Issue.record("a message for a conversation waiting on an approval is held")
+            return
+        }
+        hub.handle(.waiting(session: Self.id("t1"), prompt: nil))
+        await hub.rescan(rereadingTitles: false)
+        let sent = try #require(await submitted(transport))
+        #expect(sent.text == "also run lint")
+        #expect(host.delivered.isEmpty)
+    }
+
+    @Test func aMessageHeldForAHostThatIsTurnedOffIsNeverHandedToAConnector() async throws {
+        let host = FakeHost()
+        host.queuesInHub = true
+        let transport = FakeTransport()
+        let hub = await connected(host, transport, features: ["promptDigest", "readiness", "notify", "steer"])
+        hub.handle(.waiting(session: Self.id("t1"), prompt: AgentPrompt(kind: "confirm", title: "Run it?")))
+        await hub.rescan(rereadingTitles: false)
+        guard case .queued = await hub.deliver("also run lint", to: Self.id("t1"), request: "q1") else {
+            Issue.record("a message for a conversation waiting on an approval is held")
+            return
+        }
+        host.isEnabled = false
+        hub.handle(.waiting(session: Self.id("t1"), prompt: nil))
+        host.watcher?(.state(Self.location("t1"), .idle))
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(!transport.sent.contains { if case .submit = $0.0 { true } else { false } })
+        #expect(host.delivered.isEmpty)
+    }
+
+    @Test func aHostThatDeliversButCannotSaysSoAndNeverFallsThroughToAConnector() async {
+        let host = FakeHost()
+        host.delivery = .unsupported
+        let transport = FakeTransport()
+        let hub = await connected(host, transport, features: ["promptDigest", "readiness", "steer"])
+        #expect(await hub.deliver("fix the test", to: Self.id("t1"), request: "q1") == .notSent("docs", reason: .hostTakesNoMessages("Example")))
+        #expect(!transport.sent.contains { if case .submit = $0.0 { true } else { false } })
+    }
+
+    @Test func aConversationItsConnectorDeliversTakesImagesOnlyWhenTheConnectorSaysSo() async {
+        let host = FakeHost()
+        host.route = .connector
+        host.takesImages = true
+        let transport = FakeTransport()
+        let plain = await connected(host, transport, features: ["promptDigest"])
+        #expect(!plain.takesImages(Self.id("t1")))
+        let announcing = FakeHost()
+        announcing.route = .connector
+        let withImages = await connected(announcing, FakeTransport(), features: ["promptDigest", "images"])
+        #expect(withImages.takesImages(Self.id("t1")))
     }
 
     static func claudeSession(_ native: String = "s1", pid: Int = 42) -> AgentSession {

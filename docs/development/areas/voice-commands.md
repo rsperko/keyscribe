@@ -361,6 +361,11 @@ every rule above applies to it, with these sharpenings:
   reload command (`AgentConnectorCopy.extensionAgent`), so every agent's wording stays the same. A connector whose
   files are current but whose agent cannot say whether it is turned off is installed but unconfirmed
   (`AgentConnectorModel.State.unconfirmed`): never Ready, never repaired by an update, and checked again by Try Again.
+- **A host says who delivers each conversation's dictation** (`AgentHost.deliveryRoute`): the host itself, through
+  its own command or server (`deliver`), or the connector it installs, through the bridge `submit` path with its
+  receipts, steering and checks. The hub takes the declared route and never infers it from a delivery result: a host
+  that delivers and answers `.unsupported` sends nothing, rather than falling through to a connector. A conversation
+  its connector delivers takes images only when that connector's hello lists `images`.
 - **A dictation for the conversation in front is typed into it, so it is the user's own prompt.** A connector's own
   prompt runs once the agent is idle (Claude Code queues a plugin's prompt behind the turn; measured on 2.1.325,
   2026-11-14), and only a prompt the user enters is recorded as theirs. So for the conversation in front,

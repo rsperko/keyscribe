@@ -988,6 +988,11 @@ final class AgentHub {
         return (source, location)
     }
 
+    private func deliveringHost(of conversation: AgentConversation) -> (HostDiscovery, AgentHostLocation)? {
+        guard let (source, location) = host(of: conversation), source.host.deliveryRoute(at: location) == .host else { return nil }
+        return (source, location)
+    }
+
     static let defaultHostDeadline: Duration = .seconds(2)
 
     private static func within<T: Sendable>(_ deadline: Duration, otherwise late: T, _ call: @escaping @MainActor () async -> T) async -> T {
@@ -1160,15 +1165,15 @@ final class AgentHub {
     ) async -> AgentReceipt {
         if let source = startingHost(id) { return await start(text, through: source, request: request ?? makeId(), inFront: inFront) }
         let conversation = directory.conversations.first { $0.id == id }
-        if released, let request, exclusions.excludes(id) || conversation.flatMap(host(of:)) == nil { outbox.finish(request) }
+        if released, let request, exclusions.excludes(id) || conversation.flatMap(deliveringHost(of:)) == nil { outbox.finish(request) }
         if exclusions.excludes(id) { return .notSent(disconnected.first { $0.id == id }?.handle, reason: .disconnected) }
         guard let conversation else { return .notSent(nil, reason: .conversationEnded) }
         lastUsed[id] = now()
         let handle = conversation.handle
-        if released, host(of: conversation) == nil {
+        if released, deliveringHost(of: conversation) == nil {
             return .notSent(handle, reason: .hostTakesNoMessages(hubQueue(for: id)?.kind.displayName ?? conversation.agent))
         }
-        if let (source, location) = host(of: conversation) {
+        if let (source, location) = deliveringHost(of: conversation) {
             let request = request ?? makeId()
             let queuing = hubQueue(for: id) != nil
             let message = AgentOutbox.Message(id: request, conversation: id, text: text, images: images)
@@ -1273,6 +1278,7 @@ final class AgentHub {
                 return .notSent(handle, reason: .hostRefused(why))
             case .unsupported:
                 stopFollowingHosted(request, in: id)
+                return .notSent(handle, reason: .hostTakesNoMessages(source.kind.displayName))
             }
         }
         let message = AgentOutbox.Message(id: request ?? makeId(), conversation: id, text: text, images: images)
@@ -1295,7 +1301,6 @@ final class AgentHub {
         case .needsReview(let reason):
             return .kept(handle, reason: Self.kept(reason))
         case .disconnected:
-            if let (source, _) = host(of: conversation) { return .notSent(handle, reason: .hostTakesNoMessages(source.kind.displayName)) }
             return .notSent(handle, reason: .connectorNotRunning)
         }
     }
@@ -1820,7 +1825,7 @@ final class AgentHub {
 
     private func state(of id: String) -> AgentLiveState? {
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return nil }
-        if let (source, _) = host(of: conversation), source.host.queuesInHub { return conversation.state.named(by: waitingPrompts[id]) }
+        if let (source, _) = deliveringHost(of: conversation), source.host.queuesInHub { return conversation.state.named(by: waitingPrompts[id]) }
         guard conversation.connectorLive else { return nil }
         if handingOff[id] != nil { return .working }
         if running[id] != nil, conversation.state == .idle { return .working }
@@ -2007,7 +2012,8 @@ final class AgentHub {
     }
 
     private func steers(_ id: String) -> Bool {
-        if let conversation = directory.conversations.first(where: { $0.id == id }), let (source, _) = host(of: conversation), source.host.queuesInHub {
+        if let conversation = directory.conversations.first(where: { $0.id == id }), let (source, _) = deliveringHost(of: conversation),
+           source.host.queuesInHub {
             return true
         }
         return features[id]?.contains("steer") == true && busyAndFree(id)
@@ -2220,6 +2226,12 @@ final class AgentHub {
     }
 
     private func hubQueue(for conversation: String) -> HostDiscovery? {
+        if let known = (directory.conversations + disconnected).first(where: { $0.id == conversation }) {
+            guard let location = known.host, let source = hosts.first(where: { $0.kind.id == location.host }),
+                  source.host.queuesInHub, source.host.deliveryRoute(at: location) == .host
+            else { return nil }
+            return source
+        }
         let agent = AgentSessionID.agent(of: conversation)
         return hosts.first { $0.kind.id == agent && $0.host.queuesInHub }
     }
@@ -2250,7 +2262,7 @@ final class AgentHub {
     func typedCount(_ session: String) -> Int { typedCounts[session] ?? 0 }
 
     func takesImages(_ session: String) -> Bool {
-        if let conversation = directory.conversations.first(where: { $0.id == session }), let (source, _) = host(of: conversation) {
+        if let conversation = directory.conversations.first(where: { $0.id == session }), let (source, _) = deliveringHost(of: conversation) {
             return source.host.takesImages
         }
         return features[session]?.contains("images") == true

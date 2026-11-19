@@ -59,6 +59,11 @@ public enum AgentHostFront: Equatable, Sendable {
     case unsupported
 }
 
+public enum AgentHostDeliveryRoute: Equatable, Sendable {
+    case host
+    case connector
+}
+
 public enum AgentHostDelivery: Equatable, Sendable {
     case accepted
     case queued
@@ -78,6 +83,7 @@ public protocol AgentHost: AnyObject {
     func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront
     func focusedWindow() -> AgentHostApp?
     func copyInFront() -> AgentHostCopy?
+    func deliveryRoute(at location: AgentHostLocation) -> AgentHostDeliveryRoute
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery
     func rename(_ location: AgentHostLocation, to name: String) async -> Bool
     func observe(_ event: AgentEvent)
@@ -98,6 +104,7 @@ extension AgentHost {
     }
     public func focusedWindow() -> AgentHostApp? { nil }
     public func copyInFront() -> AgentHostCopy? { nil }
+    public func deliveryRoute(at location: AgentHostLocation) -> AgentHostDeliveryRoute { .host }
     public func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
         .unsupported
     }
