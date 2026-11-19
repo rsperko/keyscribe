@@ -711,6 +711,96 @@ struct AgentHostTests {
         #expect(Set(hub.directory.conversations.map(\.id)) == [Self.id("t1"), Self.id("t2")])
     }
 
+    @Test func aStateTheHostReportsShowsOnItsRowWithoutListingAgain() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1"), Self.thread("t2")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        let before = host.scans
+        host.watcher?(.state(Self.location("t1"), .working))
+        #expect(hub.directory.conversations.first { $0.id == Self.id("t1") }?.state == .working)
+        #expect(hub.directory.conversations.first { $0.id == Self.id("t2") }?.state == .idle)
+        host.watcher?(.state(Self.location("t1"), .waitingApproval))
+        #expect(hub.directory.conversations.first { $0.id == Self.id("t1") }?.state == .waitingApproval)
+        #expect(host.scans == before)
+    }
+
+    @Test func aListingAfterTheReportedStateIsWhatTheRowShows() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        host.watcher?(.state(Self.location("t1"), .working))
+        let before = host.scans
+        host.watcher?(.listing)
+        #expect(await BBHostTests.within { host.scans > before })
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.directory.conversations.first?.state == .idle)
+    }
+
+    @Test func aStateForAConversationTheHostNeverListedOrAnotherHostIsIgnored() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        host.watcher?(.state(Self.location("gone"), .working))
+        host.watcher?(.state(AgentHostLocation(host: "other", instance: Self.instance, native: "t1"), .working))
+        #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
+        #expect(hub.directory.conversations.first?.state == .idle)
+    }
+
+    @Test func aTurnTheConnectorReportsAfterTheHostsStateIsWhatTheRowShows() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        var hello = Self.hello(Self.id("t1"), features: ["promptDigest", "readiness", "notify"])
+        hello.agent = "example"
+        hello.idle = true
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(hello))
+        await hub.rescan()
+        host.watcher?(.state(Self.location("t1"), .working))
+        #expect(hub.directory.conversations.first?.state == .working)
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "done", after: nil))
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.directory.conversations.first?.state == .idle)
+        host.watcher?(.state(Self.location("t1"), .working))
+        #expect(hub.directory.conversations.first?.state == .working)
+    }
+
+    @Test func aHelloThatReportsNoTurnsKeepsTheStateTheHostReported() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        host.watcher?(.state(Self.location("t1"), .working))
+        var hello = Self.hello(Self.id("t1"), features: ["promptDigest"])
+        hello.agent = "example"
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(hello))
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.directory.conversations.first?.state == .working)
+    }
+
+    @Test func aPromptTheConnectorReportsOutranksTheHostsState() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        var hello = Self.hello(Self.id("t1"), features: ["promptDigest", "readiness"])
+        hello.agent = "example"
+        hello.waiting = AgentPrompt(kind: "confirm", title: "Run it?")
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(hello))
+        await hub.rescan()
+        host.watcher?(.state(Self.location("t1"), .working))
+        #expect(hub.directory.conversations.first?.state == .userDialog)
+    }
+
     @Test func aStoppedHubStopsWatchingItsHosts() {
         let host = FakeHost()
         let hub = makeHub(host)

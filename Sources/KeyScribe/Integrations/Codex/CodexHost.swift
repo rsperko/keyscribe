@@ -25,6 +25,7 @@ final class CodexHost: AgentHost {
     }()
 
     nonisolated static let callTimeout: TimeInterval = 3
+    nonisolated static let stopCheckTimeout: TimeInterval = 1
     nonisolated static let pageLimit = 10
     nonisolated static let paneLifetime: TimeInterval = 5
     nonisolated static let ownPromptMemory = 16
@@ -38,6 +39,7 @@ final class CodexHost: AgentHost {
         var threads: [String: CodexThread] = [:]
         var listedAt: Date?
         var notices = 0
+        var statusRevisions: [String: Int] = [:]
         var foreignPrompt: [String: Date] = [:]
         var panes: (at: Date, panes: [HostPane])?
     }
@@ -272,14 +274,31 @@ final class CodexHost: AgentHost {
         switch notification {
         case .statusChanged(let id, let status):
             if home.threads[id] == nil { home.listedAt = nil }
+            home.statusRevisions[id, default: 0] += 1
+            let revision = home.statusRevisions[id]
             let was = home.threads[id]?.status.liveState
-            home.threads[id]?.status = status
             let state = status.liveState
             let asking: Set<AgentLiveState> = [.waitingApproval, .waitingQuestion]
             if let was, asking.contains(was), !(state.map(asking.contains) ?? false) {
                 changed?(.event(.waiting(session: key(id, in: folder), prompt: nil)))
             }
-            if state == .idle, let was, was != .idle { checkStopped(id, in: folder) }
+            if state == .idle, let was, was != .idle {
+                let current: @MainActor () -> Bool = { [weak self] in
+                    guard let home = self?.homes[folder] else { return false }
+                    return home.generation == generation && home.statusRevisions[id] == revision
+                }
+                checkStopped(id, in: folder, while: current) { [weak self] in
+                    guard let self, current(), let home = self.homes[folder] else { return }
+                    home.threads[id]?.status = status
+                    self.changed?(.state(AgentHostLocation(host: Self.kind.id, instance: folder, native: id), .idle))
+                }
+                return
+            }
+            home.threads[id]?.status = status
+            if was != nil, let state {
+                changed?(.state(AgentHostLocation(host: Self.kind.id, instance: folder, native: id), state))
+                return
+            }
         case .nameUpdated(let id, let name):
             if home.threads[id] == nil { home.listedAt = nil }
             home.threads[id]?.name = name
@@ -289,6 +308,7 @@ final class CodexHost: AgentHost {
             home.listedAt = nil
         case .closed(let id):
             home.threads[id] = nil
+            home.statusRevisions[id] = nil
             home.listedAt = nil
         case .other:
             return
@@ -317,19 +337,22 @@ final class CodexHost: AgentHost {
         }
     }
 
-    private func checkStopped(_ id: String, in folder: String) {
-        guard let home = homes[folder], let client = home.client else { return }
+    private func checkStopped(
+        _ id: String, in folder: String, while current: @escaping @MainActor () -> Bool, then settled: @escaping @MainActor () -> Void
+    ) {
+        guard let home = homes[folder], let client = home.client else { return settled() }
         let generation = home.generation
         Task { @MainActor [weak self] in
             struct List: Encodable, Sendable {
                 var threadId: String
                 var limit = 1
             }
-            guard let result = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.callTimeout),
-                  let last = CodexDelivery.turns(result)?.turns.first, last.status == "interrupted",
-                  let self, let home = self.homes[folder], home.generation == generation
-            else { return }
-            self.changed?(.event(.turnComplete(session: self.key(id, in: folder), reason: "aborted", answer: "", turn: last.id)))
+            let result = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.stopCheckTimeout)
+            if let result, let last = CodexDelivery.turns(result)?.turns.first, last.status == "interrupted", current(),
+               let self, let home = self.homes[folder], home.generation == generation {
+                self.changed?(.event(.turnComplete(session: self.key(id, in: folder), reason: "aborted", answer: "", turn: last.id)))
+            }
+            settled()
         }
     }
 

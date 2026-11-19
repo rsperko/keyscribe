@@ -50,6 +50,7 @@ public struct AgentHostCopy: Equatable, Sendable {
 public enum AgentHostChange: Equatable, Sendable {
     case listing
     case event(AgentEvent)
+    case state(AgentHostLocation, AgentLiveState)
 }
 
 public enum AgentHostFront: Equatable, Sendable {
@@ -149,7 +150,7 @@ final class HostDiscovery: AgentDiscovery {
     private var wanted = false
     private var prompting: [String: Date] = [:]
     private var answeredSinceList: Set<String> = []
-    private var turning: [String: (working: Bool, at: Date)] = [:]
+    private var observed: [String: (state: AgentLiveState, at: Date, byHost: Bool)] = [:]
     private var reportsTurns: Set<String> = []
 
     init(_ integration: AgentHostIntegration, allowed: @escaping @MainActor () -> Bool, now: @escaping () -> Date = Date.init) {
@@ -170,16 +171,16 @@ final class HostDiscovery: AgentDiscovery {
             prompt(hello.session, open: hello.waiting != nil)
             if hello.reportsTurn, hello.features.contains("readiness") {
                 reportsTurns.insert(hello.session)
-                turning[hello.session] = (!hello.knownIdle, now())
+                observed[hello.session] = (hello.knownIdle ? .idle : .working, now(), false)
             } else {
                 reportsTurns.remove(hello.session)
-                turning[hello.session] = nil
+                if observed[hello.session]?.byHost == false { observed[hello.session] = nil }
             }
         case .waiting(let session, let prompt): self.prompt(session, open: prompt != nil)
-        case .turnStarted(let session, _, _): if reportsTurns.contains(session) { turning[session] = (true, now()) }
+        case .turnStarted(let session, _, _): if reportsTurns.contains(session) { observed[session] = (.working, now(), false) }
         case .turnComplete(let session, _, _, _, _):
             prompt(session, open: false)
-            if reportsTurns.contains(session) { turning[session] = (false, now()) }
+            if reportsTurns.contains(session) { observed[session] = (.idle, now(), false) }
         default: break
         }
     }
@@ -193,26 +194,36 @@ final class HostDiscovery: AgentDiscovery {
         }
     }
 
+    func note(_ state: AgentLiveState, at location: AgentHostLocation) {
+        guard location.host == kind.id else { return }
+        observed[location.conversationKey] = (state, now(), true)
+    }
+
     func retire(sessions: Set<String>) {
         prompting = prompting.filter { !sessions.contains($0.key) }
         answeredSinceList.subtract(sessions)
-        turning = turning.filter { !sessions.contains($0.key) }
+        observed = observed.filter { !sessions.contains($0.key) }
         reportsTurns.subtract(sessions)
     }
 
     private func withPrompts(_ scan: AgentScan) -> AgentScan {
-        guard case .found(let sessions, let extras) = scan, !prompting.isEmpty || !answeredSinceList.isEmpty || !turning.isEmpty else { return scan }
-        return .found(sessions.map { session in
+        guard case .found(let sessions, let extras) = scan else { return scan }
+        return .found(overlaid(sessions), extras)
+    }
+
+    func overlaid(_ sessions: [AgentSession]) -> [AgentSession] {
+        guard !prompting.isEmpty || !answeredSinceList.isEmpty || !observed.isEmpty else { return sessions }
+        return sessions.map { session in
             var shown = session
             if prompting[session.id] != nil {
                 shown.state = .userDialog
-            } else if let turn = turning[session.id] {
-                shown.state = turn.working ? .working : .idle
+            } else if let state = observed[session.id] {
+                shown.state = state.state
             } else if answeredSinceList.contains(session.id), [.waitingApproval, .waitingQuestion, .userDialog].contains(session.state) {
                 shown.state = .working
             }
             return shown
-        }, extras)
+        }
     }
 
     func expect() { last = nil }
@@ -237,7 +248,7 @@ final class HostDiscovery: AgentDiscovery {
             let idle = Set(sessions.filter { $0.state == .idle }.map(\.id))
             let listed = Set(sessions.map(\.id))
             prompting = prompting.filter { listed.contains($0.key) && ($0.value > started || !idle.contains($0.key)) }
-            turning = turning.filter { listed.contains($0.key) && $0.value.at > started }
+            observed = observed.filter { listed.contains($0.key) && $0.value.at > started }
             if isEnabled { answered = true }
         }
         return withPrompts(scan)

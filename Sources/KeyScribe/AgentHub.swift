@@ -249,6 +249,13 @@ final class AgentHub {
                 Task { [weak self] in await self?.rescan(rereadingTitles: false) }
             case .event(let event):
                 self.handle(event.renamingSession { AgentSessionID.make(agent: agent, native: $0) })
+            case .state(let location, let state):
+                guard location.host == agent, let listed = self.lastScan[agent],
+                      listed.contains(where: { $0.id == location.conversationKey })
+                else { return }
+                source.note(state, at: location)
+                self.lastScan[agent] = source.overlaid(listed)
+                self.refresh()
             }
         }
     }

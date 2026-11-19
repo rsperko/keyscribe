@@ -15,6 +15,7 @@ struct CodexHostTests {
         var noticeBeforeRead: (notice: String, thread: String)?
         var threads: [String: String] = [one: thread(one, status: #"{"type":"idle"}"#, name: "fix the build")]
         var lastTurn = "completed"
+        var noticeBeforeTurns: String?
         var clientAt = 0
         var renameFails = false
         var sentClient: String?
@@ -57,6 +58,10 @@ struct CodexHostTests {
                     inputs = params["input"] as? [[String: Any]] ?? []
                     return .result(#"{"turn":{"id":"turn-ours","status":"inProgress","items":[]}}"#)
                 case "thread/turns/list":
+                    if let notice = noticeBeforeTurns {
+                        noticeBeforeTurns = nil
+                        return .resultAfter(notification: notice, result: #"{"data":[{"id":"turn-ours","status":"\#(lastTurn)","items":[]}],"nextCursor":null}"#)
+                    }
                     if emptyReads > 0 {
                         emptyReads -= 1
                         return .result(#"{"data":[{"id":"turn-ours","status":"inProgress","items":[]}],"nextCursor":null}"#)
@@ -349,6 +354,42 @@ struct CodexHostTests {
         #expect(changes.all.contains(stopped))
     }
 
+    @Test func aStoppedTurnIsReportedStoppedBeforeTheConversationReadsIdle() async throws {
+        let script = Script()
+        script.set(Self.one, status: Self.working)
+        script.lastTurn = "interrupted"
+        let changes = Changes()
+        let (host, daemon, _) = try rig(script, changes: changes)
+        defer { daemon.stop() }
+        _ = await host.scan()
+        push(daemon, #"{"type":"idle"}"#)
+        let stopped = AgentHostChange.event(.turnComplete(session: location(daemon).conversationKey, reason: "aborted", answer: "", turn: "turn-ours"))
+        let idle = AgentHostChange.state(location(daemon), .idle)
+        await eventually { changes.all.contains(idle) }
+        let order = changes.all.filter { $0 == stopped || $0 == idle }
+        #expect(order == [stopped, idle])
+    }
+
+    @Test(arguments: ["completed", "interrupted"])
+    func aTurnThatStartsWhileTheStopCheckWaitsIsNotReportedIdleOrStopped(previous: String) async throws {
+        let script = Script()
+        script.set(Self.one, status: Self.working)
+        script.lastTurn = previous
+        script.noticeBeforeTurns = #"{"method":"thread/status/changed","params":{"threadId":"\#(Self.one)","status":\#(Self.working)}}"#
+        let changes = Changes()
+        let (host, daemon, _) = try rig(script, changes: changes)
+        defer { daemon.stop() }
+        _ = await host.scan()
+        push(daemon, #"{"type":"idle"}"#)
+        let working = AgentHostChange.state(location(daemon), .working)
+        await eventually { changes.all.contains(working) && daemon.methods().contains("thread/turns/list") }
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(changes.all.last { if case .state = $0 { true } else { false } } == working)
+        guard case .found(let sessions, _, _, _, _) = await host.scan() else { Issue.record("no listing"); return }
+        #expect(sessions.first?.state == .working)
+        #expect(!changes.all.contains { if case .event(.turnComplete) = $0 { true } else { false } })
+    }
+
     @Test func aTurnThatEndedNormallyIsNotReportedAsStopped() async throws {
         let script = Script()
         script.set(Self.one, status: Self.working)
@@ -385,7 +426,7 @@ struct CodexHostTests {
         #expect(await host.confirm(request: "r9", at: AgentHostLocation(host: "codex", instance: "/elsewhere", native: Self.one)) == nil)
     }
 
-    @Test func aStatusChangeTellsTheHubAtOnceAndAnAnsweredApprovalClearsTheWait() async throws {
+    @Test func aStatusChangeReportsTheThreadsStateWithoutListingAndAnAnsweredApprovalClearsTheWait() async throws {
         let script = Script()
         script.set(Self.one, status: Self.approving)
         let changes = Changes()
@@ -393,8 +434,9 @@ struct CodexHostTests {
         defer { daemon.stop() }
         _ = await host.scan()
         push(daemon, Self.working)
-        await eventually { changes.all.contains(.listing) }
-        #expect(changes.all.contains(.listing))
+        await eventually { changes.all.contains(.state(location(daemon), .working)) }
+        #expect(changes.all.contains(.state(location(daemon), .working)))
+        #expect(!changes.all.contains(.listing))
         #expect(changes.all.contains(.event(.waiting(session: location(daemon).conversationKey, prompt: nil))))
     }
 
