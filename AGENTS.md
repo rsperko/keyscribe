@@ -269,6 +269,19 @@ keyscribe/
 - **A fix covers every site of the pattern.** Before reporting a review finding fixed, grep for the same
   pattern elsewhere and fix the siblings too, and make its regression test reproduce the failing window
   itself (no reload before the retry, no loosened timing, no fixture that sidesteps the bug).
+- **A second review finding in the same mechanism puts the design in question, not the case.** When a fix
+  for a review finding needs a new stored value, flag, or branch, or when a finding lands in code written to
+  fix an earlier finding, stop patching. Say why the mechanism needs each piece of state it keeps, then look
+  for the design that removes it: take a fact from the source that already has it instead of inferring it and
+  correcting the inference later.
+- **State fed by events that can arrive in any order gets its orderings listed before the first fix.** Write
+  one table-driven test over the grid: each event before, between, and after the others, crossed with each
+  state the code tells apart. Assert the outcome of every cell. A test per reported case leaves the other
+  cells unexamined, and the next review finds one of them.
+- **A review reports the class, not the instance.** For each finding, name the mechanism, check its other
+  orderings and inputs, and report them together. When this round's findings sit in code added for the last
+  round's, lead with that and recommend the design change rather than another narrow fix. Suggest a fix shape
+  only after asking whether the state it patches can be removed.
 - **A behavior or name change updates every place that describes it.** Grep the user docs (README, FAQ,
   PRIVACY), `docs/reference/`, `docs/development/ui_design.md`, and in-app strings for the old name and
   for any promise about the behavior.
