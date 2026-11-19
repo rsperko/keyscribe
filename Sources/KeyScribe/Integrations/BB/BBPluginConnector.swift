@@ -357,7 +357,6 @@ final class BBPluginConnector: AgentConnector {
         removalUnfinishedAdvice: "The plugin was uninstalled in \(Branding.appName), but its files are still in place. Its threads no longer report. Finish uninstalling it, then install it again if you want it back.",
         listUnreadable: "bb didn\u{2019}t answer, so the plugin couldn\u{2019}t be checked. Open bb to check it.",
         noReason: "bb did not say why.",
-        manualUninstallLead: "To remove the plugin from bb, run these in a terminal:",
         manualUninstallAfterDisconnect: "Disconnected from \(Branding.appName). Run these in a terminal to finish uninstalling:",
         stillConnected: { count in
             count == 1

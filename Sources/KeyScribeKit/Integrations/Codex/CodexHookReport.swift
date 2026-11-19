@@ -19,9 +19,9 @@ public enum CodexHookReport {
             guard let turn else { return nil }
             return [.turnStarted(session: session, turn: turn, prompt: (hook["prompt"] as? String).map(AgentPromptDigest.of))]
         case "Stop":
-            return [.turnComplete(session: session, reason: "complete", answer: hook["last_assistant_message"] as? String ?? "")]
+            return [.turnComplete(session: session, reason: "complete", answer: hook["last_assistant_message"] as? String ?? "", turn: turn)]
         case "Interrupt":
-            return [.turnComplete(session: session, reason: "aborted", answer: "")]
+            return [.turnComplete(session: session, reason: "aborted", answer: "", turn: turn)]
         case "PermissionRequest":
             let input = hook["tool_input"] as? [String: Any]
             let prompt = AgentPrompt(

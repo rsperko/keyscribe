@@ -363,7 +363,9 @@ it reports that the command did not run.
 can address one. Its displayed and spoken name is the name the user sees for it: the user's KeyScribe
 override, else what herdr shows on its pane (the pane title a herdr hook sets, else the pane's label), else
 the name the user gave the agent in herdr, else the agent's explicit conversation name, else its herdr tab,
-else its workspace, else a name generated from the project folder. The pane comes before the agent's own
+else its workspace, else a name generated from the project folder, or from the agent's name while a host has not
+said which folder a new conversation is in yet (replaced by the folder's name once it does; a name no one could say
+is never kept). The pane comes before the agent's own
 name because that is what the user sees in herdr, and an agent's own name may be a title it generated. A
 deliberate name for one conversation beats a place that can hold several. The same order applies to the
 other places a conversation can run in, closest first: a tmux window the user renamed and a tmux session
@@ -2426,7 +2428,8 @@ through the host's own command, and that {appName} runs nothing of the host's un
 the next scan. While the host is on, a reason the host's list is missing (the tool isn't installed or isn't
 open, no app is known to use one of bb's data folders — “Open the copy of bb that uses ~/.bb-work to reach its threads. If it’s
 already open, {appName} can’t tell that it uses this folder.” — or its list couldn't be read) stays visible below its header as an advisory `IssueText` that says what to do next,
-whether or not other conversations are listed.
+whether or not other conversations are listed. A host with several copies names the copy each problem belongs to, and a closed
+copy is a problem only while no copy lists. A host's conversations count under that host whichever agent runs inside them.
 
 An integration's expanded row holds its setup and repair in place; ordinary management opens no sheet.
 Each integration is drawn from that agent's own adapter. Its expanded content is a **Configuration folders**
@@ -2457,7 +2460,11 @@ by a signal, printed no version, could not be started). Both are advisories, not
 the row's action; unless a command is chosen (the line under the row already names it), a collapsed **Where {app}
 looked** `DisclosureSection` under the row lists every path checked with where it came from, and says when the login
 shell could not be read. The manual uninstall commands below are offered only while the command is not found, never
-for one that is found but not working, whose fix is to choose or repair the command; an enrolled folder whose command
+for one that is found but not working, whose fix is to choose or repair the command, and only after the user chooses
+Uninstall there. Uninstall first undoes in the app whatever needs no command (Codex's title item); if that fails, the
+setup is left exactly as it was and the reason shows, with no commands, since following them would strand an edit the
+app made. Only then is the folder disconnected and the commands shown. Before that the row says the command wasn't found and
+that Uninstall gives the commands to finish; an enrolled folder whose command
 is not working still offers its Uninstall action. A chosen command shows under the row
 (“Uses the command you chose: …”) and is saved with that folder's enrollment, or held until it is installed.
 **Copy Details** copies the folder, the command search and its result, the `--version` result, the login

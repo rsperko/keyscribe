@@ -203,6 +203,7 @@ final class AgentOutput {
             case .stopped: "after a stopped turn \(it) takes only typed messages"
             case .expired: "\(it) timed out"
             case .refused: "\(it) wouldn\u{2019}t accept it"
+            case .hostRefused(let why): why.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
             case .disconnected: "\(it)\u{2019}s disconnected"
             case .hostTakesNoMessages(let host): "\(host) doesn\u{2019}t take messages from \(Branding.appName)"
             case .newConversationNotInFront(let host): "\(host)\u{2019}s page for a new conversation is no longer in front"
@@ -412,6 +413,7 @@ final class AgentOutput {
             case .stopped: "\(name)\u{2019}s last turn was interrupted, so it takes only a message you type. \(nothingSent) Type one there, then dictate again."
             case .expired: "\(name) didn\u{2019}t take it in time. \(nothingSent)"
             case .refused: "\(name) refused the message. \(nothingSent)"
+            case .hostRefused(let why): "\(name) didn\u{2019}t take the message: \(Self.sentence(why)) \(nothingSent)"
             case .disconnected: "\(name) is disconnected. \(nothingSent)"
             case .hostTakesNoMessages(let host): "\(name) is in \(host), which doesn\u{2019}t take messages from \(Branding.appName). \(nothingSent)"
             case .newConversationNotInFront(let host): "\(host)\u{2019}s page for a new conversation is no longer in front. \(nothingSent)"

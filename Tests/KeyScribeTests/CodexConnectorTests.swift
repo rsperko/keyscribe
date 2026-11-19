@@ -72,6 +72,21 @@ struct CodexConnectorTests {
         rig.codex.installedPath = rig.connector.pluginFolder(for: rig.home).path
     }
 
+    @Test func aCodexConversationCountsAsConnectedSinceItReportsThroughHooksRatherThanAConnection() async throws {
+        let rig = try rig()
+        let model = AgentsSettingsModel(
+            describeTerminal: { _ in nil }, agentsDir: rig.agents, setups: ConnectorSetupRegistry(directory: rig.agents),
+            connectors: [rig.connector], hosts: [CodexHost.kind])
+        await model.refresh()
+        let setup = try #require(model.connectors.first?.setups.first { $0.folder.path == rig.home.path })
+        let thread = AgentConversation(
+            id: "codex:t1@\(rig.home.path)", agent: "codex", pid: nil, cwd: "/src/app", handle: "app", state: .idle, connectorLive: false,
+            host: AgentHostLocation(host: "codex", instance: rig.home.path, native: "t1"))
+        model.show([thread])
+        #expect(setup.usedBy == ["app"])
+        #expect(setup.connectedCount == 1)
+    }
+
     @Test func installWritesThePluginAddsItToThisCodexHomeAndAddsTheThreadIdTitleItem() async throws {
         let rig = try rig(config: "model = \"x\"\n")
         try await installed(rig)
@@ -114,6 +129,136 @@ struct CodexConnectorTests {
         #expect(text(rig.config) == original)
         #expect(rig.codex.subcommands.suffix(2) == ["plugin remove keyscribe@keyscribe-local", "plugin marketplace remove"])
         #expect(!FileManager.default.fileExists(atPath: rig.connector.marketplaceFolder(for: rig.home).path))
+    }
+
+    @Test func anUninstallThatCannotTakeItsTitleItemBackFailsAndKeepsWhatARetryNeeds() async throws {
+        let rig = try rig(config: "[tui]\nterminal_title = [\"project-name\"]\n")
+        try await installed(rig)
+        try Data("[tui\nbroken".utf8).write(to: rig.config)
+        await #expect(throws: AgentConnectorError.self) { try await rig.connector.uninstall(tool: "/x/codex", target: rig.target) }
+        #expect(text(rig.config) == "[tui\nbroken")
+        #expect(rig.connector.hasFiles(in: rig.target))
+    }
+
+    @Test func anUpdateOverAMarketplaceCodexAlreadyHasSucceeds() async throws {
+        let rig = try rig(config: "[tui]\nterminal_title = [\"project-name\"]\n")
+        try await installed(rig)
+        let folder = rig.connector.marketplaceFolder(for: rig.home).path
+        let config = (text(rig.config) ?? "") + "\n[marketplaces.keyscribe-local]\nsource_type = \"local\"\nsource = \"\(folder)\"\n"
+        try Data(config.utf8).write(to: rig.config)
+        rig.codex.answer("plugin marketplace add", status: 1, stderr: "marketplace 'keyscribe-local' already exists")
+        try await rig.connector.update(tool: "/x/codex", target: rig.target)
+        rig.codex.answer("plugin marketplace add", status: 1, stderr: "no such folder")
+        try Data("[tui]\nterminal_title = [\"project-name\", \"thread-id\"]\n".utf8).write(to: rig.config)
+        await #expect(throws: AgentConnectorError.self) { try await rig.connector.update(tool: "/x/codex", target: rig.target) }
+    }
+
+    @Test func anUninstallCodexAlreadyFinishedSucceedsAndOneItCouldNotDoFails() async throws {
+        let rig = try rig(config: "[tui]\nterminal_title = [\"project-name\"]\n")
+        try await installed(rig)
+        rig.codex.answer("plugin remove", status: 1, stderr: "not installed")
+        rig.codex.answer("plugin marketplace remove", status: 1, stderr: "not found")
+        try await rig.connector.uninstall(tool: "/x/codex", target: rig.target)
+        #expect(!rig.connector.hasFiles(in: rig.target))
+        let again = try self.rig(config: "[tui]\nterminal_title = [\"project-name\"]\n")
+        try await installed(again)
+        let config = (text(again.config) ?? "") + "\n[plugins.\"keyscribe@keyscribe-local\"]\nenabled = true\n"
+        try Data(config.utf8).write(to: again.config)
+        again.codex.answer("plugin remove", status: 1, stderr: "permission denied")
+        await #expect(throws: AgentConnectorError.self) { try await again.connector.uninstall(tool: "/x/codex", target: again.target) }
+        #expect(again.connector.hasFiles(in: again.target))
+    }
+
+    @Test func anAppNameTheShellWouldReadIsWrittenIntoTheExecutableAsPlainText() throws {
+        let name = #"Ac"me $(touch /tmp/ks-never) `x` \ App"#
+        let filled = CodexConnector.filled("app=__APP_NAME__\nprintf '%s' \"$app\"\n", agentsDir: URL(fileURLWithPath: "/tmp/a"), app: name)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", filled]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        process.waitUntilExit()
+        let printed = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(try JSONDecoder().decode(String.self, from: Data("\"\(printed)\"".utf8)) == name)
+        #expect(!FileManager.default.fileExists(atPath: "/tmp/ks-never"))
+    }
+
+    @Test func anUninstallAfterTheUserDeletedTheConfigLeavesItDeleted() async throws {
+        let rig = try rig(config: "[tui]\nterminal_title = [\"project-name\"]\n")
+        try await installed(rig)
+        try FileManager.default.removeItem(at: rig.config)
+        try await rig.connector.uninstall(tool: "/x/codex", target: rig.target)
+        #expect(!FileManager.default.fileExists(atPath: rig.config.path))
+    }
+
+    @Test func uninstallingWithoutCodexTakesOurTitleItemBackBeforeTheFolderHoldingItsRecordIsDeleted() async throws {
+        let original = "[tui]\nterminal_title = [\"project-name\"]\n"
+        let rig = try rig(config: original)
+        try await installed(rig)
+        try await rig.connector.uninstallWithoutTool(target: rig.target)
+        #expect(text(rig.config) == original)
+        #expect(rig.connector.manualUninstall(for: rig.target).count == 3)
+        let again = try self.rig(config: original)
+        try await installed(again)
+        try Data("[tui\nbroken".utf8).write(to: again.config)
+        await #expect(throws: AgentConnectorError.self) { try await again.connector.uninstallWithoutTool(target: again.target) }
+    }
+
+    @Test func anUninstallWithoutCodexThatCannotTakeItsItemBackLeavesTheSetupAsItWas() async throws {
+        let original = "[tui]\nterminal_title = [\"project-name\"]\n"
+        let rig = try rig(config: original)
+        let registry = ConnectorSetupRegistry(directory: rig.agents)
+        func connector(finding: Bool) -> CodexConnector {
+            CodexConnector(
+                agentsDir: rig.agents, pluginName: "keyscribe", home: rig.home.deletingLastPathComponent(),
+                script: "#!/bin/sh\nagents=__AGENTS_DIR__\napp=__APP_NAME__\n",
+                run: { argv, subcommand, _, environment in rig.codex.run(argv, subcommand, environment) },
+                tools: ToolEnvironment(
+                    appEnvironment: ["PATH": "/test-bin"], shell: "/bin/zsh",
+                    execute: { _, _, _, _, _ in ToolCLI.Ran(end: .exited(0), output: Data("codex-cli 0.170.0".utf8)) },
+                    isExecutable: { finding && $0 == "/test-bin/codex" }),
+                trust: { _, _ in .trusted })
+        }
+        let found = AgentsSettingsModel(
+            describeTerminal: { _ in nil }, agentsDir: rig.agents, setups: registry, connectors: [connector(finding: true)], hosts: [CodexHost.kind])
+        await found.refresh()
+        let installing = try #require(found.connectors[0].setups.first { $0.folder.path == rig.home.path })
+        await installing.install()
+        rig.codex.installedPath = rig.connector.pluginFolder(for: rig.home).path
+        let installation = try #require(installing.target.installation)
+        try Data("[tui\nbroken".utf8).write(to: rig.config)
+        let missing = AgentsSettingsModel(
+            describeTerminal: { _ in nil }, agentsDir: rig.agents, setups: ConnectorSetupRegistry(directory: rig.agents),
+            connectors: [connector(finding: false)], hosts: [CodexHost.kind])
+        await missing.refresh()
+        let setup = try #require(missing.connectors[0].setups.first { $0.folder.path == rig.home.path })
+        #expect(setup.canUninstallWithoutTool)
+        await setup.remove()
+        #expect(setup.state == .failed(CodexConnector.titleNotRemoved))
+        await setup.refresh()
+        #expect(setup.manualUninstall.isEmpty)
+        #expect(setup.target.installation == installation && !setup.target.removing)
+        #expect(FileManager.default.fileExists(atPath: rig.connector.marketplaceFolder(for: rig.home).appendingPathComponent("title-item.json").path))
+    }
+
+    @Test func aConfigThatCannotBeReadKeepsTheRecordUninstallNeeds() async throws {
+        let rig = try rig(config: "[tui]\nterminal_title = [\"project-name\"]\n")
+        try await installed(rig)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: rig.config.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: rig.config.path) }
+        await #expect(throws: AgentConnectorError.self) { try await rig.connector.uninstallWithoutTool(target: rig.target) }
+        await #expect(throws: AgentConnectorError.self) { try await rig.connector.uninstall(tool: "/x/codex", target: rig.target) }
+        #expect(FileManager.default.fileExists(atPath: rig.connector.marketplaceFolder(for: rig.home).appendingPathComponent("title-item.json").path))
+    }
+
+    @Test func aConfigThatCannotBeReadIsNeverReplacedByAnInstall() async throws {
+        let original = "[tui]\nterminal_title = [\"project-name\"]\n"
+        let rig = try rig(config: original)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: rig.config.path)
+        await #expect(throws: AgentConnectorError.self) { try await rig.connector.install(tool: "/x/codex", target: rig.target) }
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: rig.config.path)
+        #expect(text(rig.config) == original)
     }
 
     @Test func aTitleItemTheUserAlreadyHadIsKeptOnUninstall() async throws {
@@ -171,6 +316,13 @@ struct CodexConnectorTests {
         try await installed(rig)
         rig.trust.result = nil
         #expect(await rig.connector.check(tool: "/x/codex", target: rig.target) == .status(.ready))
+    }
+
+    @Test func anAppServerThatListsNoneOfOurHooksSaysSo() async throws {
+        let rig = try rig()
+        try await installed(rig)
+        rig.trust.result = .absent
+        #expect(await rig.connector.check(tool: "/x/codex", target: rig.target) == .broken(CodexConnector.hooksNotListed))
     }
 
     @Test func nothingInstalledIsNotInstalledAndAHalfRemovedSetupIsUnfinished() async throws {

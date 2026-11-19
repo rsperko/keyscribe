@@ -309,7 +309,10 @@ final class SpokenResultOutput {
     ) {
         let settings = settings()
         let usable = connection(settings.connection).flatMap { permits($0) ? $0 : nil }
-        if plan == .nothing { return }
+        if plan == .nothing {
+            Log.agents.info("reply from \(handle, privacy: .private) not read aloud: it had no text")
+            return
+        }
         load()
         supersede(conversation, requested: requested)
         if requested { pendingRequested.insert(conversation) }
@@ -321,6 +324,7 @@ final class SpokenResultOutput {
             let shown = requested ? false : await inFront(conversation)
             guard !Task.isCancelled, let self else { return }
             guard !shown else {
+                Log.agents.info("reply from \(handle, privacy: .private) not read aloud: it was in front when it finished")
                 self.generating.removeValue(forKey: key)
                 if let origin { self.onUnread?(.inFront(name: handle), origin) }
                 return self.settle()

@@ -24,6 +24,42 @@ struct AgentOutboxTests {
         #expect(outbox.held.isEmpty)
     }
 
+    @Test func aMessageBeingSentStaysFirstSoNothingForItsConversationOvertakesIt() {
+        var outbox = AgentOutbox()
+        _ = outbox.send(message("m1"), state: .working)
+        _ = outbox.send(message("m2"), state: .working)
+        _ = outbox.send(message("m3", to: "s2"), state: .working)
+        let first = outbox.release(state: { _ in .idle }, keeping: { $0.conversation == "s1" })
+        #expect(first.map(\.message.id) == ["m1", "m3"])
+        #expect(outbox.held.map(\.id) == ["m1", "m2"])
+        #expect(outbox.release(state: { _ in .idle }, keeping: { _ in true }).isEmpty)
+        #expect(outbox.send(message("m4"), state: .idle) == .queue(.working))
+        outbox.finish("m1")
+        #expect(outbox.release(state: { _ in .idle }, keeping: { _ in true }).map(\.message.id) == ["m2"])
+    }
+
+    @Test func aMessageTheConversationCouldNotTakeYetKeepsItsPlaceAndWhatHappenedWhileItWasBeingSent() {
+        var outbox = AgentOutbox()
+        _ = outbox.send(message("m1"), state: .working)
+        _ = outbox.send(message("m2"), state: .working)
+        _ = outbox.release(state: { _ in .idle }, keeping: { _ in true })
+        outbox.noteTyped(conversation: "s1")
+        outbox.retry("m1", at: Date())
+        #expect(outbox.held.map(\.id) == ["m1", "m2"])
+        let released = outbox.release(state: { _ in .idle }, keeping: { _ in true })
+        #expect(released.map(\.message.id) == ["m1"])
+        #expect(released.first?.decision == .needsReview(.typedSince))
+    }
+
+    @Test func withdrawingAConversationLeavesTheMessageBeingSentToFinish() {
+        var outbox = AgentOutbox()
+        _ = outbox.send(message("m1"), state: .working)
+        _ = outbox.send(message("m2"), state: .working)
+        _ = outbox.release(state: { _ in .idle }, keeping: { _ in true })
+        #expect(outbox.withdraw(conversation: "s1").map(\.id) == ["m2"])
+        #expect(outbox.held.map(\.id) == ["m1"])
+    }
+
     @Test func aMessageForAPromptBoxIsEnteredThereAndNotHeld() {
         var outbox = AgentOutbox()
         #expect(outbox.send(message("m1"), state: .working, canEnterPromptBox: true) == .enterPromptBox)

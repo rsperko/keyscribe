@@ -52,7 +52,7 @@ final class ExtensionDiscovery: AgentDiscovery {
         case .turnStarted(let session, _, _):
             mark(&inTurn, session, true)
             resolve(session)
-        case .turnComplete(let session, _, _, _):
+        case .turnComplete(let session, _, _, _, _):
             mark(&inTurn, session, false)
             resolve(session)
         case .waiting(let session, let prompt):

@@ -87,7 +87,8 @@ struct BBPluginConnectorTests {
 
     @Test func pluginCommandsReachTheServerTheDataFolderRecords() async throws {
         let (home, agents) = scratch()
-        try Data(#"{"entryPath":"/nix/store/x/bb-app.js","pid":\#(getpid()),"serverUrl":"http://127.0.0.1:4411"}"#.utf8)
+        let written = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(Date())
+        try Data(#"{"entryPath":"/nix/store/x/bb-app.js","pid":\#(getpid()),"serverUrl":"http://127.0.0.1:4411","startedAt":"\#(written)"}"#.utf8)
             .write(to: home.appendingPathComponent(".bb/bb-app-runtime.json"))
         let calls = Calls()
         calls.set("plugin list", listing(agents))

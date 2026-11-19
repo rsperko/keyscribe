@@ -127,7 +127,7 @@ struct AgentsSettingsModelTests {
         let marketplace = ClaudeConnectorInstaller.marketplaceDir(in: dir, setupFolder: folder)
         try FileManager.default.createDirectory(at: marketplace, withIntermediateDirectories: true)
         await model.refresh()
-        #expect(!setup(model).manualUninstall.isEmpty)
+        #expect(setup(model).canUninstallWithoutTool)
         let chosen = dir.appendingPathComponent("broken-claude")
         try Data("#!/bin/sh\nexit 1\n".utf8).write(to: chosen)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: chosen.path)
@@ -330,20 +330,23 @@ struct AgentsSettingsModelTests {
         #expect(setup(model).manualUninstall.isEmpty)
         #expect(!setup(model).canUninstallWithoutTool)
         #expect(setup(model).manualUninstallLead == nil)
+        #expect(setup(model).uninstallWithoutToolNote == nil)
 
         await setup(installed).install()
         model.setups.reload()
         await model.refresh()
         #expect(setup(model).canUninstallWithoutTool)
-        #expect(setup(model).manualUninstallLead == "To remove the connector from Claude Code, run these in a terminal, then run /reload-plugins in each open conversation or restart it:")
+        #expect(setup(model).uninstallWithoutToolNote == "Claude Code wasn\u{2019}t found. Choose Uninstall to remove the connector here and get the commands that finish it in a terminal.")
+        #expect(setup(model).manualUninstall.isEmpty)
+        #expect(setup(model).manualUninstallLead == nil)
+
+        await setup(model).remove()
+        #expect(!setup(model).canUninstallWithoutTool)
+        #expect(setup(model).uninstallWithoutToolNote == nil)
         #expect(setup(model).manualUninstall == [
             "env -u CLAUDE_CONFIG_DIR claude plugin uninstall keyscribe-dev@keyscribe-dev-local --scope user",
             "env -u CLAUDE_CONFIG_DIR claude plugin marketplace remove keyscribe-dev-local",
         ])
-
-        await setup(model).remove()
-        #expect(!setup(model).canUninstallWithoutTool)
-        #expect(setup(model).manualUninstall.count == 2)
         #expect(setup(model).manualUninstallLead == "Disconnected from \(Branding.appName). Run these in a terminal to finish uninstalling, then run /reload-plugins in each open conversation or restart it:")
     }
 

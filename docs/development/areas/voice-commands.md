@@ -277,7 +277,8 @@ every rule above applies to it, with these sharpenings:
   `SourceInvariantsTests` pins it. A label must be shown by that surface's current
   configuration (tmux with its status line and pane borders off shows none), must be one the surface keeps
   apart from the title a program writes through OSC 0/2 (which Claude Code and Pi set to generated text, so
-  it is never read: herdr's `terminal_title`, and Terminal.app's custom title, which receives it), and must be
+  it is never read: herdr's `terminal_title`, and Terminal.app's custom title, assumed but not yet checked to receive it: run
+  `KeyScribe --title-probe` with Codex in Terminal.app and record what it prints before relying on it), and must be
   joined to the conversation by its tty, pid or environment. An outer title that mirrors the active inner
   pane belongs to that pane alone, never to every conversation behind it. `.title` is for a separate,
   hook-set display field; `.agent` for a handle the surface's own commands target. A new reader is checked
@@ -671,11 +672,13 @@ every rule above applies to it, with these sharpenings:
   its threads are keyed by that folder, and every call for them runs that folder's own command with that folder as
   `BB_DATA_DIR` and a fixed environment that turns bb's telemetry off, never the app's own. The one value taken from
   the folder is the server its runtime record names (`serverUrl`), as `BB_SERVER_URL`, only when that server is on this
-  Mac (http or https) and only while the process that wrote the record is alive (`BBBuilds.environment`): bb's command
+  Mac (http or https) and only while the process that wrote the record still runs (`BBBuilds.environment`): the record's
+  process must be the user's own and must have started no later than the record's `startedAt`, so a process id reused
+  after a crash, which starts later, or one belonging to another user, never counts. bb's command
   otherwise goes to the default port, which for a copy started on another port is a different copy's server. A record
   left behind by a crash names a port another copy may now hold, so it is ignored while its process is gone, and bb's
-  command finds its server as bb's own `bin/bb` would; a reused process id defeats that check until bb rewrites the
-  record. A failed match for an app that names a folder is never cached, so a folder set up while
+  command finds its server as bb's own `bin/bb` would. A record without `startedAt` is never trusted. bb 0.49.0's record carries `pid`, `serverUrl` and `startedAt`
+  (ISO 8601 with milliseconds), and its process started under a second before that time (measured on 2026-11-17). A failed match for an app that names a folder is never cached, so a folder set up while
   that app is in front is found on the next take. When an app that is one of bb's copies launches or quits, the host
   says its list changed (`AgentHost.watch`), and the hub scans it again at once instead of at its next interval. A
   copy that just launched may not be serving yet, so until its folder lists the host asks again a bounded number of
@@ -683,7 +686,9 @@ every rule above applies to it, with these sharpenings:
   app path's resolved form is kept for the life of the app, so a symlink retargeted while it runs keeps its old
   answer until relaunch. A build that is closed or
   could not be read keeps the threads it last listed, as Last seen, while the others are listed fresh
-  (`AgentHostScan.found`'s `carried`); only when no build could be read is the list unreadable. Delivery uses `--mode auto`, which steers a
+  (`AgentHostScan.found`'s `carried`); only when no build could be read is the list unreadable. A closed build is
+  not a problem while another build lists, since a copy the user is not running is not a fault; a build that could
+  not list is, and its problem names that build. Delivery uses `--mode auto`, which steers a
   running turn and starts one when the thread is idle, as typing in bb does. The hub holds nothing back for an open
   approval: bb queues the message itself and answers `queued` (measured with bb 0.49.0 on 2026-11-15, Claude Code in
   a thread stopped on a command approval). The approval stayed open, the message sat in bb's queue as
@@ -696,8 +701,9 @@ every rule above applies to it, with these sharpenings:
   queued, its error envelope as refused in plain words, and anything else as uncertain; bb's error code goes to
   the log as public and its message as private, since a message could echo what was sent. Open only asks:
   bb's answer counts the clients it broadcast to, not a window that showed the thread, so it reads as requested, and bb is brought forward only when some client took it and the open is
-  still wanted. In-front comes from bb's plugin (below), since bb's command reports no focused thread. While bb's app is not running its
-  command is not run at all; the command never starts bb's server either (it fails at once, measured with bb
+  still wanted. In-front comes from bb's plugin (below), since bb's command reports no focused thread. While neither bb's app runs nor the process its runtime record names serves on this Mac
+  (`BBBuilds.serves`), its command is not run at all; a server left running after its app quits still lists, takes
+  messages and renames, but Open needs a window, so it waits for the app. The command never starts bb's server either (it fails at once, measured with bb
   0.49.0 on 2026-11-14). Its data folder is not watched: bb writes its database every few seconds even while
   idle (measured 2026-11-14), so a watch would run its command constantly. A thread nested under another
   is listed like any other: bb's `parentThreadId` is where the thread sits in its sidebar, which the user can
@@ -863,21 +869,38 @@ every rule above applies to it, with these sharpenings:
   home (`~/.codex`, or the folder `CODEX_HOME` names) is its own instance. KeyScribe connects as a local client to
   that home's control socket (`app-server-control/app-server-control.sock`) and never starts, restarts or stops the
   server; a socket that does not answer reads as the app server not running (`CodexHost.daemonDown`), never as no
-  conversations. A Codex started with settings flags that keep it off the app server, and conversations in the
+  conversations. Callers that need the server at once share one connection attempt per home, so a scan and a send
+  started together never cancel each other. The full list (`thread/loaded/list` and a `thread/read` per thread) is
+  read on connect, when a thread starts or closes, and at most a minute apart otherwise; status and name changes are
+  applied to the last list as they arrive, so a busy conversation never makes every notification a relist. A
+  list a notification arrived during is read again before it is used (a bounded number of times), since the read
+  may predate it; a notification for a thread the list does not have yet makes the next scan read the list. A Codex started with settings flags that keep it off the app server, and conversations in the
   ChatGPT app, are not listed, and the codex bundled in that app is never used or counted as an install
   (`CodexInstall.find`). Auto-generated naming threads are not listed. A conversation's title is its name, like a
   tab label, and a rename sets the Codex thread name (`thread/name/set`).
 - **Codex delivery starts a turn on an idle conversation and steers a working one** (`CodexDelivery.precheck`,
   `CodexHost.send`). Idle sends `turn/start`; working reads the running turn and sends `turn/steer` with that
   `expectedTurnId`, so a turn that ended in between is refused rather than joined, and is then sent as a new turn
-  only when the conversation reads idle. Every send carries a `clientUserMessageId` KeyScribe chose, with pasted
+  only when the conversation reads idle; if it still reads busy the message was not taken, so the host answers
+  `queued` and the hub holds it to try again, at each state change until the turn ends (two or three app-server
+  calls a try). A message Codex did not take is forgotten as KeyScribe's own, so the
+  user typing the same words later still reads as typed. Every send carries a `clientUserMessageId` KeyScribe chose, with pasted
   images as `localImage` inputs, and settles as sent once that id appears in the conversation's latest turns,
   re-read for a bounded moment because Codex records it shortly after answering; anything unread is uncertain. A message
   for a conversation waiting on an approval, a question or an unknown state is held in the hub's own queue
   (`AgentHost.queuesInHub`, `AgentOutbox`), under the same rules as a connector's: released when the prompt is
   answered or the turn ends, kept for review when the user typed (Codex's own prompts arrive as `typed`) or stopped
   the turn (the hooks' `Interrupt`, or an interrupted last turn the host reads when the conversation goes idle), and
-  reported not sent when the conversation is gone. A host that answers `queued` (a prompt typed a moment ago) puts
+  reported not sent when the conversation is gone. Every send to such a host, new or released, holds
+  its conversation's first place in that queue while it is sent (`AgentOutbox`'s `keeping`), so messages leave one
+  at a time in the order spoken, a new dictation waits behind it, and typing or a stopped turn while it is sent still
+  marks it. One the host answers `queued` keeps its place and those marks (`AgentOutbox.retry`). Every `queued` the
+  Codex host gives is followed by an event: a prompt typed a moment ago is waited out inside the host (it sleeps the
+  rest of `CodexDelivery.foreignPromptSettle` and decides again), an approval or a question ends with a status change,
+  and a running turn ends with its stop. So the hub does not poll. While the turn runs it waits for that event with no
+  deadline; a message marked by typing or a stopped turn goes to review at once; in any other state (an unknown status,
+  a system error), `heldLimit` of time spent outside a running turn bounds it, with one timer per conversation and one
+  last try at the deadline before it is reported not sent as timed out. One whose conversation was disconnected meanwhile is reported not sent instead. A release the hub stopped before is never sent. A host that answers `queued` (a prompt typed a moment ago) puts
   the message back in that queue. An uncertain send is checked once more after `hostConfirmDelay` through
   `AgentHost.confirm`, which looks for KeyScribe's own message id. KeyScribe never answers
   an approval or a question and never uses Codex's own message queue, and a held message cannot be withdrawn from
@@ -885,7 +908,14 @@ every rule above applies to it, with these sharpenings:
 - **Codex's plugin reports through hooks, not a connection** (`CodexPlugin`, `CodexHookReport`, sources in
   `Resources/CodexConnector`). Its hooks (prompt submitted, turn stopped, interrupted, permission request, and the
   plan-mode question tool) each run `agents/codex/keyscribe-codex`, which posts the payload to `POST /report` and
-  exits 0, sending nothing when KeyScribe is not running (config_schema.md, Agent bridge); a payload over the bridge's
+  exits 0. The post is synchronous so the hub hears a turn's events in the order Codex ran them (a Stop that overtook
+  its prompt would lose the reply), and bounded to half a second so a stalled app barely delays a hook. A post cut off there is lost, not retried: a lost
+  prompt leaves that turn's reply unread, and a lost Stop leaves the conversation reading as working until its next
+  turn or the next listing that reads it idle. A Stop or Interrupt carries its turn, and so does the interrupted turn the host
+  finds on its own, and the hub drops a second end of a turn that already ended, before anything else sees it (the app
+  server's turn ids are the session record's `turn_id`s, measured with codex-cli 0.170.0 on 2026-11-19); the end of any other turn is taken, since how Codex numbers a
+  turn a message was steered into has not been observed. It sends nothing
+  when KeyScribe is not running (config_schema.md, Agent bridge); a payload over the bridge's
   frame limit is cut to the fields KeyScribe reads, with long text shortened. A waiting prompt
   is the approval's tool and command or the question's text. The same executable serves the plugin's
   `tell_me_when_done` tool as an auto-approved MCP server; its one wait is bounded and a timeout promises nothing.
@@ -894,8 +924,25 @@ every rule above applies to it, with these sharpenings:
   `/hooks`, and Settings reads that trust from the app server. Status changes, a cleared approval and the agent's
   last words for a prompt reach the hub as they happen (`AgentHost.watch`). Each conversation is joined to the
   `codex` process whose terminal pane title carries its thread id, through the `thread-id` title item the install
-  adds (`CodexPaneTitle`, `TerminalTitleReader`), so Open and in front use the same terminal routes agents use;
-  the focused window's title is the fallback for a terminal without a pane title read. Check `CodexHost` for Stop
+  adds (`CodexPaneTitle`, `TerminalTitleReader`), so Open and in front use the same terminal routes agents use.
+  Each terminal or multiplexer is read once per scan, all at once and off the cooperative pool, and the reader returns
+  after a budget below the scan deadline with whatever answered; a source that failed, refused or ran past the budget
+  leaves its processes unread, never titleless, so the host keeps their last known pane and reads them again on the
+  next scan. The budget is an injected wait (`TerminalTitleReader.Wait`) handed a count of the sources that have
+  answered, raised only after an answer is queued; production ignores the count, and tests use it to end the budget
+  right after a fast source answers, so keep it even though production never reads it. Title commands read standard
+  output only. A Ghostty pane the user renamed shows that name instead of
+  Codex's title, so it is not joined. The install records how it changed `config.toml` (`CodexTitleItem.Record`,
+  kept when Update puts a removed item back), and install and uninstall refuse rather than go on when the file
+  cannot be read (only a missing file counts as empty) or has since changed into a shape it cannot safely edit, so the record a retry needs is never deleted. Uninstalling without
+  Codex takes the item back the same way before the manual steps delete the folder holding the record
+  (`AgentConnector.uninstallWithoutTool`). `hooks/list` with `cwds: [codexHome]` lists a plugin's hooks with their
+  trust (measured with codex-cli 0.170.0 on 2026-11-19: `untrusted` right after install, `trusted` once trusted), and a
+  running daemon lists a plugin installed after it started at once, with no restart (same version and date), so a check
+  that finds none of ours says only that, and offers Update;
+  the focused window's title is the fallback for a terminal without a pane title read. A title names a thread only
+  when a word of it starts with the thread id (`CodexPaneTitle`), so a session file name or path that contains the id,
+  as an editor or browser shows it, is never that thread, while Codex in any terminal still is. Check `CodexHost` for Stop
   before documenting it for Codex.
 - **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
   process group, with content on standard input rather than in the arguments. Standard output (the only

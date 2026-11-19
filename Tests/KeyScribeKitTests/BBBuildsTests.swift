@@ -25,27 +25,58 @@ struct BBBuildsTests {
         #expect(BBBuilds.app(runtime: nil, launcher: nil) == nil)
     }
 
+    private static let recorded = "2026-11-17T13:15:23.046Z"
+    private static let recordedAt = Date(timeIntervalSince1970: 1_794_921_323.046)
+
+    private static func ours(_ pid: Int32) -> Date? { pid == 41 ? recordedAt.addingTimeInterval(-0.8) : nil }
+
     @Test func bbsCommandIsPointedAtTheServerItsDataFolderRecordsOnThisMac() {
-        let record = { (url: String) in Data(#"{"entryPath":"/x/bb.js","pid":41,"serverUrl":"\#(url)"}"#.utf8) }
-        let alive: (Int32) -> Bool = { $0 == 41 }
+        let record = { (url: String) in Data(#"{"entryPath":"/x/bb.js","pid":41,"serverUrl":"\#(url)","startedAt":"\#(Self.recorded)"}"#.utf8) }
         let base = ["HOME": "/Users/a", "PATH": "/usr/bin:/bin", "BB_TELEMETRY": "false", "BB_DATA_DIR": "/Users/a/.bb-work"]
-        #expect(BBBuilds.environment(folder: "/Users/a/.bb-work", home: "/Users/a", runtime: record("http://127.0.0.1:4411"), alive: alive)
+        #expect(BBBuilds.environment(folder: "/Users/a/.bb-work", home: "/Users/a", runtime: record("http://127.0.0.1:4411"), started: Self.ours)
             == base.merging(["BB_SERVER_URL": "http://127.0.0.1:4411"]) { $1 })
         for url in ["http://localhost:4411", "http://[::1]:4411", "https://127.0.0.1:4411"] {
-            #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record(url), alive: alive)["BB_SERVER_URL"] == url)
+            #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record(url), started: Self.ours)["BB_SERVER_URL"] == url)
         }
-        #expect(BBBuilds.environment(folder: "/Users/a/.bb-work", home: "/Users/a", runtime: nil, alive: alive) == base)
+        #expect(BBBuilds.environment(folder: "/Users/a/.bb-work", home: "/Users/a", runtime: nil, started: Self.ours) == base)
     }
 
     @Test func aServerOffThisMacOrARecordLeftByAProcessThatIsGoneLeavesBbToFindItsOwnServer() {
-        let record = { (url: String, pid: String) in Data(#"{"pid":\#(pid),"serverUrl":"\#(url)"}"#.utf8) }
-        let alive: (Int32) -> Bool = { $0 == 41 }
+        let record = { (url: String, pid: String) in Data(#"{"pid":\#(pid),"serverUrl":"\#(url)","startedAt":"\#(Self.recorded)"}"#.utf8) }
         for url in ["https://bb.example.com", "http://10.0.0.4:4411", "http://127.0.0.1.example.com:4411", "file:///tmp/x", "not a url", ""] {
-            #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record(url, "41"), alive: alive)["BB_SERVER_URL"] == nil)
+            #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record(url, "41"), started: Self.ours)["BB_SERVER_URL"] == nil)
         }
-        #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record("http://127.0.0.1:4411", "42"), alive: alive)["BB_SERVER_URL"] == nil)
-        #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: Data(#"{"serverUrl":"http://127.0.0.1:4411"}"#.utf8), alive: alive)["BB_SERVER_URL"] == nil)
-        #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: Data("{".utf8), alive: alive)["BB_SERVER_URL"] == nil)
+        #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record("http://127.0.0.1:4411", "42"), started: Self.ours)["BB_SERVER_URL"] == nil)
+        #expect(BBBuilds.environment(
+            folder: "/f", home: "/h", runtime: Data(#"{"serverUrl":"http://127.0.0.1:4411","startedAt":"\#(Self.recorded)"}"#.utf8), started: Self.ours)["BB_SERVER_URL"] == nil)
+        #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: Data("{".utf8), started: Self.ours)["BB_SERVER_URL"] == nil)
+    }
+
+    @Test func theRecordBb0490WritesIsTrustedWhileTheProcessThatWroteItRuns() {
+        let record = Data(#"""
+            {
+              "entryPath": "/Applications/bb.app/Contents/Resources/app.asar.unpacked/dist/bb-app-bridge.mjs",
+              "pid": 84404,
+              "serverUrl": "http://127.0.0.1:38886",
+              "startedAt": "2026-11-17T13:15:23.046Z",
+              "surface": "desktop",
+              "version": "0.49.0"
+            }
+            """#.utf8)
+        let launched = Date(timeIntervalSince1970: 1_794_921_322)
+        #expect(BBBuilds.serves(runtime: record, started: { $0 == 84404 ? launched : nil }))
+        #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record, started: { $0 == 84404 ? launched : nil })["BB_SERVER_URL"]
+            == "http://127.0.0.1:38886")
+    }
+
+    @Test func aFolderIsServedOnlyWhileTheProcessItsRecordNamesIsTheOneThatWroteIt() {
+        let record = Data(#"{"pid":41,"serverUrl":"http://127.0.0.1:4411","startedAt":"\#(Self.recorded)"}"#.utf8)
+        #expect(BBBuilds.serves(runtime: record, started: Self.ours))
+        #expect(!BBBuilds.serves(runtime: record, started: { _ in nil }))
+        #expect(!BBBuilds.serves(runtime: record, started: { _ in Self.recordedAt.addingTimeInterval(3600) }))
+        #expect(!BBBuilds.serves(runtime: Data(#"{"pid":41,"serverUrl":"http://127.0.0.1:4411"}"#.utf8), started: Self.ours))
+        #expect(!BBBuilds.serves(runtime: Data(#"{"pid":41,"serverUrl":"https://bb.example.com","startedAt":"\#(Self.recorded)"}"#.utf8), started: Self.ours))
+        #expect(!BBBuilds.serves(runtime: nil, started: Self.ours))
     }
 
     @Test func aBuildDeclaresItsDataFolderInItsLaunchEnvironment() {

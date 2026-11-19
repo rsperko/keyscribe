@@ -19,7 +19,9 @@ extension ScriptedTerminalRoute {
         set out to ""
         repeat with w in windows
             repeat with t in tabs of w
-                set out to out & (tty of t) & sep & (custom title of t) & linefeed
+                set shown to custom title of t
+                if shown is missing value then set shown to ""
+                set out to out & (tty of t) & sep & shown & linefeed
             end repeat
         end repeat
         return out

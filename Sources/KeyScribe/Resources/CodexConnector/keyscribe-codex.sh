@@ -1,6 +1,6 @@
 #!/bin/sh
 agents=__AGENTS_DIR__
-app="__APP_NAME__"
+app=__APP_NAME__
 socket="$agents/bridge.sock"
 limit=250000
 
@@ -25,11 +25,14 @@ clip() {
 }
 
 slim() {
+  source= built=
+  trap 'rm -f "$source" "$built"' EXIT
+  trap 'exit 1' HUP INT TERM
   source=$(mktemp "${TMPDIR:-/tmp}/ksc.XXXXXX") || return 1
-  built=$(mktemp "${TMPDIR:-/tmp}/ksc.XXXXXX") || { rm -f "$source"; return 1; }
+  built=$(mktemp "${TMPDIR:-/tmp}/ksc.XXXXXX") || return 1
   printf %s "$1" > "$source"
   rm -f "$built"
-  /usr/bin/plutil -create xml1 "$built" || { rm -f "$source"; return 1; }
+  /usr/bin/plutil -create xml1 "$built" || return 1
   for key in hook_event_name session_id turn_id tool_name; do
     value=$(/usr/bin/plutil -extract "$key" raw -o - "$source" 2>/dev/null | clip 1000) && [ -n "$value" ] && /usr/bin/plutil -insert "$key" -string "$value" "$built"
   done
@@ -45,9 +48,6 @@ slim() {
   esac
   value=$(/usr/bin/plutil -extract "$path" raw -o - "$source" 2>/dev/null | clip 4000) && [ -n "$value" ] && /usr/bin/plutil -insert tool_input.question -string "$value" "$built"
   /usr/bin/plutil -convert json -o - "$built"
-  status=$?
-  rm -f "$source" "$built"
-  return $status
 }
 
 reply() {
@@ -60,7 +60,7 @@ hook)
   if [ "$(printf %s "$body" | wc -c)" -gt "$limit" ]; then
     body=$(slim "$body") || exit 0
   fi
-  post "$(plain "$2")" "$body" 2 >/dev/null
+  post "$(plain "$2")" "$body" 0.5 >/dev/null
   exit 0
   ;;
 mcp)

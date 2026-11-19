@@ -39,23 +39,33 @@ public enum BBBuilds {
         return nil
     }
 
-    public static func environment(folder: String, home: String, runtime: Data?, alive: (Int32) -> Bool) -> [String: String] {
+    public static func environment(folder: String, home: String, runtime: Data?, started: (Int32) -> Date?) -> [String: String] {
         var environment = ["HOME": home, "PATH": "/usr/bin:/bin", "BB_TELEMETRY": "false", dataFolderKey: folder]
-        if let server = localServer(runtime: runtime, alive: alive) { environment[serverKey] = server }
+        if let server = localServer(runtime: runtime, started: started) { environment[serverKey] = server }
         return environment
     }
 
-    private static func localServer(runtime: Data?, alive: (Int32) -> Bool) -> String? {
+    public static func serves(runtime: Data?, started: (Int32) -> Date?) -> Bool { localServer(runtime: runtime, started: started) != nil }
+
+    static let recordWrittenWithin: TimeInterval = 2
+
+    private static func localServer(runtime: Data?, started: (Int32) -> Date?) -> String? {
         struct Runtime: Decodable {
             var pid: Int32?
             var serverUrl: String?
+            var startedAt: String?
         }
         guard let record = runtime.flatMap({ try? JSONDecoder().decode(Runtime.self, from: $0) }),
-              let pid = record.pid, pid > 0, alive(pid), let text = record.serverUrl,
+              let pid = record.pid, pid > 0, let recorded = record.startedAt.flatMap(instant), let began = started(pid),
+              began <= recorded.addingTimeInterval(recordWrittenWithin), let text = record.serverUrl,
               let url = URL(string: text), ["http", "https"].contains(url.scheme), let host = url.host(percentEncoded: false),
               ["127.0.0.1", "localhost", "::1"].contains(host)
         else { return nil }
         return text
+    }
+
+    private static func instant(_ text: String) -> Date? {
+        try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(text)
     }
 
     public static func dataFolder(environment: [String: Any]?, home: String) -> String? {

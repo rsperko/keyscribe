@@ -109,18 +109,23 @@ public struct AgentDirectory: Sendable {
     private var preferredById: [String: String] = [:]
     private var sourceById: [String: AgentNameSource] = [:]
     private var placeNameById: [String: AgentPlaceName] = [:]
+    private var folderUnknown: Set<String> = []
     public private(set) var sharedPlaceNames: [String: AgentRecipient.SharedName] = [:]
 
     public init(chosen: [String: String] = [:], remembered: [String: RememberedName] = [:]) {
-        self.chosen = chosen
-        self.remembering = remembered
+        self.chosen = chosen.mapValues(AgentHandles.normalize).filter { !$0.value.isEmpty }
+        self.remembering = remembered.filter { Self.isSayable($0.value.name) }
     }
+
+    private static func isSayable(_ name: String) -> Bool { !name.isEmpty && AgentHandles.normalize(name) == name }
+
+    private func keepsName(_ id: String) -> Bool { chosen[id] == nil && !folderUnknown.contains(id) }
 
     public var chosenNames: [String: String] { chosen }
 
     public var remembered: [String: RememberedName] {
         var names = remembering
-        for conversation in conversations + disconnected where chosen[conversation.id] == nil {
+        for conversation in conversations + disconnected where keepsName(conversation.id) {
             guard let start = startById[conversation.id], let name = handleById[conversation.id] else { continue }
             names[conversation.id] = RememberedName(
                 name: name, pid: conversation.pid, startedAt: start, native: nativeNameById[conversation.id], agent: conversation.agent)
@@ -183,7 +188,7 @@ public struct AgentDirectory: Sendable {
             sharing[item.key] = (sharing[item.key]?.label ?? item.base, held + members.filter { !held.contains($0) }, item.label.surface ?? item.place.surface)
         }
         let liveIds = Set(entries.map(conversationId))
-        for conversation in conversations + disconnected where !liveIds.contains(conversation.id) && chosen[conversation.id] == nil {
+        for conversation in conversations + disconnected where !liveIds.contains(conversation.id) && keepsName(conversation.id) {
             guard let start = startById[conversation.id], let name = handleById[conversation.id] else { continue }
             remembering[conversation.id] = RememberedName(
                 name: name, pid: conversation.pid, startedAt: start, native: nativeNameById[conversation.id], agent: conversation.agent)
@@ -193,7 +198,7 @@ public struct AgentDirectory: Sendable {
             let replaced = saved.pid != nil && entries.contains { $0.pid == saved.pid && $0.startedAt == saved.startedAt }
             return !replaced && running(saved)
         }
-        for (id, handle) in handleById where !liveIds.contains(id) {
+        for (id, handle) in handleById where !liveIds.contains(id) && !folderUnknown.contains(id) {
             retired[id] = handle
         }
         handleById = handleById.filter { liveIds.contains($0.key) }
@@ -218,7 +223,7 @@ public struct AgentDirectory: Sendable {
             let native = reported ?? placed[id]?.name ?? kept
             sources[id] = reported != nil ? .agent : placed[id] != nil ? .place : kept != nil ? sourceById[id] ?? .folder : .folder
             preferred[id] = native
-            if chosen[id] == nil, native != nativeNameById[id] {
+            if chosen[id] == nil, native != nativeNameById[id] || (!entry.folder.isEmpty && folderUnknown.contains(id)) {
                 handleById[id] = nil
                 retired[id] = nil
             }
@@ -236,8 +241,9 @@ public struct AgentDirectory: Sendable {
         let named = entries.filter { preferred[conversationId($0)] != nil }.sorted { conversationId($0) < conversationId($1) }
         let unnamed = entries.filter { preferred[conversationId($0)] == nil }
         handleById = AgentHandles.assign(
-            (named + unnamed).map { AgentHandles.Conversation(id: conversationId($0), folder: $0.folder, name: preferred[conversationId($0)]) },
+            (named + unnamed).map { AgentHandles.Conversation(id: conversationId($0), folder: $0.nameBase, name: preferred[conversationId($0)]) },
             existing: handleById, reserved: away)
+        folderUnknown = Set(entries.filter { $0.folder.isEmpty && preferred[conversationId($0)] == nil }.map(conversationId))
         sourceById = sources
         placeNameById = placed.mapValues(\.place).merging(placeNameById.filter { unplaced.contains($0.key) }) { now, _ in now }
         preferredById = preferred
@@ -260,7 +266,7 @@ public struct AgentDirectory: Sendable {
         let next = entries.map {
             AgentConversation(
                 id: conversationId($0), agent: $0.agent, pid: $0.pid, cwd: $0.cwd,
-                handle: handleById[conversationId($0)] ?? AgentHandles.base(forFolder: $0.folder),
+                handle: handleById[conversationId($0)] ?? AgentHandles.base(forFolder: $0.nameBase),
                 state: $0.state, connectorLive: live.contains(conversationId($0)), title: titles[conversationId($0)],
                 startedAt: $0.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }, setup: $0.setup,
                 nameSource: chosen[conversationId($0)] != nil ? .chosen : sources[conversationId($0)] ?? .folder,
@@ -375,7 +381,7 @@ public struct AgentDirectory: Sendable {
         let held = Array(handleById.filter { $0.key != id }.values)
             + Array(chosen.filter { $0.key != id }.values)
             + remembering.filter { $0.key != id }.values.map(\.name)
-        let folder = URL(fileURLWithPath: conversation.cwd).lastPathComponent
+        let folder = AgentSession.nameBase(cwd: conversation.cwd, agent: conversation.agent)
         let name = AgentHandles.assign(
             [AgentHandles.Conversation(id: id, folder: folder, name: preferredById[id])], existing: [:], reserved: Set(held))[id]
         return name.map { DefaultName(name: $0, source: source, place: place, otherNames: others) }

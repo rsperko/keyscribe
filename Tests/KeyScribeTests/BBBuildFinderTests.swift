@@ -39,6 +39,22 @@ struct BBBuildFinderTests {
         }
     }
 
+    @Test func aRecordIsServedOnlyByTheUsersOwnProcessThatStartedBeforeItWasWritten() throws {
+        let fixture = try Fixture()
+        let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(Date())
+        func record(pid: Int32, at: String) throws {
+            try Data(#"{"pid":\#(pid),"serverUrl":"http://127.0.0.1:38886","startedAt":"\#(at)"}"#.utf8)
+                .write(to: fixture.folder.appendingPathComponent(BBBuilds.runtimeFile))
+        }
+        try record(pid: getpid(), at: now)
+        #expect(BBBuildFinder.serves(folder: fixture.path))
+        try record(pid: 1, at: now)
+        #expect(!BBBuildFinder.serves(folder: fixture.path))
+        try record(pid: getpid(), at: "2020-01-01T00:00:00.000Z")
+        #expect(!BBBuildFinder.serves(folder: fixture.path))
+        #expect(BBBuildFinder.environment(folder: fixture.path, home: fixture.home.path)[BBBuilds.serverKey] == nil)
+    }
+
     @Test func aFolderServedFromOutsideAnyAppBelongsToTheAppThatDeclaresIt() throws {
         let fixture = try Fixture()
         try fixture.servedFromOutsideAnyApp()

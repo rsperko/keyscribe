@@ -5,6 +5,7 @@ import Foundation
 final class FakeCodexDaemon: @unchecked Sendable {
     enum Reply {
         case result(String)
+        case resultAfter(notification: String, result: String)
         case error(code: Int, message: String)
         case silent
     }
@@ -112,6 +113,9 @@ final class FakeCodexDaemon: @unchecked Sendable {
             let idText = (id as? String).map { "\"\($0)\"" } ?? "\(id)"
             switch reply {
             case .result(let json): send(fd, opcode: 0x1, Data(#"{"id":\#(idText),"result":\#(json)}"#.utf8))
+            case .resultAfter(let notification, let json):
+                send(fd, opcode: 0x1, Data(notification.utf8))
+                send(fd, opcode: 0x1, Data(#"{"id":\#(idText),"result":\#(json)}"#.utf8))
             case .error(let code, let text): send(fd, opcode: 0x1, Data(#"{"id":\#(idText),"error":{"code":\#(code),"message":"\#(text)"}}"#.utf8))
             case .silent: break
             }

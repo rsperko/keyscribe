@@ -40,6 +40,7 @@ final class CodexDaemonClient: @unchecked Sendable {
     private var key = ""
     private var greeting = Data()
     private var opening: CheckedContinuation<Void, Error>?
+    private var attempt = 0
     private var pending: [Int: CheckedContinuation<Data, Error>] = [:]
     private var lastID = 0
     private var open = false
@@ -114,12 +115,14 @@ final class CodexDaemonClient: @unchecked Sendable {
         greeting = Data()
         key = Data((0..<16).map { _ in UInt8.random(in: 0...255) }).base64EncodedString()
         opening = continuation
+        attempt += 1
+        let thisAttempt = attempt
         let read = DispatchSource.makeReadSource(fileDescriptor: socketFD, queue: queue)
         read.setEventHandler { [weak self] in self?.readable() }
         read.resume()
         source = read
         queue.asyncAfter(deadline: .now() + timeout) { [weak self] in
-            guard let self, let waiting = opening else { return }
+            guard let self, attempt == thisAttempt, let waiting = opening else { return }
             opening = nil
             shut(report: false)
             waiting.resume(throwing: Failure.unavailable)
@@ -131,6 +134,7 @@ final class CodexDaemonClient: @unchecked Sendable {
         guard fd >= 0 else { return }
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         let n = read(fd, &chunk, chunk.count)
+        if n < 0, errno == EINTR || errno == EAGAIN { return }
         guard n > 0 else { return shut(report: true) }
         var bytes = Data(chunk[0..<n])
         if let waiting = opening {
@@ -178,6 +182,7 @@ final class CodexDaemonClient: @unchecked Sendable {
             var offset = 0
             while offset < raw.count {
                 let n = Darwin.write(fd, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                if n < 0, errno == EINTR { continue }
                 guard n > 0 else { return false }
                 offset += n
             }

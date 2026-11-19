@@ -46,7 +46,19 @@ public struct AgentSession: Equatable, Sendable {
         self.title = title
     }
 
-    public var folder: String { URL(fileURLWithPath: cwd).lastPathComponent }
+    public var folder: String { Self.folder(cwd: cwd) }
+
+    var nameBase: String { Self.nameBase(cwd: cwd, agent: agent) }
+
+    static func nameBase(cwd: String, agent: String) -> String {
+        let known = folder(cwd: cwd)
+        return known.isEmpty ? agent : known
+    }
+
+    static func folder(cwd: String) -> String {
+        let last = cwd.isEmpty ? "" : URL(fileURLWithPath: cwd).lastPathComponent
+        return AgentHandles.base(forFolder: last).isEmpty ? "" : last
+    }
 }
 
 public struct AgentHostLocation: Hashable, Sendable {

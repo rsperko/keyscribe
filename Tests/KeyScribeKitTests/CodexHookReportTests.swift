@@ -27,13 +27,13 @@ struct CodexHookReportTests {
     @Test func stopCompletesTheTurnWithTheLastAnswer() {
         #expect(
             events(hook("Stop", #""stop_hook_active":false,"last_assistant_message":"`README.md` has 1 line.""#))
-                == [.turnComplete(session: session, reason: "complete", answer: "`README.md` has 1 line.")])
-        #expect(events(hook("Stop", #""last_assistant_message":null"#)) == [.turnComplete(session: session, reason: "complete", answer: "")])
-        #expect(events(hook("Stop")) == [.turnComplete(session: session, reason: "complete", answer: "")])
+                == [.turnComplete(session: session, reason: "complete", answer: "`README.md` has 1 line.", turn: "01a1ef41-68df-7cf0-a907-99c4cddf9cc1")])
+        #expect(events(hook("Stop", #""last_assistant_message":null"#)) == [.turnComplete(session: session, reason: "complete", answer: "", turn: "01a1ef41-68df-7cf0-a907-99c4cddf9cc1")])
+        #expect(events(hook("Stop")) == [.turnComplete(session: session, reason: "complete", answer: "", turn: "01a1ef41-68df-7cf0-a907-99c4cddf9cc1")])
     }
 
     @Test func anInterruptEndsTheTurnAsAborted() {
-        #expect(events(hook("Interrupt")) == [.turnComplete(session: session, reason: "aborted", answer: "")])
+        #expect(events(hook("Interrupt")) == [.turnComplete(session: session, reason: "aborted", answer: "", turn: "01a1ef41-68df-7cf0-a907-99c4cddf9cc1")])
     }
 
     @Test func aPermissionRequestWaitsOnAConfirmNamingTheToolAndItsCommand() {
@@ -93,6 +93,6 @@ struct CodexHookReportTests {
 
     @Test func theSessionIsTheNativeIdAtThisCodexHome() {
         let other = CodexHookReport.events(Data(hook("Interrupt").utf8), instance: "/other/.codex")
-        #expect(other == [.turnComplete(session: "\(sessionId)@/other/.codex", reason: "aborted", answer: "")])
+        #expect(other == [.turnComplete(session: "\(sessionId)@/other/.codex", reason: "aborted", answer: "", turn: "01a1ef41-68df-7cf0-a907-99c4cddf9cc1")])
     }
 }

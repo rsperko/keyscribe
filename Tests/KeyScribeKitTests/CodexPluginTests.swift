@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import KeyScribeKit
 import Testing
@@ -46,10 +47,12 @@ struct CodexPluginTests {
         #expect(server["default_tools_approval_mode"] as? String == "approve")
     }
 
-    @Test func theFilesDependOnlyOnTheirInputsSoTrustSurvivesAReinstall() {
-        let first = CodexPlugin.files(layout, executable: executable, installation: "inst-1")
-        #expect(first == CodexPlugin.files(layout, executable: executable, installation: "inst-1"))
-        #expect(first != CodexPlugin.files(layout, executable: executable, installation: "inst-2"))
+    @Test func theFilesAreExactlyTheBytesUsersTrustedSoAChangeIsMadeOnPurpose() {
+        let files = CodexPlugin.files(layout, executable: executable, installation: "inst-1")
+        let joined = files.keys.sorted().map { "\($0)\n\(files[$0] ?? "")" }.joined(separator: "\n")
+        let digest = SHA256.hash(data: Data(joined.utf8)).map { String(format: "%02x", $0) }.joined()
+        #expect(digest == "075e42c7c4e2829dbe1a50634494d2533041216693655e0b2c37acf90ec9a05f", "Changing these files makes every user trust the hooks again. If that is intended, update the digest.")
+        #expect(files != CodexPlugin.files(layout, executable: executable, installation: "inst-2"))
     }
 
     @Test func trustIsReadFromOnlyThisPluginsHooks() {

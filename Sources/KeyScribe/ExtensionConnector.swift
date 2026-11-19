@@ -72,7 +72,6 @@ extension AgentConnectorCopy {
             removalUnfinishedAdvice: "The connector was uninstalled in \(app), but its folder is still in \(name)\u{2019}s extensions. Its conversations no longer connect. Finish uninstalling it, then install it again if you want it back.",
             listUnreadable: "\(name)\u{2019}s extensions folder could not be read.",
             noReason: "\(name) did not say why.",
-            manualUninstallLead: "To remove the connector from \(name), delete its folder in a terminal, then \(unloadEach):",
             manualUninstallAfterDisconnect: "Disconnected from \(app). Delete the connector\u{2019}s folder in a terminal to finish uninstalling, then \(unloadEach):",
             stillConnected: { count in
                 count == 1

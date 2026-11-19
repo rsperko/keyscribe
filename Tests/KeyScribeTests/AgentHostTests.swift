@@ -38,6 +38,20 @@ struct AgentHostTests {
 
         var calls: Int { scans + opened.count + asked.count + delivered.count }
 
+        var gated = false
+        private var gate: [CheckedContinuation<Void, Never>] = []
+
+        func passOne() {
+            guard !gate.isEmpty else { return }
+            gate.removeFirst().resume()
+        }
+
+        func openGate() {
+            gated = false
+            gate.forEach { $0.resume() }
+            gate = []
+        }
+
         private func stall() async {
             guard hangs else { return }
             try? await Task.sleep(for: .seconds(30))
@@ -93,7 +107,11 @@ struct AgentHostTests {
         var reportsTurns = false
         private(set) var observed: [AgentEvent] = []
 
-        func observe(_ event: AgentEvent) { observed.append(event) }
+        var onObserve: (@MainActor (AgentEvent) -> Void)?
+        func observe(_ event: AgentEvent) {
+            observed.append(event)
+            onObserve?(event)
+        }
 
         func reportsTurns(at location: AgentHostLocation) -> Bool { reportsTurns }
 
@@ -115,6 +133,7 @@ struct AgentHostTests {
             delivered.append((text, request, location))
             deliveredImages.append(images)
             whileDelivering?()
+            if gated { await withCheckedContinuation { gate.append($0) } }
             await stall()
             return replies.isEmpty ? delivery : replies.removeFirst()
         }
@@ -140,13 +159,14 @@ struct AgentHostTests {
         names: AgentNameStore? = nil, places: (any AgentPlaceReading)? = nil, allowed: @escaping @MainActor (String) -> Bool = { _ in true }, hostDeadline: Duration = .milliseconds(50),
         claude: FakeDiscovery = FakeDiscovery(kind: .claude), environments: [Int: [String: String]] = [:], handOffLimit: Duration = .seconds(30),
         parents: [Int: Int] = [:], now: @escaping () -> Date = Date.init, accessibility: @escaping @MainActor () -> Bool = { true },
-        hostConfirmDelay: Duration = .seconds(3)
+        hostConfirmDelay: Duration = .seconds(3), receiptTimeout: Duration = .milliseconds(50),
+        heldLimit: Duration = .milliseconds(100)
     ) -> AgentHub {
         AgentHub(
             transport: transport, discovery: [claude], names: names, focus: focus, front: front,
-            receiptTimeout: .milliseconds(50), handOffLimit: handOffLimit, scanDeadline: .seconds(30), places: places,
+            receiptTimeout: receiptTimeout, handOffLimit: handOffLimit, scanDeadline: .seconds(30), places: places,
             hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostAllowed: allowed, hostDeadline: hostDeadline,
-            hostConfirmDelay: hostConfirmDelay,
+            hostConfirmDelay: hostConfirmDelay, heldLimit: heldLimit,
             processEnvironment: { pid, keys in (environments[pid] ?? [:]).filter { keys.contains($0.key) } },
             processParent: { parents[$0] }, now: now,
             makeId: { "r1" }, accessibilityTrusted: accessibility)
@@ -365,7 +385,7 @@ struct AgentHostTests {
         (AgentHostDelivery.accepted, AgentReceipt.sent("docs")),
         (.queued, .queued("docs")),
         (.uncertain, .uncertain("docs")),
-        (.refused("thread is archived"), .notSent("docs", reason: .refused("thread is archived"))),
+        (.refused("thread is archived"), .notSent("docs", reason: .hostRefused("thread is archived"))),
         (.unsupported, .notSent("docs", reason: .hostTakesNoMessages("Example"))),
     ])
     func dictationToAHostedConversationGoesThroughItsHostOnceAndSaysOnlyWhatTheHostProved(answer: AgentHostDelivery, receipt: AgentReceipt) async {
@@ -870,6 +890,55 @@ struct AgentHostTests {
         #expect(host.observed.contains(.turnStarted(session: Self.location("t1").conversationKey, turn: "a", prompt: AgentPromptDigest.of("plan the release"))))
     }
 
+    @Test(arguments: ["a", "b"])
+    func aSteeredTurnEndsWhicheverTurnIdItsStopCarries(stoppedTurn: String) async {
+        let host = FakeHost()
+        host.reportsTurns = true
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("plan the release")))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "b", prompt: AgentPromptDigest.of("and the notes")))
+        let stop = AgentEvent.turnComplete(session: Self.location("t1").conversationKey, reason: "complete", answer: "planned", turn: stoppedTurn)
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "planned", turn: stoppedTurn))
+        #expect(host.observed.last == stop)
+    }
+
+    @Test func theTurnAConversationLastEndedIsForgottenOnceTheConversationIsGone() async {
+        let host = FakeHost()
+        host.reportsTurns = true
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "done", turn: "a"))
+        #expect(hub.connectorStateSessions.contains(Self.id("t1")))
+        host.conversations = []
+        host.watcher?(.listing)
+        await hub.rescan()
+        #expect(!hub.connectorStateSessions.contains(Self.id("t1")))
+    }
+
+    @Test func aSecondCompletionOfATurnThatAlreadyEndedIsIgnoredBeforeAnyoneSeesIt() async {
+        let host = FakeHost()
+        host.reportsTurns = true
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
+        _ = await hub.deliver("plan the release", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("plan the release")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "planned", turn: "a"))
+        _ = await hub.deliver("now the notes", to: Self.id("t1"), request: "q2")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "b", prompt: AgentPromptDigest.of("now the notes")))
+        let seen = host.observed.count
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "planned", turn: "a"))
+        #expect(host.observed.count == seen)
+        #expect(replies == ["planned"])
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "noted", turn: "b"))
+        #expect(replies == ["planned", "noted"])
+    }
+
     @Test func aHostedConversationShownByATerminalProcessOpensThroughThatTerminalWhenTheHostCannotOpenIt() async {
         let host = FakeHost()
         host.opening = .unsupported
@@ -929,6 +998,398 @@ struct AgentHostTests {
         await settled { !notices.isEmpty }
         #expect(host.delivered.map(\.1) == ["q1"])
         #expect(notices == [.sent(hub.directory.conversations[0].handle)])
+    }
+
+    @Test func twoDictationsHeldInTheHubDuringAnApprovalBothArriveInOrder() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        _ = await hub.deliver("then the docs", to: Self.id("t1"), request: "q2")
+        #expect(host.delivered.isEmpty)
+        host.conversations = [waiting("t1", .working)]
+        for _ in 0..<3 {
+            host.watcher?(.listing)
+            await hub.rescan()
+            await settled { notices.count == 2 }
+        }
+        #expect(host.delivered.map(\.1) == ["q1", "q2"])
+        #expect(notices == [.sent(hub.directory.conversations[0].handle), .sent(hub.directory.conversations[0].handle)])
+    }
+
+    @Test func aSecondHeldDictationWaitsWhileTheFirstIsStillBeingSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host, receiptTimeout: .seconds(5))
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        _ = await hub.deliver("then the docs", to: Self.id("t1"), request: "q2")
+        host.gated = true
+        host.conversations = [waiting("t1", .working)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !host.delivered.isEmpty }
+        host.watcher?(.listing)
+        await hub.rescan()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(host.delivered.map(\.1) == ["q1"])
+        host.openGate()
+        await settled { notices.count == 2 }
+        #expect(host.delivered.map(\.1) == ["q1", "q2"])
+    }
+
+    @Test func threeHeldDictationsLeaveOneAtATime() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host, receiptTimeout: .seconds(5))
+        await hub.rescan()
+        for (text, request) in [("one", "q1"), ("two", "q2"), ("three", "q3")] { _ = await hub.deliver(text, to: Self.id("t1"), request: request) }
+        host.gated = true
+        host.conversations = [waiting("t1", .working)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { host.delivered.count == 1 }
+        host.passOne()
+        await settled { host.delivered.count == 2 }
+        try? await Task.sleep(for: .milliseconds(20))
+        host.watcher?(.listing)
+        await hub.rescan()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(host.delivered.map(\.1) == ["q1", "q2"])
+        host.openGate()
+        await settled { host.delivered.count == 3 }
+        #expect(host.delivered.map(\.1) == ["q1", "q2", "q3"])
+    }
+
+    @Test func aSecondDictationWaitsBehindAFirstStillBeingSentStraightAway() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .working)]
+        let hub = makeHub(host, receiptTimeout: .seconds(5))
+        await hub.rescan()
+        host.gated = true
+        let first = Task { await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") }
+        await settled { host.delivered.count == 1 }
+        guard case .queued = await hub.deliver("then the docs", to: Self.id("t1"), request: "q2") else {
+            Issue.record("the second dictation went alongside the first")
+            return
+        }
+        host.openGate()
+        _ = await first.value
+        await settled { host.delivered.count == 2 }
+        #expect(host.delivered.map(\.1) == ["q1", "q2"])
+    }
+
+    @Test func aFreshDictationTheHostCannotTakeYetIsKeptForReviewWhenTheUserTypedWhileItWasBeingSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .working)]
+        let hub = makeHub(host, receiptTimeout: .seconds(5))
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        host.gated = true
+        host.replies = [.queued]
+        let first = Task { await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") }
+        await settled { host.delivered.count == 1 }
+        hub.handle(.typed(session: Self.id("t1")))
+        host.openGate()
+        guard case .queued = await first.value else { Issue.record("not held"); return }
+        await settled { !notices.isEmpty }
+        #expect(host.delivered.map(\.1) == ["q1"])
+        #expect(notices == [.kept(hub.directory.conversations[0].handle, reason: .typedSince)])
+    }
+
+    @Test func aDictationTheHostCannotTakeYetAfterItsConversationWasDisconnectedIsNotSentLater() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .working)]
+        let hub = makeHub(host, receiptTimeout: .seconds(5))
+        await hub.rescan()
+        host.gated = true
+        host.replies = [.queued]
+        let first = Task { await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") }
+        await settled { host.delivered.count == 1 }
+        hub.disconnect(Self.id("t1"))
+        host.openGate()
+        #expect(await first.value == .notSent(hub.disconnected.first?.handle, reason: .disconnected))
+        hub.reconnect(Self.id("t1"))
+        host.watcher?(.listing)
+        await hub.rescan()
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(host.delivered.map(\.1) == ["q1"])
+    }
+
+    @Test func aDictationTheHostCannotTakeYetOutsideARunningTurnIsTriedAgainAtItsDeadlineWithoutAnotherEvent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .idle)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        host.replies = [.queued]
+        guard case .queued = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") else { Issue.record("not held"); return }
+        await settled { !notices.isEmpty }
+        #expect(host.delivered.map(\.1) == ["q1", "q1"])
+        #expect(notices == [.sent(hub.directory.conversations[0].handle)])
+    }
+
+    @Test func aDictationTheHostNeverTakesOutsideARunningTurnIsReportedNotSentOnceItsTimeIsUp() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.delivery = .queued
+        host.conversations = [waiting("t1", .idle)]
+        let hub = makeHub(host, heldLimit: .milliseconds(200))
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        guard case .queued = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") else { Issue.record("not held"); return }
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(notices.isEmpty)
+        await settled { !notices.isEmpty }
+        let tries = host.delivered.count
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(host.delivered.count == tries)
+        #expect(notices == [.notSent(hub.directory.conversations[0].handle, reason: .expired)])
+    }
+
+    @Test func aDictationARunningTurnKeepsRefusingWaitsForTheTurnToEndAndIsThenSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.delivery = .queued
+        host.conversations = [waiting("t1", .working)]
+        let hub = makeHub(host, heldLimit: .milliseconds(100))
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(notices.isEmpty)
+        #expect(host.delivered.count <= 4)
+        host.delivery = .accepted
+        host.conversations = [waiting("t1", .idle)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        #expect(notices == [.sent(hub.directory.conversations[0].handle)])
+    }
+
+    @Test func eventsWhileARetryWaitsAddNoSecondRetry() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.delivery = .queued
+        host.conversations = [waiting("t1", .idle)]
+        let hub = makeHub(host, heldLimit: .seconds(30))
+        await hub.rescan()
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        for _ in 0..<5 {
+            host.watcher?(.listing)
+            await hub.rescan()
+            await settled { host.delivered.count > 1 }
+        }
+        #expect(host.delivered.count > 1)
+        #expect(hub.retryWaiting == [Self.id("t1")])
+    }
+
+    @Test func aDictationHeldThroughALongTurnStillArrivesWhenTheHostRefusesItOnceMoreAsTheTurnEnds() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.replies = [.queued, .queued]
+        host.conversations = [waiting("t1", .working)]
+        let hub = makeHub(host, heldLimit: .milliseconds(100))
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        try? await Task.sleep(for: .milliseconds(250))
+        host.conversations = [waiting("t1", .idle)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        #expect(host.delivered.map(\.1) == ["q1", "q1", "q1"])
+        #expect(notices == [.sent(hub.directory.conversations[0].handle)])
+    }
+
+    @Test func aMessageMarkedWhileARetryWaitsOnItsDeadlineGoesToReviewAtOnce() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.replies = [.queued, .queued]
+        host.conversations = [waiting("t1", .idle)]
+        let hub = makeHub(host, receiptTimeout: .seconds(5), heldLimit: .seconds(60))
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        guard case .queued = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") else { Issue.record("not held"); return }
+        #expect(hub.retryWaiting == [Self.id("t1")])
+        host.gated = true
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { host.delivered.count == 2 }
+        hub.handle(.typed(session: Self.id("t1")))
+        host.openGate()
+        await settled { !notices.isEmpty }
+        #expect(notices == [.kept(hub.directory.conversations[0].handle, reason: .typedSince)])
+    }
+
+    @Test func aNewDictationWaitsBehindAReleasedOneStillBeingSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host, receiptTimeout: .seconds(5))
+        await hub.rescan()
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        host.gated = true
+        host.conversations = [waiting("t1", .working)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { host.delivered.count == 1 }
+        guard case .queued = await hub.deliver("then the docs", to: Self.id("t1"), request: "q2") else {
+            Issue.record("the new dictation went ahead")
+            return
+        }
+        #expect(host.delivered.map(\.1) == ["q1"])
+        host.openGate()
+        await settled { host.delivered.count == 2 }
+        #expect(host.delivered.map(\.1) == ["q1", "q2"])
+    }
+
+    @Test func aReleasedDictationTheHostCannotTakeYetIsKeptForReviewWhenTheUserTypedWhileItWasBeingSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host, receiptTimeout: .seconds(5))
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        host.gated = true
+        host.replies = [.queued]
+        host.conversations = [waiting("t1", .working)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { host.delivered.count == 1 }
+        hub.handle(.typed(session: Self.id("t1")))
+        host.openGate()
+        for _ in 0..<3 {
+            host.watcher?(.listing)
+            await hub.rescan()
+            await settled { !notices.isEmpty }
+        }
+        #expect(host.delivered.map(\.1) == ["q1"])
+        #expect(notices == [.kept(hub.directory.conversations[0].handle, reason: .typedSince)])
+    }
+
+    @Test func aPromptTheHostReportsAsTypedWhileTheHubHandlesItsTurnKeepsAHeldDictationForReview() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.reportsTurns = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        host.onObserve = { event in
+            if case .turnStarted(let session, _, _) = event { host.watcher?(.event(.typed(session: session))) }
+        }
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "u1", prompt: AgentPromptDigest.of("something typed")))
+        host.conversations = [waiting("t1", .idle)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        #expect(host.delivered.isEmpty)
+        #expect(notices == [.kept(hub.directory.conversations[0].handle, reason: .typedSince)])
+    }
+
+    @Test func aReleasedDictationTheHostCannotTakeYetStaysAheadOfLaterOnes() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        _ = await hub.deliver("then the docs", to: Self.id("t1"), request: "q2")
+        host.replies = [.queued]
+        host.conversations = [waiting("t1", .working)]
+        for _ in 0..<4 {
+            host.watcher?(.listing)
+            await hub.rescan()
+            await settled { notices.count == 2 }
+        }
+        #expect(host.delivered.map(\.1) == ["q1", "q1", "q2"])
+    }
+
+    @Test func aHeldDictationReleasedAsItsConversationIsDisconnectedIsNeverSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        hub.onChange = { [weak hub] in
+            hub?.onChange = nil
+            hub?.disconnect(Self.id("t1"))
+        }
+        host.conversations = [waiting("t1", .working)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(host.delivered.isEmpty)
+        #expect(notices.count == 1)
+        if case .notSent(_, reason: .disconnected) = notices.first {} else { Issue.record("not reported as disconnected: \(notices)") }
+    }
+
+    @Test func aHeldDictationWhoseHostIsTurnedOffIsReportedNotSentAndNeverSentLater() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        var allowed = true
+        let hub = makeHub(host, allowed: { _ in allowed })
+        await hub.rescan()
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        allowed = false
+        host.conversations = [waiting("t1", .working)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        await settled { !notices.isEmpty }
+        allowed = true
+        host.watcher?(.listing)
+        await hub.rescan()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(host.delivered.isEmpty)
+        #expect(notices.count == 1)
+        if case .notSent = notices.first {} else { Issue.record("not reported as not sent: \(notices)") }
+    }
+
+    @Test func aHeldDictationReleasedAsTheHubStopsIsNeverSent() async {
+        let host = FakeHost()
+        host.queuesInHub = true
+        host.conversations = [waiting("t1", .waitingApproval)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        hub.onChange = { [weak hub] in hub?.stop() }
+        host.conversations = [waiting("t1", .working)]
+        host.watcher?(.listing)
+        await hub.rescan()
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(host.delivered.isEmpty)
     }
 
     @Test func aHostQueuingInTheHubSendsAtOnceToAWorkingConversationSoItCanSteer() async {

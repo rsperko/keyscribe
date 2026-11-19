@@ -16,7 +16,6 @@ struct AgentConnectorCopy: Sendable {
     var removalUnfinishedAdvice: String
     var listUnreadable: String
     var noReason: String
-    var manualUninstallLead: String
     var manualUninstallAfterDisconnect: String
     var stillConnected: @Sendable (Int) -> String
     var toolTooOldLabel = ""
@@ -56,6 +55,7 @@ protocol AgentConnector: AnyObject {
     func name(of folder: URL) -> String?
     var toolProgram: String? { get }
     var folderVariable: String? { get }
+    var keepsConnection: Bool { get }
     func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result
     func checkTool(_ tool: String) async -> ToolCheck?
     func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State
@@ -64,6 +64,7 @@ protocol AgentConnector: AnyObject {
     func uninstall(tool: String, target: ConnectorTarget) async throws
     func undoesOnUninstall(in target: ConnectorTarget) -> Bool
     func uninstall(tool: String, target: ConnectorTarget, undoing: Bool) async throws
+    func uninstallWithoutTool(target: ConnectorTarget) async throws
 }
 
 extension AgentConnector {
@@ -72,9 +73,11 @@ extension AgentConnector {
     func name(of folder: URL) -> String? { nil }
     var toolProgram: String? { nil }
     var folderVariable: String? { nil }
+    var keepsConnection: Bool { true }
     func checkTool(_ tool: String) async -> ToolCheck? { nil }
     func undoesOnUninstall(in target: ConnectorTarget) -> Bool { false }
     func uninstall(tool: String, target: ConnectorTarget, undoing: Bool) async throws { try await uninstall(tool: tool, target: target) }
+    func uninstallWithoutTool(target: ConnectorTarget) async throws {}
 }
 
 enum ConnectorFolders {
@@ -227,11 +230,18 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
     }
 
     var manualUninstall: [String] {
-        guard state == .toolNotFound, connector.hasFiles(in: target) else { return [] }
+        guard state == .toolNotFound, target.removing, connector.hasFiles(in: target) else { return [] }
         return connector.manualUninstall(for: target)
     }
 
-    var canUninstallWithoutTool: Bool { !manualUninstall.isEmpty && !target.removing }
+    var canUninstallWithoutTool: Bool {
+        state == .toolNotFound && !target.removing && connector.hasFiles(in: target) && !connector.manualUninstall(for: target).isEmpty
+    }
+
+    var uninstallWithoutToolNote: String? {
+        guard canUninstallWithoutTool else { return nil }
+        return "\(connector.kind.displayName) wasn\u{2019}t found. Choose Uninstall to remove the \(copy.setupTitle.lowercased()) here and get the commands that finish it in a terminal."
+    }
 
     var offersUninstall: Bool {
         if case .toolTooOld = state { return connector.hasFiles(in: target) }
@@ -248,10 +258,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
         }
     }
 
-    var manualUninstallLead: String? {
-        guard !manualUninstall.isEmpty else { return nil }
-        return canUninstallWithoutTool ? copy.manualUninstallLead : copy.manualUninstallAfterDisconnect
-    }
+    var manualUninstallLead: String? { manualUninstall.isEmpty ? nil : copy.manualUninstallAfterDisconnect }
 
     func refresh() async {
         guard let tool = availableTool() else { return }
@@ -297,6 +304,14 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     func remove(undoing: Bool = false) async {
         guard operation == nil else { return }
+        if connector.findTool(in: folder, chosen: chosenTool).tool == nil, connector.hasFiles(in: target) {
+            do {
+                try await connector.uninstallWithoutTool(target: target)
+            } catch {
+                fail(.remove, (error as? AgentConnectorError)?.message ?? error.localizedDescription)
+                return
+            }
+        }
         undoingRemoval = undoing
         let installation = target.installation
         var unsaved: String?

@@ -25,6 +25,9 @@ final class AgentsSettingsModel: ObservableObject {
         var otherNames: [String] = []
         var unreadSince: Date?
         var needsYou = false
+        var host: String?
+
+        var countsUnder: String { host ?? agent }
 
         var location: String? {
             guard let place else { return terminal }
@@ -247,7 +250,7 @@ final class AgentsSettingsModel: ObservableObject {
                 readAloud: readAloud.contains(conversation.id) ? .thisReply : readNextAloud.contains(conversation.id) ? .nextReply : nil,
                 place: conversation.placeName, renamed: conversation.nameSource == .chosen,
                 surface: conversation.placeSurface, otherNames: conversation.otherNames, unreadSince: conversation.placeUnreadSince,
-                needsYou: conversation.reachable && Self.waitsOnUser.contains(conversation.state))
+                needsYou: conversation.reachable && Self.waitsOnUser.contains(conversation.state), host: conversation.host?.host)
         }
         next += candidates.map { candidate in
             Row(
@@ -268,6 +271,11 @@ final class AgentsSettingsModel: ObservableObject {
         if away != disconnectedRows { disconnectedRows = away }
         for connector in connectors {
             let uses = conversations.compactMap { conversation -> AgentConnectorModel.Use? in
+                if let hosted = conversation.host {
+                    guard hosted.host == connector.kind.id else { return nil }
+                    return AgentConnectorModel.Use(
+                        folder: hosted.instance, name: conversation.handle, connected: !connector.connector.keepsConnection || conversation.connectorLive)
+                }
                 guard conversation.runningAgent == connector.kind.id, let setup = conversation.setup else { return nil }
                 return AgentConnectorModel.Use(
                     folder: setup, name: conversation.handle, connected: conversation.connectorLive,

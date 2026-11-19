@@ -24,14 +24,16 @@ enum WezTermRoute {
         titleFrom: title)
 
     private struct TitledPane: Decodable {
+        var pane_id: Int?
         var tty_name: String?
         var title: String?
     }
 
     @Sendable static func title(answer: String, pane: [String]) -> String? {
         guard let panes = try? JSONDecoder().decode([TitledPane].self, from: Data(answer.utf8)) else { return nil }
-        let ttys = pane.dropFirst()
-        return ttys.lazy.compactMap { tty in panes.first { $0.tty_name == tty } }.first.flatMap { TerminalTitles.shown($0.title) }
+        let byTTY = pane.dropFirst().lazy.compactMap { tty in panes.first { $0.tty_name == tty } }.first
+        let byID = pane.first.flatMap { id in panes.first { $0.pane_id.map(String.init) == id } }
+        return (byTTY ?? byID).flatMap { TerminalTitles.shown($0.title) }
     }
 
     static func cli(_ terminal: TerminalProcess, socket: String) -> [String] {

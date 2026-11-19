@@ -180,7 +180,7 @@ struct PiConnectorInstallerTests {
 
     @Test func theCopySpeaksOfConversationsAndNamesPisReloadCommandWhereOneIsNeeded() {
         let copy = AgentConnectorCopy.extensionAgent(.pi)
-        let reloading = [copy.reloadHint, copy.uninstallMessage, copy.manualUninstallLead, copy.manualUninstallAfterDisconnect, copy.stillConnected(1), copy.stillConnected(2)]
+        let reloading = [copy.reloadHint, copy.uninstallMessage, copy.manualUninstallAfterDisconnect, copy.stillConnected(1), copy.stillConnected(2)]
         for text in reloading { #expect(text.contains("/reload"), "\(text)") }
         for text in reloading + [copy.help, copy.removalUnfinishedAdvice, copy.toolNotFoundAdvice] {
             #expect(!text.lowercased().contains("session"), "\(text)")
@@ -423,8 +423,11 @@ struct PiConnectorStatusTests {
             home: folder.deletingLastPathComponent().deletingLastPathComponent())
         let without = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
         await without.refresh()
-        #expect(without.connectors[0].setups[0].state == .toolNotFound)
-        #expect(without.connectors[0].setups[0].manualUninstall.first?.hasPrefix("rm -r ") == true)
-        #expect(without.connectors[0].setups[0].canUninstallWithoutTool)
+        let setup = without.connectors[0].setups[0]
+        #expect(setup.state == .toolNotFound)
+        #expect(setup.canUninstallWithoutTool)
+        #expect(setup.manualUninstall.isEmpty)
+        await setup.remove()
+        #expect(setup.manualUninstall.first?.hasPrefix("rm -r ") == true)
     }
 }

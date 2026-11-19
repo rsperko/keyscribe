@@ -46,13 +46,14 @@ struct BBHostTests {
 
     private func host(
         _ runner: Runner, builds: [BBBuild], enrolled: [String]? = nil, installed: Bool = true,
-        open: @escaping @MainActor (BBBuild) -> Bool = { _ in true }, frontmost: @escaping @MainActor () -> AgentHostApp? = { nil },
+        open: @escaping @MainActor (BBBuild) -> Bool = { _ in true }, serving: @escaping @MainActor (BBBuild) -> Bool = { _ in false },
+        frontmost: @escaping @MainActor () -> AgentHostApp? = { nil },
         frontApp: (@MainActor () -> AgentHostApp?)? = nil, dataFolders: [String: String] = [:]
     ) -> (BBHost, () -> [String]) {
         var activations: [String] = []
         let host = BBHost(
             home: Self.home, enrolled: { enrolled ?? builds.map(\.folder) }, describe: { folder in builds.first { $0.folder == folder } },
-            installed: { path in installed && builds.contains { $0.launcher == path } }, isOpen: open,
+            installed: { path in installed && builds.contains { $0.launcher == path } }, isOpen: open, serving: serving,
             run: { try await runner.run($0, subcommand: $1, input: $2, environment: $3) },
             activate: { activations.append($0.folder) }, frontmost: { _ in frontmost() },
             frontApp: frontApp ?? { frontmost().map { AgentHostApp(bundle: $0.bundle, pid: $0.pid, name: $0.name, path: $0.path) } },
@@ -98,7 +99,8 @@ struct BBHostTests {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ks-bbserver-\(UUID().uuidString.prefix(8))", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try Data(#"{"entryPath":"/nix/store/x/bb-app.js","pid":\#(getpid()),"serverUrl":"http://127.0.0.1:4411"}"#.utf8)
+        let written = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(Date())
+        try Data(#"{"entryPath":"/nix/store/x/bb-app.js","pid":\#(getpid()),"serverUrl":"http://127.0.0.1:4411","startedAt":"\#(written)"}"#.utf8)
             .write(to: folder.appendingPathComponent(BBBuilds.runtimeFile))
         let runner = Runner()
         runner.answers["thread list"] = Self.output("[]")
@@ -301,7 +303,7 @@ struct BBHostTests {
         guard case .found(let kept, _, _, let carriedNow, let problemNow) = await bb.scan() else { Issue.record("expected threads"); return }
         #expect(kept.compactMap(\.host) == [theirs])
         #expect(carriedNow == [theirs])
-        #expect(problemNow == "bb (Acme) isn\u{2019}t open. Open bb (Acme) to reach its threads.")
+        #expect(problemNow == nil)
         acmeOpen = true
         runner.calls.removeAll()
         #expect(await bb.deliver("x", images: [], request: "r", to: theirs) == .accepted)
@@ -521,6 +523,31 @@ struct BBHostTests {
         #expect(apps.cancelled == 2)
         bb.unwatch()
         #expect(apps.cancelled == 2)
+    }
+
+    @Test func aCopyWhoseAppIsClosedButWhoseServerAnswersListsAndTakesMessages() async {
+        let runner = Runner()
+        runner.answers["thread list"] = Self.output("[]")
+        runner.answers["thread tell"] = Self.output(#"{"ok":true,"delivery":"sent"}"#)
+        runner.answers["thread open"] = Self.output(#"{"delivered":1}"#)
+        let (bb, activated) = host(runner, builds: [Self.acme], open: { _ in false }, serving: { _ in true })
+        let thread = AgentHostLocation(host: "bb", instance: Self.acme.folder, native: "thr_abc1")
+        #expect(await bb.scan() == .found([]))
+        #expect(await bb.deliver("x", images: [], request: "r", to: thread) == .accepted)
+        #expect(await bb.open(thread, stillWanted: { true }) == .failed)
+        #expect(activated().isEmpty)
+    }
+
+    @Test func aClosedCopyBesideOneThatListsIsNotAProblemButEveryCopyClosedIs() async {
+        let runner = Runner()
+        runner.answers["thread list"] = Self.output("[]")
+        let (some, _) = host(runner, builds: [Self.usual, Self.acme], open: { $0 == Self.acme })
+        #expect(await some.scan() == .found([]))
+        let (none, _) = host(runner, builds: [Self.usual, Self.acme], open: { _ in false })
+        #expect(await none.scan() == .unreadable("bb isn\u{2019}t open. Open bb to reach its threads."))
+        let failing = Runner()
+        let (broken, _) = host(failing, builds: [Self.usual, Self.acme], open: { $0 == Self.acme })
+        #expect(await broken.scan() == .unreadable("bb (Acme) could not list its threads. Try again in a moment."))
     }
 
     @Test func aFolderNoAppIsKnownToUseSaysSoRatherThanThatBbIsNotOpen() async {
@@ -802,6 +829,13 @@ struct AgentHostConsentModelTests {
         await open.install()
         #expect(model.isTurnedOn(BBHost.kind))
         #expect(calls.all.allSatisfy { $0.0[0] == acme.launcher })
+        let thread = AgentConversation(
+            id: "bb:thr_1@\(acme.folder)", agent: "bb", pid: nil, cwd: "/src/app", handle: "app", state: .idle, connectorLive: false,
+            setup: "/Users/a/.claude", host: AgentHostLocation(host: "bb", instance: acme.folder, native: "thr_1"), innerAgent: "claude")
+        model.show([thread])
+        #expect(open.usedBy == ["app"])
+        #expect(open.connectedCount == 0)
+        #expect(model.rows.map(\.countsUnder) == ["bb"])
     }
 
     @Test func aHostsListingProblemIsShownBesideItsSwitchOnlyWhileItIsOn() {

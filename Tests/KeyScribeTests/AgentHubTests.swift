@@ -1651,6 +1651,20 @@ struct AgentHubTests {
         #expect(results.isEmpty)
     }
 
+    @Test func aNameTheUserChoseInAnOlderSpellingSurvivesALoadAndASave() async throws {
+        let dir = try nameDir(#"{"schema_version": 1, "names": {"claude:a": "Build 2"}}"#)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = Registry()
+        registry.set("a", cwd: "/src/api")
+        registry.set("b", cwd: "/src/web")
+        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
+        await hub.rescan()
+        #expect(hub.names["build two"] == "claude:a")
+        try hub.rename("claude:b", to: "web")
+        guard case .names(let saved, _, _) = AgentNameStore(directory: dir).load() else { Issue.record("names unreadable"); return }
+        #expect(saved["claude:a"] == "build two")
+    }
+
     @Test func aRecipientSavedByAnEarlierVersionIsIgnoredAndDroppedOnTheNextSave() async throws {
         let dir = try nameDir(#"{"schema_version": 1, "names": {"claude:a": "backend"}, "chosen": {"id": "claude:a", "name": "backend"}}"#)
         defer { try? FileManager.default.removeItem(at: dir) }

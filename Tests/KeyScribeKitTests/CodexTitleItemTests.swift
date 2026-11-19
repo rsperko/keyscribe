@@ -97,6 +97,27 @@ struct CodexTitleItemTests {
         roundTrips("[tui]\r\nx = 1\r\n", to: "[tui]\r\n\(createdLine)\r\nx = 1\r\n", record: .createdKey(createdTable: false, addedLineBreak: false))
     }
 
+    @Test func windowsLineEndingsAreKeptWhenOurTableOrKeyIsAdded() {
+        roundTrips("model = \"x\"\r\n", to: "model = \"x\"\r\n\r\n[tui]\r\n\(createdLine)\r\n", record: .createdKey(createdTable: true, addedLineBreak: false))
+        roundTrips("a = 1\r\n[tui]", to: "a = 1\r\n[tui]\r\n\(createdLine)", record: .createdKey(createdTable: false, addedLineBreak: false))
+    }
+
+    @Test func aFileThatStartsWithAByteOrderMarkIsEditedAndKeepsIt() {
+        let original = "\u{FEFF}[tui]\nterminal_title = [\"project\"]\n"
+        roundTrips(original, to: "\u{FEFF}[tui]\nterminal_title = [\"project\", \"thread-id\"]\n", record: .appended)
+    }
+
+    @Test func ourItemFirstInALineIsTakenOutWithoutLeavingASpace() {
+        #expect(CodexTitleItem.removing(from: "[tui]\nterminal_title = [\"thread-id\", \"b\"]\n", record: .appended) == "[tui]\nterminal_title = [\"b\"]\n")
+    }
+
+    @Test func aKeyWeCreatedStaysOursWhenOurItemIsPutBackInIt() {
+        let created = CodexTitleItem.Record.createdKey(createdTable: true, addedLineBreak: false)
+        #expect(CodexTitleItem.keeping(created, over: .appended) == created)
+        #expect(CodexTitleItem.keeping(.appended, over: created) == created)
+        #expect(CodexTitleItem.keeping(.alreadyPresent, over: .appended) == .appended)
+    }
+
     @Test func textThatOnlyLooksLikeATuiTableIsNotMistakenForOne() {
         let original = """
             notes = \"\"\"

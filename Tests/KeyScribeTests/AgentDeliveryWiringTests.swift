@@ -706,6 +706,13 @@ struct AgentDeliveryWiringTests {
         #expect(rig.texts == ["Run the tests."])
     }
 
+    @Test func aHostsRefusalShowsTheHostsReason() {
+        #expect(AgentOutput.receiptState(.notSent("docs", reason: .hostRefused("Work bb isn\u{2019}t open.")), mode: "Agent", heard: "")
+            == .error(message: "docs didn\u{2019}t take the message: Work bb isn\u{2019}t open. Nothing sent.", action: nil, heard: HeardExcerpt(heard: "")))
+        #expect(AgentOutput.spokenRefusal(.notSent("docs", reason: .hostRefused("Work bb isn\u{2019}t open.")))
+            == "docs didn\u{2019}t take that: Work bb isn\u{2019}t open")
+    }
+
     @Test func aStoppedConversationSaysWhatHappenedAndHowToGetPastIt() {
         #expect(AgentOutput.receiptState(.notSent("docs", reason: .stopped), mode: "Agent", heard: "")
             == .error(message: "docs\u{2019}s last turn was interrupted, so it takes only a message you type. Nothing sent. Type one there, then dictate again.",

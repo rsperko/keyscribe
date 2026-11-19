@@ -25,6 +25,8 @@ public struct AgentOutbox: Sendable {
         var typedSince = false
         var interruptedSince = false
         var connectionGapSince = false
+        var sending = false
+        var refusedSince: Date?
     }
 
     private var queue: [Held] = []
@@ -34,7 +36,7 @@ public struct AgentOutbox: Sendable {
     public var held: [Message] { queue.map(\.message) }
 
     public mutating func send(
-        _ message: Message, state: AgentLiveState?, canEnterPromptBox: Bool = false, canSteer: Bool = false
+        _ message: Message, state: AgentLiveState?, canEnterPromptBox: Bool = false, canSteer: Bool = false, keeping: Bool = false
     ) -> AgentDeliveryDecision {
         var context = AgentDeliveryContext(state: state ?? .disconnected)
         context.canEnterPromptBox = canEnterPromptBox
@@ -45,17 +47,23 @@ public struct AgentOutbox: Sendable {
             context.canSteer = false
         }
         let decision = AgentDeliveryPolicy.decide(context)
-        if case .queue = decision { queue.append(Held(message: message)) }
+        switch decision {
+        case .queue: queue.append(Held(message: message))
+        case .handOff, .enterPromptBox: if keeping { queue.append(Held(message: message, sending: true)) }
+        case .needsReview, .disconnected: break
+        }
         return decision
     }
 
-    public mutating func release(state: (String) -> AgentLiveState?, canSteer: (String) -> Bool = { _ in false }) -> [Release] {
+    public mutating func release(
+        state: (String) -> AgentLiveState?, canSteer: (String) -> Bool = { _ in false }, keeping: (Message) -> Bool = { _ in false }
+    ) -> [Release] {
         var released: [Release] = []
         var seen: Set<String> = []
         var remaining: [Held] = []
-        for held in queue {
+        for var held in queue {
             let conversation = held.message.conversation
-            guard seen.insert(conversation).inserted else {
+            guard seen.insert(conversation).inserted, !held.sending else {
                 remaining.append(held)
                 continue
             }
@@ -65,14 +73,34 @@ public struct AgentOutbox: Sendable {
             context.connectionGapSinceQueued = held.connectionGapSince
             context.canSteer = canSteer(conversation)
             let decision = AgentDeliveryPolicy.decide(context)
-            if case .queue = decision {
+            switch decision {
+            case .queue:
                 remaining.append(held)
-            } else {
+            case .handOff, .enterPromptBox:
+                released.append(Release(message: held.message, decision: decision))
+                if keeping(held.message) {
+                    held.sending = true
+                    remaining.append(held)
+                }
+            case .needsReview, .disconnected:
                 released.append(Release(message: held.message, decision: decision))
             }
         }
         queue = remaining
         return released
+    }
+
+    public mutating func finish(_ id: String) {
+        queue.removeAll { $0.message.id == id }
+    }
+
+    @discardableResult
+    public mutating func retry(_ id: String, at now: Date, turnRunning: Bool = false) -> (since: Date, marked: Bool) {
+        guard let i = queue.firstIndex(where: { $0.message.id == id }) else { return (now, false) }
+        queue[i].sending = false
+        queue[i].refusedSince = turnRunning ? nil : queue[i].refusedSince ?? now
+        let held = queue[i]
+        return (held.refusedSince ?? now, held.typedSince || held.interruptedSince || held.connectionGapSince)
     }
 
     public mutating func noteTyped(conversation: String) {
@@ -88,13 +116,13 @@ public struct AgentOutbox: Sendable {
     }
 
     public mutating func withdraw(_ id: String) -> Message? {
-        guard let index = queue.firstIndex(where: { $0.message.id == id }) else { return nil }
+        guard let index = queue.firstIndex(where: { $0.message.id == id && !$0.sending }) else { return nil }
         return queue.remove(at: index).message
     }
 
     public mutating func withdraw(conversation: String) -> [Message] {
-        let withdrawn = queue.filter { $0.message.conversation == conversation }.map(\.message)
-        queue.removeAll { $0.message.conversation == conversation }
+        let withdrawn = queue.filter { $0.message.conversation == conversation && !$0.sending }.map(\.message)
+        queue.removeAll { $0.message.conversation == conversation && !$0.sending }
         return withdrawn
     }
 }

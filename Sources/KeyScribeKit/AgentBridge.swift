@@ -133,7 +133,7 @@ public enum AgentEvent: Equatable, Sendable {
     case typed(session: String, prompts: Int? = nil)
     case turnStarted(session: String, turn: String, prompt: String? = nil)
     case absorbed(session: String, turn: String, prompt: String)
-    case turnComplete(session: String, reason: String, answer: String, after: AgentTurnInput? = nil)
+    case turnComplete(session: String, reason: String, answer: String, after: AgentTurnInput? = nil, turn: String? = nil)
     case undelivered(request: String, reason: String, handedOff: Bool)
     case focused(request: String)
     case title(session: String, text: String)
@@ -146,7 +146,7 @@ extension AgentEvent {
     public var session: String? {
         switch self {
         case .hello(let hello): hello.session
-        case .typed(let session, _), .turnStarted(let session, _, _), .absorbed(let session, _, _), .turnComplete(let session, _, _, _),
+        case .typed(let session, _), .turnStarted(let session, _, _), .absorbed(let session, _, _), .turnComplete(let session, _, _, _, _),
              .title(let session, _), .waiting(let session, _), .notify(let session, _, _), .shown(let session, _, _, _): session
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: nil
         }
@@ -160,8 +160,8 @@ extension AgentEvent {
         case .typed(let session, let prompts): return .typed(session: rename(session), prompts: prompts)
         case .turnStarted(let session, let turn, let prompt): return .turnStarted(session: rename(session), turn: turn, prompt: prompt)
         case .absorbed(let session, let turn, let prompt): return .absorbed(session: rename(session), turn: turn, prompt: prompt)
-        case .turnComplete(let session, let reason, let answer, let after):
-            return .turnComplete(session: rename(session), reason: reason, answer: answer, after: after)
+        case .turnComplete(let session, let reason, let answer, let after, let turn):
+            return .turnComplete(session: rename(session), reason: reason, answer: answer, after: after, turn: turn)
         case .title(let session, let text): return .title(session: rename(session), text: text)
         case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
         case .notify(let session, let turn, let on): return .notify(session: rename(session), turn: turn, on: on)

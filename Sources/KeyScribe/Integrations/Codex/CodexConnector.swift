@@ -10,6 +10,8 @@ final class CodexConnector: AgentConnector {
     nonisolated static let script = ConnectorResources.text(named: "keyscribe-codex", extension: "sh", subdirectory: "CodexConnector")
     nonisolated static let executableName = "keyscribe-codex"
 
+    var keepsConnection: Bool { false }
+
     let kind = CodexHost.kind
     let id: String
     private let agentsDir: URL
@@ -40,7 +42,7 @@ final class CodexConnector: AgentConnector {
               let result = try? await client.call("hooks/list", ["cwds": [home]], timeout: CodexHost.callTimeout)
         else { return nil }
         switch CodexPlugin.trust(result, pluginId: pluginId) {
-        case .unreadable, .absent: return nil
+        case .unreadable: return nil
         case let known: return known
         }
     }
@@ -84,9 +86,12 @@ final class CodexConnector: AgentConnector {
         CodexPlugin.files(layout, executable: executable.path, installation: installation)
     }
 
-    private func filled(_ script: String) -> String {
-        let app = String(String(decoding: (try? JSONEncoder().encode(Branding.appName)) ?? Data("\"\"".utf8), as: UTF8.self).dropFirst().dropLast())
-        return script.replacingOccurrences(of: "__AGENTS_DIR__", with: ShellWord.quoted(agentsDir.path)).replacingOccurrences(of: "__APP_NAME__", with: app)
+    private func filled(_ script: String) -> String { Self.filled(script, agentsDir: agentsDir, app: Branding.appName) }
+
+    static func filled(_ script: String, agentsDir: URL, app: String) -> String {
+        let escaped = String(String(decoding: (try? JSONEncoder().encode(app)) ?? Data("\"\"".utf8), as: UTF8.self).dropFirst().dropLast())
+        return script.replacingOccurrences(of: "__AGENTS_DIR__", with: ShellWord.quoted(agentsDir.path))
+            .replacingOccurrences(of: "__APP_NAME__", with: ShellWord.quoted(escaped))
     }
 
     private func filesCurrent(_ script: String, target: ConnectorTarget, installation: String) -> Bool {
@@ -108,20 +113,28 @@ final class CodexConnector: AgentConnector {
         case .enabled: break
         }
         guard filesCurrent(script, target: target, installation: installation) else { return .status(.outdated(installed: "")) }
-        let config = await Self.read(configURL(target.folder))
+        let config: String?
+        do { config = try await Self.read(configURL(target.folder)) } catch { return .broken(Self.titleUnreadable) }
         switch CodexTitleItem.inspect(config) {
         case .present: break
         case .missing: return .broken(Self.needsRepair)
         case .unreadable, .unsupported: return .broken(Self.titleUnreadable)
         }
-        if await trust(target.folder.path, layout.pluginId) == .needsTrust { return .broken(Self.needsTrust) }
-        return .status(.ready)
+        switch await trust(target.folder.path, layout.pluginId) {
+        case .needsTrust: return .broken(Self.needsTrust)
+        case .absent: return .broken(Self.hooksNotListed)
+        case .trusted, .unreadable, nil: return .status(.ready)
+        }
     }
 
     nonisolated static let needsRepair =
         "The thread-id item was removed from Codex\u{2019}s terminal title, so \(Branding.appName) can\u{2019}t tell which terminal shows which conversation. Choose Update to put it back."
     nonisolated static let titleUnreadable =
         "Codex\u{2019}s config.toml couldn\u{2019}t be read, so \(Branding.appName) can\u{2019}t check the thread-id item in its terminal title."
+    nonisolated static let titleNotRemoved =
+        "Codex\u{2019}s config.toml has changed in a way \(Branding.appName) can\u{2019}t safely edit, so the thread-id item it added to the terminal title is still there. Remove \u{201C}thread-id\u{201D} from terminal_title under [tui] in config.toml, or put the file back as it was, then uninstall again."
+    nonisolated static let hooksNotListed =
+        "Codex\u{2019}s app server doesn\u{2019}t list the plugin\u{2019}s hooks, so its turns may not be reported. Choose Update to add the plugin again."
     nonisolated static let needsTrust =
         "Codex hasn\u{2019}t trusted the plugin\u{2019}s hooks yet. In Codex, type /hooks and trust the \(Branding.appName) hooks."
 
@@ -129,21 +142,29 @@ final class CodexConnector: AgentConnector {
         guard let script else { throw AgentConnectorError(message: copy.unavailable) }
         guard let installation = target.installation else { throw AgentConnectorError(message: copy.noReason) }
         let config = configURL(target.folder)
-        let original = await Self.read(config)
+        let original = try await Self.read(config)
         switch CodexTitleItem.inspect(original) {
         case .unreadable, .unsupported: throw AgentConnectorError(message: Self.titleUnreadable)
         case .present, .missing: break
         }
         let marketplace = marketplaceFolder(for: target.folder)
-        let files = expectedFiles(installation).map { (marketplace.appendingPathComponent($0.key), $0.value) } + [(executable, filled(script))]
+        let files = expectedFiles(installation).map { (marketplace.appendingPathComponent($0.key), $0.value) }
         let executable = self.executable
+        let program = filled(script)
         let failure: String? = await Task.detached {
             do {
                 for (url, text) in files {
                     try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try Data(text.utf8).write(to: url, options: .atomic)
                 }
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+                try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let staged = executable.deletingLastPathComponent().appendingPathComponent(".\(executable.lastPathComponent)-\(UUID().uuidString)")
+                try Data(program.utf8).write(to: staged)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staged.path)
+                guard rename(staged.path, executable.path) == 0 else {
+                    try? FileManager.default.removeItem(at: staged)
+                    return String(cString: strerror(errno))
+                }
                 return nil
             } catch {
                 return error.localizedDescription
@@ -151,7 +172,7 @@ final class CodexConnector: AgentConnector {
         }.value
         if let failure { throw AgentConnectorError(message: failure) }
         let added = try await output(tool, ["plugin", "marketplace", "add", marketplace.path], subcommand: "plugin marketplace add", target: target)
-        if added.status != 0, !Self.mentions(await Self.read(config), marketplace: layout.marketplace, at: marketplace.path) {
+        if added.status != 0, !Self.mentions((try? await Self.read(config)) ?? nil, marketplace: layout.marketplace, at: marketplace.path) {
             throw AgentConnectorError(message: Self.problem(added))
         }
         try await call(tool, ["plugin", "add", layout.pluginId], subcommand: "plugin add", target: target)
@@ -160,14 +181,46 @@ final class CodexConnector: AgentConnector {
 
     private func addTitleItem(_ target: ConnectorTarget) async throws {
         let config = configURL(target.folder)
-        let current = await Self.read(config)
+        let current = try await Self.read(config)
         guard CodexTitleItem.inspect(current) != .present else { return }
-        guard let (text, record) = CodexTitleItem.adding(to: current) else { throw AgentConnectorError(message: Self.titleUnreadable) }
+        guard let (text, added) = CodexTitleItem.adding(to: current) else { throw AgentConnectorError(message: Self.titleUnreadable) }
         let recordURL = titleRecordURL(target.folder)
+        let earlier = FileManager.default.contents(atPath: recordURL.path).flatMap { try? JSONDecoder().decode(CodexTitleItem.Record.self, from: $0) }
+        let record = earlier.map { CodexTitleItem.keeping($0, over: added) } ?? added
         let failure: String? = await Task.detached {
             do {
                 try JSONEncoder().encode(record).write(to: recordURL, options: .atomic)
-                try Data(text.utf8).write(to: config, options: .atomic)
+                do {
+                    try Data(text.utf8).write(to: config, options: .atomic)
+                } catch {
+                    if let earlier { try? JSONEncoder().encode(earlier).write(to: recordURL, options: .atomic) } else { try? FileManager.default.removeItem(at: recordURL) }
+                    throw error
+                }
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }.value
+        if let failure { throw AgentConnectorError(message: failure) }
+    }
+
+    func uninstallWithoutTool(target: ConnectorTarget) async throws {
+        try await takeTitleItemBack(target)
+    }
+
+    private func takeTitleItemBack(_ target: ConnectorTarget) async throws {
+        let recordURL = titleRecordURL(target.folder)
+        let config = configURL(target.folder)
+        let failure: String? = await Task.detached {
+            guard let data = FileManager.default.contents(atPath: recordURL.path),
+                  let record = try? JSONDecoder().decode(CodexTitleItem.Record.self, from: data)
+            else { return nil }
+            let current: String?
+            do { current = try Self.readNow(config) } catch { return Self.titleUnreadable }
+            guard let restored = CodexTitleItem.removing(from: current, record: record) else { return Self.titleNotRemoved }
+            do {
+                if restored != (current ?? "") { try Data(restored.utf8).write(to: config, options: .atomic) }
+                try FileManager.default.removeItem(at: recordURL)
                 return nil
             } catch {
                 return error.localizedDescription
@@ -183,23 +236,17 @@ final class CodexConnector: AgentConnector {
     func uninstall(tool: String, target: ConnectorTarget) async throws {
         let removed = try await output(tool, ["plugin", "remove", layout.pluginId], subcommand: "plugin remove", target: target)
         let config = configURL(target.folder)
-        if removed.status != 0, (await Self.read(config))?.contains("\"\(layout.pluginId)\"") == true { throw AgentConnectorError(message: Self.problem(removed)) }
+        if removed.status != 0, (try? await Self.read(config))??.contains("\"\(layout.pluginId)\"") == true { throw AgentConnectorError(message: Self.problem(removed)) }
         let marketplace = marketplaceFolder(for: target.folder)
         let left = try await output(tool, ["plugin", "marketplace", "remove", layout.marketplace], subcommand: "plugin marketplace remove", target: target)
-        if left.status != 0, Self.mentions(await Self.read(config), marketplace: layout.marketplace, at: marketplace.path) {
+        if left.status != 0, Self.mentions((try? await Self.read(config)) ?? nil, marketplace: layout.marketplace, at: marketplace.path) {
             throw AgentConnectorError(message: Self.problem(left))
         }
-        let recordURL = titleRecordURL(target.folder)
+        try await takeTitleItemBack(target)
         let codexFolder = self.codexFolder
         let executable = self.executable
         let failure: String? = await Task.detached {
             do {
-                if let data = FileManager.default.contents(atPath: recordURL.path), let record = try? JSONDecoder().decode(CodexTitleItem.Record.self, from: data) {
-                    let current = FileManager.default.contents(atPath: config.path).map { String(decoding: $0, as: UTF8.self) }
-                    if let restored = CodexTitleItem.removing(from: current, record: record), restored != current {
-                        try Data(restored.utf8).write(to: config, options: .atomic)
-                    }
-                }
                 if FileManager.default.fileExists(atPath: marketplace.path) { try FileManager.default.removeItem(at: marketplace) }
                 let others = (try? FileManager.default.contentsOfDirectory(atPath: codexFolder.path))?.filter { $0.hasPrefix("home-") } ?? []
                 if others.isEmpty, FileManager.default.fileExists(atPath: executable.path) { try FileManager.default.removeItem(at: executable) }
@@ -211,8 +258,18 @@ final class CodexConnector: AgentConnector {
         if let failure { throw AgentConnectorError(message: failure) }
     }
 
-    private nonisolated static func read(_ url: URL) async -> String? {
-        await Task.detached { FileManager.default.contents(atPath: url.path).map { String(decoding: $0, as: UTF8.self) } }.value
+    private nonisolated static func read(_ url: URL) async throws -> String? {
+        try await Task.detached { try readNow(url) }.value
+    }
+
+    private nonisolated static func readNow(_ url: URL) throws -> String? {
+        do {
+            return String(decoding: try Data(contentsOf: url), as: UTF8.self)
+        } catch CocoaError.fileReadNoSuchFile {
+            return nil
+        } catch {
+            throw AgentConnectorError(message: titleUnreadable)
+        }
     }
 
     private nonisolated static func mentions(_ config: String?, marketplace: String, at path: String) -> Bool {
@@ -253,7 +310,6 @@ final class CodexConnector: AgentConnector {
         removalUnfinishedAdvice: "The plugin was uninstalled in \(Branding.appName), but its files are still in place. Finish uninstalling it, then install it again if you want it back.",
         listUnreadable: "Codex didn\u{2019}t answer, so the plugin couldn\u{2019}t be checked.",
         noReason: "Codex did not say why.",
-        manualUninstallLead: "To remove the plugin from Codex, run these in a terminal:",
         manualUninstallAfterDisconnect: "Disconnected from \(Branding.appName). Run these in a terminal to finish uninstalling:",
         stillConnected: { _ in "" },
         setupTitle: "Plugin",

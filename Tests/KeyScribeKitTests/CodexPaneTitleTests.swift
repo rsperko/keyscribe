@@ -16,6 +16,12 @@ struct CodexPaneTitleTests {
         #expect(CodexPaneTitle.thread(in: "", among: [first]) == nil)
     }
 
+    @Test func aSessionFileNameOrPathThatContainsTheIdNamesNoThread() {
+        #expect(CodexPaneTitle.thread(in: "rollout-2026-11-18T12-00-00-019a8b2c-1234-7abc-8def-0123456789ab.jsonl — Editor", among: [first]) == nil)
+        #expect(CodexPaneTitle.thread(in: "~/.codex/sessions/019a8b2c-1234-7abc-8def-0123456789ab", among: [first]) == nil)
+        #expect(CodexPaneTitle.thread(in: "x019a8b2c-1234-7abc-8def-0123456789ab", among: [first]) == nil)
+    }
+
     @Test func twoThreadsTheShownPrefixCannotTellApartNameNone() {
         let twin = "019a8b2c-1234-7abc-8def-01234ffffffff"
         #expect(CodexPaneTitle.thread(in: "019a8b2c-1234-7abc-8def-01234...", among: [first, twin]) == nil)

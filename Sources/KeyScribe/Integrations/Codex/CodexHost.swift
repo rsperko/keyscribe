@@ -7,12 +7,17 @@ struct CodexPane: Equatable, Sendable {
     var title: String
 }
 
+struct CodexPanes: Equatable, Sendable {
+    var panes: [CodexPane]
+    var unread: Set<Int> = []
+}
+
 @MainActor
 final class CodexHost: AgentHost {
     typealias Connect = @Sendable (
         _ home: String, _ onNotification: @escaping @Sendable (CodexNotification) -> Void, _ onClose: @escaping @Sendable () -> Void
     ) async -> CodexDaemonClient?
-    typealias Panes = @Sendable (_ home: String) async -> [CodexPane]
+    typealias Panes = @Sendable (_ home: String) async -> CodexPanes
 
     nonisolated static let homeVariable = AgentProcesses.Rule.codex.setupVariable
     nonisolated static let kind = AgentKind(id: CodexThread.agent, displayName: "Codex", connectorName: "Codex plugin")
@@ -33,11 +38,16 @@ final class CodexHost: AgentHost {
     nonisolated static let pageLimit = 10
     nonisolated static let paneLifetime: TimeInterval = 5
     nonisolated static let ownPromptMemory = 16
+    nonisolated static let relistAfter: TimeInterval = 60
+    nonisolated static let listAttempts = 3
 
     private final class Home {
         var client: CodexDaemonClient?
+        var connecting: Task<CodexDaemonClient?, Never>?
         var generation = 0
         var threads: [String: CodexThread] = [:]
+        var listedAt: Date?
+        var notices = 0
         var foreignPrompt: [String: Date] = [:]
         var panes: (at: Date, panes: [CodexPane])?
     }
@@ -92,9 +102,10 @@ final class CodexHost: AgentHost {
                 candidate.tool.map { CodexInstall.accepts($0) } ?? true
                     && candidate.setup.map { ConnectorFolders.canonical(URL(fileURLWithPath: $0)).path == wanted } == true
             }
-            guard !found.isEmpty else { return [] }
+            guard !found.isEmpty else { return CodexPanes(panes: []) }
             let read = await titles.titles(of: found.map(\.pid))
-            return found.compactMap { candidate in read[candidate.pid].map { CodexPane(pid: candidate.pid, title: $0) } }
+            return CodexPanes(
+                panes: found.compactMap { candidate in read.titles[candidate.pid].map { CodexPane(pid: candidate.pid, title: $0) } }, unread: read.unread)
         }
     }
 
@@ -160,8 +171,10 @@ final class CodexHost: AgentHost {
         if let known = home.panes, now().timeIntervalSince(known.at) < Self.paneLifetime {
             current = known.panes
         } else {
-            current = await panes(folder)
-            home.panes = (now(), current)
+            let fresh = await panes(folder)
+            let kept = (home.panes?.panes ?? []).filter { fresh.unread.contains($0.pid) }
+            current = fresh.panes + kept
+            home.panes = (fresh.unread.isEmpty ? now() : .distantPast, current)
         }
         var shown: [String: Set<Int>] = [:]
         for pane in current {
@@ -181,19 +194,28 @@ final class CodexHost: AgentHost {
     private func client(_ folder: String) async -> CodexDaemonClient? {
         let home = home(folder)
         if let client = home.client, client.isOpen { return client }
+        if let pending = home.connecting { return await pending.value }
         drop(home)
         let generation = home.generation
-        let client = await connect(folder, { [weak self] notification in
+        let connect = connect
+        let notified: @Sendable (CodexNotification) -> Void = { [weak self] notification in
             Task { @MainActor [weak self] in self?.apply(notification, in: folder, generation: generation) }
-        }, { [weak self] in
-            Task { @MainActor [weak self] in self?.closed(folder, generation: generation) }
-        })
-        guard home.generation == generation, homes[folder] === home else {
-            client?.close()
-            return nil
         }
-        home.client = client
-        return client
+        let ended: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor [weak self] in self?.closed(folder, generation: generation) }
+        }
+        let pending = Task { @MainActor [weak self] () -> CodexDaemonClient? in
+            let client = await connect(folder, notified, ended)
+            home.connecting = nil
+            guard let self, home.generation == generation, self.homes[folder] === home else {
+                client?.close()
+                return nil
+            }
+            home.client = client
+            return client
+        }
+        home.connecting = pending
+        return await pending.value
     }
 
     private func drop(_ home: Home) {
@@ -201,6 +223,7 @@ final class CodexHost: AgentHost {
         home.client = nil
         home.generation += 1
         home.threads = [:]
+        home.listedAt = nil
     }
 
     private func closed(_ folder: String, generation: Int) {
@@ -211,6 +234,22 @@ final class CodexHost: AgentHost {
 
     private func list(_ folder: String) async -> [CodexThread]? {
         guard let client = await client(folder) else { return nil }
+        let known = home(folder)
+        if known.client === client, let listed = known.listedAt, now().timeIntervalSince(listed) < Self.relistAfter {
+            return known.threads.values.sorted { $0.id < $1.id }
+        }
+        for _ in 1..<Self.listAttempts {
+            let noticesBefore = known.notices
+            guard let threads = await readList(folder, client: client) else { return nil }
+            if known.notices == noticesBefore {
+                known.listedAt = now()
+                return threads
+            }
+        }
+        return await readList(folder, client: client)
+    }
+
+    private func readList(_ folder: String, client: CodexDaemonClient) async -> [CodexThread]? {
         var ids: [String] = []
         var cursor: String?
         for _ in 0..<Self.pageLimit {
@@ -251,8 +290,11 @@ final class CodexHost: AgentHost {
 
     private func apply(_ notification: CodexNotification, in folder: String, generation: Int) {
         guard let home = homes[folder], home.generation == generation else { return }
+        if case .other = notification { return }
+        home.notices += 1
         switch notification {
         case .statusChanged(let id, let status):
+            if home.threads[id] == nil { home.listedAt = nil }
             let was = home.threads[id]?.status.liveState
             home.threads[id]?.status = status
             let state = status.liveState
@@ -262,12 +304,15 @@ final class CodexHost: AgentHost {
             }
             if state == .idle, let was, was != .idle { checkStopped(id, in: folder) }
         case .nameUpdated(let id, let name):
+            if home.threads[id] == nil { home.listedAt = nil }
             home.threads[id]?.name = name
         case .started(let thread):
             home.threads[thread.id] = thread
             home.panes = nil
+            home.listedAt = nil
         case .closed(let id):
             home.threads[id] = nil
+            home.listedAt = nil
         case .other:
             return
         }
@@ -304,10 +349,10 @@ final class CodexHost: AgentHost {
                 var limit = 1
             }
             guard let result = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.callTimeout),
-                  CodexDelivery.turns(result)?.turns.first?.status == "interrupted",
+                  let last = CodexDelivery.turns(result)?.turns.first, last.status == "interrupted",
                   let self, let home = self.homes[folder], home.generation == generation
             else { return }
-            self.changed?(.event(.turnComplete(session: self.key(id, in: folder), reason: "aborted", answer: "")))
+            self.changed?(.event(.turnComplete(session: self.key(id, in: folder), reason: "aborted", answer: "", turn: last.id)))
         }
     }
 
@@ -364,8 +409,14 @@ final class CodexHost: AgentHost {
         guard let client = await client(location.instance) else { return .refused(Self.daemonDown) }
         let home = home(location.instance)
         if home.threads[id] == nil, let thread = await read(id, with: client), home.client === client { home.threads[id] = thread }
-        let status = home.threads[id]?.status
-        switch CodexDelivery.precheck(status: status, lastForeignPrompt: home.foreignPrompt[id], now: now()) {
+        var precheck = CodexDelivery.precheck(status: home.threads[id]?.status, lastForeignPrompt: home.foreignPrompt[id], now: now())
+        if precheck == .hold(.typedJustNow), let typed = home.foreignPrompt[id] {
+            let wait = CodexDelivery.foreignPromptSettle - now().timeIntervalSince(typed)
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            if let fresh = await read(id, with: client), home.client === client { home.threads[id] = fresh }
+            precheck = CodexDelivery.precheck(status: home.threads[id]?.status, lastForeignPrompt: home.foreignPrompt[id], now: now())
+        }
+        switch precheck {
         case .refuse:
             return .refused("Codex no longer has this conversation open.")
         case .hold:
@@ -389,13 +440,26 @@ final class CodexHost: AgentHost {
     private func send(
         _ text: String, images: [String], request: String, thread id: String, home: Home, client: CodexDaemonClient
     ) async -> AgentHostDelivery {
+        let digest = AgentPromptDigest.of(text)
+        remember(digest)
+        let delivery = await start(text, images: images, request: request, thread: id, home: home, client: client)
+        switch delivery {
+        case .refused, .queued: forget(digest)
+        case .accepted, .uncertain, .unsupported: break
+        }
+        return delivery
+    }
+
+    private func start(
+        _ text: String, images: [String], request: String, thread id: String, home: Home, client: CodexDaemonClient
+    ) async -> AgentHostDelivery {
         let messageId = Self.messageId(request)
-        remember(AgentPromptDigest.of(text))
         if case .active = home.threads[id]?.status {
             if let steered = await steer(text, images: images, messageId: messageId, thread: id, client: client) { return steered }
             guard let fresh = await read(id, with: client), home.client === client else { return .uncertain }
             home.threads[id] = fresh
-            guard fresh.status == .idle else { return .uncertain }
+            if fresh.status == .notLoaded { return .refused("Codex no longer has this conversation open.") }
+            guard fresh.status == .idle else { return .queued }
         }
         struct Params: Encodable, Sendable {
             var threadId: String
@@ -447,13 +511,13 @@ final class CodexHost: AgentHost {
             var limit = 2
             var itemsView = "full"
         }
-        let deadline = Date().addingTimeInterval(confirmFor)
+        let deadline = now().addingTimeInterval(confirmFor)
         while true {
             guard let listed = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.callTimeout),
                   let turns = CodexDelivery.turns(listed)?.turns
             else { return .uncertain }
             if CodexDelivery.confirmation(in: turns, clientUserMessageId: messageId) != .absent { return .accepted }
-            guard Date() < deadline else { return .uncertain }
+            guard now() < deadline else { return .uncertain }
             try? await Task.sleep(for: .seconds(confirmEvery))
         }
     }
@@ -461,6 +525,10 @@ final class CodexHost: AgentHost {
     private func remember(_ digest: String) {
         ownPrompts.append(digest)
         if ownPrompts.count > Self.ownPromptMemory { ownPrompts.removeFirst() }
+    }
+
+    private func forget(_ digest: String) {
+        if let last = ownPrompts.lastIndex(of: digest) { ownPrompts.remove(at: last) }
     }
 
     private func thread(at location: AgentHostLocation) -> String? {

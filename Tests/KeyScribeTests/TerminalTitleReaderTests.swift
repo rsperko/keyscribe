@@ -72,26 +72,70 @@ struct TerminalTitleReaderTests {
 
     private let ghosttyAnswer = "/dev/ttys004\t\tcodex 019a3c61-terminal-a\n/dev/ttys005\t\tzsh\n/dev/ttys003\t\ttmux work\n"
 
-    private func reader(_ facts: Facts, _ scripts: Scripts) -> TerminalTitleReader {
-        TerminalTitleReader(surfaces: .builtIn, facts: { facts }, script: { scripts.read($0, $1, $2) })
+    final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var open = false
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                let now = lock.withLock { () -> Bool in
+                    if open { return true }
+                    waiting.append(continuation)
+                    return false
+                }
+                if now { continuation.resume() }
+            }
+        }
+
+        func release() {
+            let held = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                open = true
+                defer { waiting = [] }
+                return waiting
+            }
+            held.forEach { $0.resume() }
+        }
+    }
+
+    private func reader(_ facts: Facts, _ scripts: Scripts, scriptsWaitFor gate: Gate? = nil, budget: TerminalTitleReader.Wait? = nil) -> TerminalTitleReader {
+        TerminalTitleReader(surfaces: .builtIn, facts: { facts }, script: {
+            await gate?.wait()
+            return scripts.read($0, $1, $2)
+        }, wait: budget ?? { _ in try? await Task.sleep(for: .seconds(30)) })
     }
 
     @Test func eachSurfaceIsReadOnceAndAPaneInsideAMultiplexerTakesThePaneTitleNotTheTabAroundIt() async {
         let facts = facts()
         let scripts = Scripts(.value(ghosttyAnswer))
-        let titles = await reader(facts, scripts).titles(of: [30, 31, 70, 71, 70])
-        #expect(titles == [30: "codex 019a3c61-terminal-a", 31: "zsh", 70: Self.first, 71: Self.second])
+        let read = await reader(facts, scripts).titles(of: [30, 31, 70, 71, 70])
+        #expect(read.titles == [30: "codex 019a3c61-terminal-a", 31: "zsh", 70: Self.first, 71: Self.second])
+        #expect(read.unread.isEmpty)
         #expect(facts.ran == [Self.titleCommand])
         #expect(scripts.asked == ["\(Self.ghostty) 10"])
     }
 
-    @Test func aSurfaceThatFailsTimesOutOrMayNotBeAskedGivesNoTitle() async {
+    @Test func aSurfaceThatFailsOrMayNotBeAskedIsUnreadNotTitleless() async {
         for answer in [TerminalRead.failed, .notAllowed] {
             let facts = facts()
             facts.outputs[Self.titleCommand] = nil
-            #expect(await reader(facts, Scripts(answer)).titles(of: [30, 70]).isEmpty)
+            let read = await reader(facts, Scripts(answer)).titles(of: [30, 70])
+            #expect(read.titles.isEmpty)
+            #expect(read.unread == [30, 70])
         }
-        #expect(await reader(facts(), Scripts(.value(ghosttyAnswer))).titles(of: [999]).isEmpty)
+        let nowhere = await reader(facts(), Scripts(.value(ghosttyAnswer))).titles(of: [999])
+        #expect(nowhere.titles.isEmpty && nowhere.unread.isEmpty)
+    }
+
+    @Test func aSurfaceStillAnsweringWhenTheBudgetEndsIsLeftUnreadWhileTheOthersAreRead() async {
+        let slow = Gate()
+        defer { slow.release() }
+        let budget: TerminalTitleReader.Wait = { answered in
+            while answered() < 1 { await Task.yield() }
+        }
+        let read = await reader(facts(), Scripts(.value(ghosttyAnswer)), scriptsWaitFor: slow, budget: budget).titles(of: [30, 70])
+        #expect(read.titles == [70: Self.first])
+        #expect(read.unread == [30])
     }
 
     @Test func readingTitlesLeavesWhatThePlaceReadFindsForTheSameConversationsUnchanged() async {

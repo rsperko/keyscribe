@@ -18,6 +18,6 @@ enum TitleProbe {
         let table = AgentProcessTable(surfaces: surfaces)
         let candidates = await Task.detached { rules.flatMap { table.found($0).candidates } }.value
         let reader = TerminalTitleReader(surfaces: surfaces)
-        return await lines(candidates: candidates, titles: { await reader.titles(of: $0) })
+        return await lines(candidates: candidates, titles: { await reader.titles(of: $0).titles })
     }
 }

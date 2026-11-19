@@ -108,9 +108,20 @@ enum BBBuildFinder {
     }
 
     nonisolated static func environment(folder: String, home: String) -> [String: String] {
-        BBBuilds.environment(
-            folder: folder, home: home, runtime: FileManager.default.contents(atPath: (folder as NSString).appendingPathComponent(BBBuilds.runtimeFile)),
-            alive: { kill($0, 0) == 0 || errno == EPERM })
+        BBBuilds.environment(folder: folder, home: home, runtime: runtime(of: folder), started: started)
+    }
+
+    nonisolated static func serves(folder: String) -> Bool { BBBuilds.serves(runtime: runtime(of: folder), started: started) }
+
+    nonisolated private static func runtime(of folder: String) -> Data? {
+        FileManager.default.contents(atPath: (folder as NSString).appendingPathComponent(BBBuilds.runtimeFile))
+    }
+
+    nonisolated static func started(_ pid: Int32) -> Date? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_uid == getuid(), info.pbi_status != UInt32(SZOMB) else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1_000_000)
     }
 
     @MainActor private static func sharingIdentity(_ build: BBBuild) -> NSRunningApplication? {

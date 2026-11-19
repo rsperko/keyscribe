@@ -18,6 +18,7 @@ final class BBHost: AgentHost {
     private enum Listing {
         case threads([BBThreads.Thread])
         case problem(String)
+        case closed(String)
     }
 
     private let home: String
@@ -25,6 +26,7 @@ final class BBHost: AgentHost {
     private let describe: @Sendable (String) -> BBBuild?
     private let installed: (String) -> Bool
     private let isOpen: @MainActor (BBBuild) -> Bool
+    private let serving: @MainActor (BBBuild) -> Bool
     private let run: Run
     private let activate: @MainActor (BBBuild) -> Void
     private let frontmost: @MainActor (Set<String>) -> AgentHostApp?
@@ -47,6 +49,7 @@ final class BBHost: AgentHost {
         describe: (@Sendable (String) -> BBBuild?)? = nil,
         installed: @escaping (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
         isOpen: @escaping @MainActor (BBBuild) -> Bool = BBBuildFinder.isOpen,
+        serving: @escaping @MainActor (BBBuild) -> Bool = { BBBuildFinder.serves(folder: $0.folder) },
         run: @escaping Run = { try await HostCLI.run($0, subcommand: $1, input: $2, environment: $3) },
         activate: @escaping @MainActor (BBBuild) -> Void = BBBuildFinder.bringForward,
         frontmost: @escaping @MainActor (Set<String>) -> AgentHostApp? = BBBuildFinder.frontmost(among:),
@@ -65,6 +68,7 @@ final class BBHost: AgentHost {
         self.describe = describe ?? { BBBuildFinder.describe(folder: $0, home: home) }
         self.installed = installed
         self.isOpen = isOpen
+        self.serving = serving
         self.run = run
         self.activate = activate
         self.frontmost = frontmost
@@ -160,22 +164,29 @@ final class BBHost: AgentHost {
         var titles: [String: String] = [:]
         var shownInstead: [String: String] = [:]
         var carried: Set<AgentHostLocation> = []
-        var problems: [String] = []
         var listedNow: [String: Bool] = [:]
+        var firstUnlisted: String?
+        var problem: String?
         defer { retryLaunched(listedNow) }
         for build in builds {
+            func lastSeen(_ said: String) -> [BBThreads.Thread] {
+                listedNow[build.folder] = false
+                firstUnlisted = firstUnlisted ?? said
+                let kept = listed[build.folder] ?? []
+                carried.formUnion(kept.map { AgentHostLocation(host: Self.kind.id, instance: build.folder, native: $0.id) })
+                return kept
+            }
             let threads: [BBThreads.Thread]
             switch await list(build) {
             case .threads(let found):
                 threads = found
                 listed[build.folder] = found
                 listedNow[build.folder] = true
-            case .problem(let problem):
-                listedNow[build.folder] = false
-                problems.append(problem)
-                guard let kept = listed[build.folder] else { continue }
-                threads = kept
-                carried.formUnion(kept.map { AgentHostLocation(host: Self.kind.id, instance: build.folder, native: $0.id) })
+            case .closed(let said):
+                threads = lastSeen(said)
+            case .problem(let said):
+                problem = problem ?? said
+                threads = lastSeen(said)
             }
             for thread in threads {
                 let location = AgentHostLocation(host: Self.kind.id, instance: build.folder, native: thread.id)
@@ -185,14 +196,16 @@ final class BBHost: AgentHost {
                 shownInstead[location.conversationKey] = thread.shownInstead
             }
         }
-        if !problems.isEmpty, problems.count == builds.count { return .unreadable(problems[0]) }
-        return .found(sessions, titles: titles, shownInstead: shownInstead, carried: carried, problem: problems.first)
+        if let unlisted = problem ?? firstUnlisted, !listedNow.values.contains(true) { return .unreadable(unlisted) }
+        return .found(sessions, titles: titles, shownInstead: shownInstead, carried: carried, problem: problem)
     }
 
+    private func reachable(_ build: BBBuild) -> Bool { isOpen(build) || serving(build) }
+
     private func list(_ build: BBBuild) async -> Listing {
-        guard isOpen(build) else {
-            guard build.app == nil else { return .problem("\(build.name) isn\u{2019}t open. Open \(build.name) to reach its threads.") }
-            return .problem(
+        guard reachable(build) else {
+            guard build.app == nil else { return .closed("\(build.name) isn\u{2019}t open. Open \(build.name) to reach its threads.") }
+            return .closed(
                 "Open the copy of bb that uses \(shown(build.folder)) to reach its threads. "
                     + "If it\u{2019}s already open, \(Branding.appName) can\u{2019}t tell that it uses this folder.")
         }
@@ -280,7 +293,7 @@ final class BBHost: AgentHost {
 
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
         guard let (build, thread) = await target(location) else { return .refused("bb no longer lists this thread.") }
-        guard isOpen(build) else { return .refused("\(build.name) isn\u{2019}t open.") }
+        guard reachable(build) else { return .refused("\(build.name) isn\u{2019}t open.") }
         let output: HostCLI.Output
         do {
             output = try await call(
@@ -302,7 +315,7 @@ final class BBHost: AgentHost {
     }
 
     func rename(_ location: AgentHostLocation, to name: String) async -> Bool {
-        guard let (build, thread) = await target(location), isOpen(build),
+        guard let (build, thread) = await target(location), reachable(build),
               let output = try? await call(build, ["thread", "update", thread, "--title=\(name)", "--json"], subcommand: "thread update")
         else { return false }
         return output.status == 0

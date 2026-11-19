@@ -262,7 +262,6 @@ final class ClaudeConnector: AgentConnector {
         removalUnfinishedAdvice: "The connector was uninstalled in \(Branding.appName), but Claude Code has not finished removing it. Its conversations no longer connect. Finish uninstalling it, then install it again if you want it back.",
         listUnreadable: "Claude Code's plugin list could not be read.",
         noReason: "Claude Code did not say why.",
-        manualUninstallLead: "To remove the connector from Claude Code, run these in a terminal, then run /reload-plugins in each open conversation or restart it:",
         manualUninstallAfterDisconnect: "Disconnected from \(Branding.appName). Run these in a terminal to finish uninstalling, then run /reload-plugins in each open conversation or restart it:",
         stillConnected: { count in
             count == 1

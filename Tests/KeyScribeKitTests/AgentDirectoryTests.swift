@@ -27,6 +27,54 @@ struct AgentDirectoryTests {
         #expect(directory.conversation(pid: 10)?.id == "claude:a")
     }
 
+    @Test func aConversationListedBeforeItsFolderIsKnownGetsASayableNameThatTheFolderReplaces() {
+        var directory = AgentDirectory()
+        directory.update(entries: [hosted("t0", at: 50, cwd: "/src/keyscribe")], live: [])
+        directory.update(entries: [hosted("t0", at: 50, cwd: "/src/keyscribe"), hosted("t1", at: 100, cwd: ""), hosted("t2", at: 200, cwd: "")], live: [])
+        let early = directory.conversations.filter { $0.id != "claude:t0" }.map(\.handle).sorted()
+        #expect(early == ["claude", "claude blue"])
+        directory.update(entries: [hosted("t0", at: 50, cwd: "/src/keyscribe"), hosted("t1", at: 100), hosted("t2", at: 200, cwd: "")], live: [])
+        #expect(directory.conversations.first { $0.id == "claude:t1" }?.handle == "keyscribe blue")
+        #expect(directory.conversations.first { $0.id == "claude:t0" }?.handle == "keyscribe")
+        #expect(directory.remembered["claude:t1"]?.name == "keyscribe blue")
+    }
+
+    @Test func aNameGivenBeforeTheFolderWasKnownIsNotRememberedSoARestartStillReplacesIt() throws {
+        var before = AgentDirectory()
+        before.update(entries: [hosted("t1", at: 100, cwd: "")], live: [])
+        #expect(before.conversations.first?.handle == "claude")
+        #expect(before.remembered["claude:t1"] == nil)
+        before.update(entries: [], live: [], running: { _ in true })
+        #expect(before.remembered["claude:t1"] == nil)
+        var after = AgentDirectory(remembered: before.remembered)
+        after.update(entries: [hosted("t1", at: 100, cwd: "")], live: [], running: { _ in true })
+        after.update(entries: [hosted("t1", at: 100)], live: [], running: { _ in true })
+        #expect(after.conversations.first?.handle == "keyscribe")
+    }
+
+    @Test func aNameGivenBeforeTheFolderWasKnownIsNotGivenBackAfterAScanThatMissedTheConversation() {
+        var directory = AgentDirectory()
+        directory.update(entries: [hosted("t1", at: 100, cwd: "")], live: [])
+        directory.update(entries: [], live: [], running: { _ in true })
+        directory.update(entries: [hosted("t1", at: 100)], live: [], running: { _ in true })
+        #expect(directory.conversations.first?.handle == "keyscribe")
+    }
+
+    @Test func aNameTheUserChoseBeforeTodaysSpellingRulesIsKeptInTodaysSpelling() {
+        let directory = AgentDirectory(chosen: ["claude:t1": "Build 2", "claude:t2": "  "])
+        #expect(directory.chosenNames == ["claude:t1": "build two"])
+    }
+
+    @Test func aRememberedNameNoOneCanSayIsNotGivenBack() {
+        let remembered = [
+            "claude:t1": RememberedName(name: "", pid: nil, startedAt: 100, native: nil, agent: "claude"),
+            "claude:t2": RememberedName(name: " blue", pid: nil, startedAt: 200, native: nil, agent: "claude"),
+        ]
+        var directory = AgentDirectory(remembered: remembered)
+        directory.update(entries: [hosted("t1", at: 100), hosted("t2", at: 200)], live: [], running: { _ in true })
+        #expect(directory.conversations.map(\.handle).sorted() == ["keyscribe", "keyscribe blue"])
+    }
+
     @Test func aHostedConversationsRememberedNameSurvivesARestartAndNoOtherHostedConversationTakesIt() throws {
         var before = AgentDirectory()
         before.update(entries: [hosted("t1", at: 100)], live: [])

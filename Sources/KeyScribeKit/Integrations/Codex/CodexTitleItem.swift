@@ -17,12 +17,24 @@ public enum CodexTitleItem {
         case alreadyPresent
     }
 
+    public static func keeping(_ earlier: Record, over added: Record) -> Record {
+        if case .createdKey = earlier, added == .appended { return earlier }
+        return added
+    }
+
     static var createdLine: String {
         "\(key) = [" + (defaultItems + [item]).map { "\"\($0)\"" }.joined(separator: ", ") + "]"
     }
 
+    private static let byteOrderMark = "\u{FEFF}"
+
+    private static func withoutMark(_ text: String?) -> (mark: String, body: String?) {
+        guard let text, text.hasPrefix(byteOrderMark) else { return ("", text) }
+        return (byteOrderMark, String(text.dropFirst()))
+    }
+
     public static func inspect(_ text: String?) -> State {
-        switch read(text ?? "") {
+        switch read(withoutMark(text).body ?? "") {
         case .failed(let state): return state
         case .read(let reading):
             if case .array(_, let values, _) = reading.shape, values.contains(where: { $0 as? String == item }) { return .present }
@@ -31,6 +43,11 @@ public enum CodexTitleItem {
     }
 
     public static func adding(to text: String?) -> (text: String, record: Record)? {
+        let (mark, body) = withoutMark(text)
+        return addingUnmarked(to: body).map { (mark + $0.text, $0.record) }
+    }
+
+    private static func addingUnmarked(to text: String?) -> (text: String, record: Record)? {
         let original = text ?? ""
         guard case .read(let reading) = read(original) else { return nil }
         let bytes = reading.scan.bytes
@@ -40,15 +57,16 @@ public enum CodexTitleItem {
         switch reading.shape {
         case .noTable:
             let addedLineBreak = bytes.last.map { $0 != newline } ?? false
-            let separator = bytes.isEmpty ? "" : addedLineBreak ? "\n\n" : "\n"
-            edits = [Edit(at: bytes.count, insert: separator + "[\(table)]\n" + createdLine + "\n")]
+            let end = lineEnding(of: bytes)
+            let separator = bytes.isEmpty ? "" : addedLineBreak ? end + end : end
+            edits = [Edit(at: bytes.count, insert: separator + "[\(table)]" + end + createdLine + end)]
             record = .createdKey(createdTable: true, addedLineBreak: addedLineBreak)
             expected = defaultItems + [item]
         case .tableWithoutKey(let header):
             if header.lineEnd > header.lineStart, bytes[header.lineEnd - 1] == newline {
                 edits = [Edit(at: header.lineEnd, insert: createdLine + terminator(endingAt: header.lineEnd - 1, in: bytes))]
             } else {
-                edits = [Edit(at: header.lineEnd, insert: "\n" + createdLine)]
+                edits = [Edit(at: header.lineEnd, insert: lineEnding(of: bytes) + createdLine)]
             }
             record = .createdKey(createdTable: false, addedLineBreak: false)
             expected = defaultItems + [item]
@@ -65,6 +83,11 @@ public enum CodexTitleItem {
     }
 
     public static func removing(from text: String?, record: Record) -> String? {
+        let (mark, body) = withoutMark(text)
+        return removingUnmarked(from: body, record: record).map { mark + $0 }
+    }
+
+    private static func removingUnmarked(from text: String?, record: Record) -> String? {
         let original = text ?? ""
         if record == .alreadyPresent { return original }
         guard case .read(let reading) = read(original) else { return nil }
@@ -116,6 +139,10 @@ public enum CodexTitleItem {
             changed.replaceSubrange(edit.start..<edit.end, with: Array(edit.insert.utf8))
         }
         return String(decoding: changed, as: UTF8.self)
+    }
+
+    private static func lineEnding(of bytes: [UInt8]) -> String {
+        bytes.firstIndex(of: newline).map { terminator(endingAt: $0, in: bytes) } ?? "\n"
     }
 
     private static func terminator(endingAt newlineIndex: Int, in bytes: [UInt8]) -> String {
@@ -224,7 +251,12 @@ public enum CodexTitleItem {
         let after = ours + 1 < layout.items.count ? layout.items[ours + 1] : nil
         if let after, !after.isElement {
             if let line = ownLine(element, comma: after.range, in: bytes) { return [Edit(removing: line)] }
-            return [Edit(removing: (before?.range.upperBound ?? layout.open.upperBound)..<after.range.upperBound)]
+            guard let before else {
+                var end = after.range.upperBound
+                while end < layout.close.lowerBound, isBlank(bytes[end]) { end += 1 }
+                return [Edit(removing: element.lowerBound..<end)]
+            }
+            return [Edit(removing: before.range.upperBound..<after.range.upperBound)]
         }
         guard let before, !before.isElement else { return [Edit(removing: element)] }
         let gap = before.range.upperBound..<element.lowerBound
@@ -261,8 +293,7 @@ public enum CodexTitleItem {
 
     private static func lineRemoval(_ entry: CodexTOMLScan.Entry, in bytes: [UInt8]) -> Edit {
         if entry.lineEnd > entry.lineStart, bytes[entry.lineEnd - 1] == newline { return Edit(removing: entry.lineStart..<entry.lineEnd) }
-        let start = entry.lineStart > 0 && bytes[entry.lineStart - 1] == newline ? entry.lineStart - 1 : entry.lineStart
-        return Edit(removing: start..<entry.lineEnd)
+        return Edit(removing: (entry.lineStart - terminatorLength(before: entry.lineStart, in: bytes))..<entry.lineEnd)
     }
 
     private static func onlyOurs(_ entry: CodexTOMLScan.Entry, header: CodexTOMLScan.Header, reading: Reading) -> Bool {
@@ -275,8 +306,14 @@ public enum CodexTitleItem {
 
     private static func headerRemoval(_ header: CodexTOMLScan.Header, entry: CodexTOMLScan.Entry, addedLineBreak: Bool, in bytes: [UInt8]) -> Edit {
         var start = header.lineStart
-        if start >= 2, bytes[start - 2] == newline, bytes[start - 1] == newline { start -= 1 }
-        if addedLineBreak, entry.lineEnd == bytes.count, start >= 1, bytes[start - 1] == newline { start -= 1 }
+        let blank = terminatorLength(before: start, in: bytes)
+        if blank > 0, terminatorLength(before: start - blank, in: bytes) > 0 { start -= blank }
+        if addedLineBreak, entry.lineEnd == bytes.count { start -= terminatorLength(before: start, in: bytes) }
         return Edit(removing: start..<header.lineEnd)
+    }
+
+    private static func terminatorLength(before position: Int, in bytes: [UInt8]) -> Int {
+        guard position >= 1, bytes[position - 1] == newline else { return 0 }
+        return position >= 2 && bytes[position - 2] == carriageReturn ? 2 : 1
     }
 }

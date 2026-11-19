@@ -23,7 +23,8 @@ enum AgentReceipt: Equatable {
         case composing, typedSince, interrupted, connectionGap, dialog, inPromptBox(PromptBoxCause), declined(by: String, saying: String, besideText: Bool)
     }
     enum NotSentReason: Equatable {
-        case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String), hostTakesNoMessages(String)
+        case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String), hostRefused(String)
+        case hostTakesNoMessages(String)
         case newConversationNotInFront(String), couldNotStart(String)
     }
 
@@ -142,7 +143,9 @@ final class AgentHub {
     private let hosts: [HostDiscovery]
     private let hostDeadline: Duration
     private let hostConfirmDelay: Duration
-    private var hostQueued: Set<String> = []
+    private let heldLimit: Duration
+    private(set) var retryWaiting: Set<String> = []
+    private var lastEndedTurn: [String: String] = [:]
     private let processEnvironment: (_ pid: Int, _ keys: Set<String>) -> [String: String]
     private let processParent: (_ pid: Int) -> Int?
     private let accessibilityTrusted: @MainActor () -> Bool
@@ -200,7 +203,7 @@ final class AgentHub {
         disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
         places: (any AgentPlaceReading)? = nil, hosts: [AgentHostIntegration] = [],
         hostAllowed: @escaping @MainActor (String) -> Bool = { _ in false },
-        hostDeadline: Duration = AgentHub.defaultHostDeadline, hostConfirmDelay: Duration = .seconds(3),
+        hostDeadline: Duration = AgentHub.defaultHostDeadline, hostConfirmDelay: Duration = .seconds(3), heldLimit: Duration = .seconds(120),
         processEnvironment: @escaping (_ pid: Int, _ keys: Set<String>) -> [String: String] = { _, _ in [:] },
         processParent: @escaping (_ pid: Int) -> Int? = { _ in nil },
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
@@ -212,6 +215,7 @@ final class AgentHub {
         self.hosts = hosts.map { host in HostDiscovery(host, allowed: { hostAllowed(host.kind.id) }, now: now) }
         self.hostDeadline = hostDeadline
         self.hostConfirmDelay = hostConfirmDelay
+        self.heldLimit = heldLimit
         self.exclusions = exclusions
         self.transport = transport
         self.disconnectGrace = disconnectGrace
@@ -573,7 +577,10 @@ final class AgentHub {
     func hostShows(_ id: String) async -> Bool? {
         guard let hosted = (directory.conversations + disconnected).first(where: { $0.id == id })?.host?.host else { return nil }
         guard let source = hosts.first(where: { $0.kind.id == hosted }), source.isEnabled else { return false }
-        return await inFront(of: source)?.id == id
+        let front = await inFront(of: source)
+        Log.agents.debug(
+            "\(source.kind.displayName, privacy: .public) has \(front.flatMap { self.handle(of: $0.id) } ?? "no listed conversation", privacy: .private) in front")
+        return front?.id == id
     }
 
     private func inFront(of source: HostDiscovery) async -> FrontSession? {
@@ -676,7 +683,6 @@ final class AgentHub {
         saveExclusions()
         for message in outbox.withdraw(conversation: id) {
             retries[message.id] = nil
-            hostQueued.remove(message.id)
             report(.notSent(handle(of: id), reason: .disconnected), for: message.id, in: id)
         }
         for (request, entry) in requests where entry.message.conversation == id && !entry.timedOut {
@@ -1083,6 +1089,7 @@ final class AgentHub {
 
     private func forgetConnectorState(keepingEnvironments keptEnvironment: ((String) -> Bool)? = nil, keeping kept: (String) -> Bool) {
         features = features.filter { kept($0.key) }
+        lastEndedTurn = lastEndedTurn.filter { kept($0.key) }
         hostOwned = hostOwned.filter(kept)
         loadedVersions = loadedVersions.filter { kept($0.key) }
         environments = environments.filter { keptEnvironment?($0.key) ?? kept($0.key) }
@@ -1097,7 +1104,7 @@ final class AgentHub {
 
     var connectorStateSessions: Set<String> {
         Set(features.keys).union(environments.keys).union(prompts.keys).union(connectorNames.keys)
-            .union(connectorNamesAt.keys).union(labels.keys)
+            .union(connectorNamesAt.keys).union(labels.keys).union(lastEndedTurn.keys)
     }
 
     private func startGrace(for session: String) -> Date {
@@ -1141,22 +1148,26 @@ final class AgentHub {
         }
     }
 
-    func deliver(_ text: String, to id: String, request: String? = nil, images: [String] = [], inFront: Bool = false) async -> AgentReceipt {
+    func deliver(
+        _ text: String, to id: String, request: String? = nil, images: [String] = [], inFront: Bool = false, released: Bool = false
+    ) async -> AgentReceipt {
         if let source = startingHost(id) { return await start(text, through: source, request: request ?? makeId(), inFront: inFront) }
+        let conversation = directory.conversations.first { $0.id == id }
+        if released, let request, exclusions.excludes(id) || conversation.flatMap(host(of:)) == nil { outbox.finish(request) }
         if exclusions.excludes(id) { return .notSent(disconnected.first { $0.id == id }?.handle, reason: .disconnected) }
-        guard let conversation = directory.conversations.first(where: { $0.id == id }) else {
-            return .notSent(nil, reason: .conversationEnded)
-        }
+        guard let conversation else { return .notSent(nil, reason: .conversationEnded) }
         lastUsed[id] = now()
         let handle = conversation.handle
+        if released, host(of: conversation) == nil {
+            return .notSent(handle, reason: .hostTakesNoMessages(hubQueue(for: id)?.kind.displayName ?? conversation.agent))
+        }
         if let (source, location) = host(of: conversation) {
             let request = request ?? makeId()
-            let queuing = source.host.queuesInHub
+            let queuing = hubQueue(for: id) != nil
             let message = AgentOutbox.Message(id: request, conversation: id, text: text, images: images)
-            if queuing {
-                switch outbox.send(message, state: state(of: id), canSteer: true) {
+            if queuing, !released {
+                switch outbox.send(message, state: state(of: id), canSteer: true, keeping: true) {
                 case .queue(let reason):
-                    hostQueued.insert(request)
                     return .queued(handle, waitingOn: reason)
                 case .needsReview(let reason): return .kept(handle, reason: Self.kept(reason))
                 case .disconnected: return .notSent(handle, reason: .hostTakesNoMessages(source.kind.displayName))
@@ -1170,12 +1181,15 @@ final class AgentHub {
                 hostFollows[id, default: []].append(HostFollow(prompt: AgentPromptDigest.of(text), request: request, expires: nil))
                 if hostFollows[id, default: []].count > Self.hostFollowLimit { hostFollows[id]?.removeFirst() }
             }
+            Log.agents.info(
+                "sending to \(handle, privacy: .private) through \(source.kind.displayName, privacy: .public): in front \(inFront), text in its box \(self.showsDraft(id)), plugin joins it \(self.hostOwned.contains(id) && self.joinsDrafts(id) && self.transport.isLive(session: id))")
             if inFront, images.isEmpty, showsDraft(id), hostOwned.contains(id), joinsDrafts(id), transport.isLive(session: id) {
                 startTrace(request, in: id)
                 let joined = await joinDraft(text, in: id)
                 let waitEnds = now().addingTimeInterval(Self.hostTurnWait)
                 switch joined {
                 case .sent:
+                    if queuing { outbox.finish(request) }
                     trace(request) {
                         $0.withDraft = true
                         $0.confirmed = now()
@@ -1184,9 +1198,11 @@ final class AgentHub {
                     if follows, running[id] != nil, let turn = turns[id] { follow(turn, of: id, for: request) }
                     return .sentWithDraft(handle)
                 case .kept(let reason):
+                    if queuing { outbox.finish(request) }
                     stopFollowingHosted(request, in: id)
                     return .kept(handle, reason: reason)
                 case .unknown:
+                    if queuing { outbox.finish(request) }
                     if follows { uncertainHosted[request] = (handle, id, true) }
                     settleHostDelivery(request, in: id, expires: waitEnds)
                     return .uncertain(handle)
@@ -1199,6 +1215,29 @@ final class AgentHub {
             })
             let arrived = matched.remove(request) != nil
             let waitEnds = now().addingTimeInterval(Self.hostTurnWait)
+            var gaveUp = false
+            if queuing {
+                if answer == .queued, !exclusions.excludes(id) {
+                    let turnRunning = state(of: id) == .working
+                    let held = outbox.retry(request, at: now(), turnRunning: turnRunning)
+                    let left = heldLimit - .seconds(now().timeIntervalSince(held.since))
+                    if held.marked {
+                        Task { [weak self] in
+                            guard let self, !self.stopped else { return }
+                            self.releaseHeld()
+                        }
+                    } else if !turnRunning, left <= .zero {
+                        gaveUp = true
+                        outbox.finish(request)
+                        releaseHeld()
+                    } else if !turnRunning {
+                        releaseAgain(id, after: left)
+                    }
+                } else {
+                    outbox.finish(request)
+                    releaseHeld()
+                }
+            }
             switch answer {
             case .accepted:
                 settleHostDelivery(request, in: id, expires: waitEnds)
@@ -1206,9 +1245,9 @@ final class AgentHub {
                 return .sent(handle)
             case .queued where queuing:
                 stopFollowingHosted(request, in: id)
-                hostQueued.insert(request)
-                if case .queue(let reason) = outbox.send(message, state: .working) { return .queued(handle, waitingOn: reason) }
-                return .queued(handle)
+                if exclusions.excludes(id) { return .notSent(handle, reason: .disconnected) }
+                if gaveUp { return .notSent(handle, reason: .expired) }
+                return .queued(handle, waitingOn: .working)
             case .queued:
                 settleHostDelivery(request, in: id, expires: nil)
                 let waiting = (directory.conversations.first { $0.id == id }?.state ?? .working).named(by: waitingPrompts[id])
@@ -1224,7 +1263,7 @@ final class AgentHub {
                 return .uncertain(handle)
             case .refused(let why):
                 stopFollowingHosted(request, in: id)
-                return .notSent(handle, reason: .refused(why))
+                return .notSent(handle, reason: .hostRefused(why))
             case .unsupported:
                 stopFollowingHosted(request, in: id)
             }
@@ -1283,6 +1322,10 @@ final class AgentHub {
 
     func handle(_ event: AgentEvent) {
         guard !stopped, let event = local(event) else { return }
+        if case .turnComplete(let session, _, _, _, let turn?) = event, lastEndedTurn[session] == turn {
+            Log.agents.info("ignored a second end of one turn in \(self.handle(of: session) ?? "a conversation", privacy: .private)")
+            return
+        }
         if let session = event.session, let agent = AgentSessionID.agent(of: session) {
             discoveries.first { $0.kind.id == agent }?.observe(event.renamingSession(AgentSessionID.native))
             if let inner = filed[session]?.session, inner != session, let (innerAgent, innerNative) = AgentSessionID.split(inner) {
@@ -1332,6 +1375,8 @@ final class AgentHub {
         case .shown(let session, let on, let draft, let newConversation):
             guard let host = AgentSessionID.split(session)?.agent, hosts.contains(where: { $0.kind.id == host }) else { break }
             let slot = Self.slot(host, Self.instance(of: session))
+            Log.agents.debug(
+                "\(host, privacy: .public) shows \(on ? self.handle(of: session) ?? "a conversation not listed yet" : "no conversation", privacy: .private)\(on && draft ? " with text in its box" : "", privacy: .public)")
             shownByHost[slot] = on ? session : nil
             shownWithDraft[slot] = on && draft ? session : nil
             newConversationShown[slot] = !on && newConversation ? session : nil
@@ -1430,7 +1475,8 @@ final class AgentHub {
             running[session] = now()
             turns[session] = turn
             if hostOwned.contains(session) { Task { [weak self] in await self?.rescan(rereadingTitles: false) } }
-        case .turnComplete(let session, let reason, let answer, let after):
+        case .turnComplete(let session, let reason, let answer, let after, let turn):
+            if let turn { lastEndedTurn[session] = turn }
             absorbed[session] = nil
             handingOff[session] = nil
             for (id, entry) in requests where entry.message.conversation == session && entry.turnDuringHandOff != nil {
@@ -1549,6 +1595,9 @@ final class AgentHub {
                   let found = startFollows[copy]?.remove(at: match).request {
             request = found
         } else {
+            if let waiting = hostFollows[session], !waiting.isEmpty {
+                Log.agents.info("a turn in \(self.handle(of: session) ?? "a conversation", privacy: .private) matched none of the \(waiting.count) dictations sent to it, so its reply won't be read aloud")
+            }
             return
         }
         if delivering[request] != nil { matched.insert(request) }
@@ -2115,24 +2164,26 @@ final class AgentHub {
     }
 
     private func releaseHeld() {
-        for release in outbox.release(state: state(of:), canSteer: steers) {
+        for release in outbox.release(state: state(of:), canSteer: steers, keeping: { self.hubQueue(for: $0.conversation) != nil }) {
             let handle = handle(of: release.message.conversation)
-            if hostQueued.remove(release.message.id) != nil {
+            if hubQueue(for: release.message.conversation) != nil {
                 let message = release.message
                 switch release.decision {
                 case .handOff, .enterPromptBox:
                     Task { [weak self] in
-                        guard let self else { return }
-                        let receipt = await self.deliver(message.text, to: message.conversation, request: message.id, images: message.images)
+                        guard let self, !self.stopped else { return }
+                        let receipt = await self.deliver(message.text, to: message.conversation, request: message.id, images: message.images, released: true)
+                        guard !self.stopped else { return }
                         if case .queued = receipt { return }
                         self.report(receipt, for: message.id, in: message.conversation)
+                        self.releaseHeld()
                     }
                 case .needsReview(let reason):
                     report(.kept(handle ?? "", reason: Self.kept(reason)), for: message.id, in: message.conversation)
                 case .disconnected:
                     report(.notSent(handle, reason: .conversationEnded), for: message.id, in: message.conversation)
                 case .queue:
-                    hostQueued.insert(message.id)
+                    break
                 }
                 continue
             }
@@ -2149,6 +2200,21 @@ final class AgentHub {
                 break
             }
         }
+    }
+
+    private func releaseAgain(_ conversation: String, after wait: Duration) {
+        guard retryWaiting.insert(conversation).inserted else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard let self else { return }
+            self.retryWaiting.remove(conversation)
+            if !self.stopped { self.releaseHeld() }
+        }
+    }
+
+    private func hubQueue(for conversation: String) -> HostDiscovery? {
+        let agent = AgentSessionID.agent(of: conversation)
+        return hosts.first { $0.kind.id == agent && $0.host.queuesInHub }
     }
 
     private func confirmLater(

@@ -136,6 +136,8 @@ struct TerminalTitlesTests {
              {"window_id":0,"tab_id":1,"pane_id":1,"workspace":"default","title":"\(Self.codexTitle)","is_active":true,"tty_name":"/dev/ttys036"}]
             """
         #expect(try route("WezTerm").title(answer: answer, pane: ["1", "/dev/ttys036"]) == Self.codexTitle)
+        let muxed = #"[{"pane_id":4,"title":"zsh","tty_name":null},{"pane_id":5,"title":"\#(Self.codexTitle)","tty_name":null}]"#
+        #expect(try route("WezTerm").title(answer: muxed, pane: ["5", "/dev/ttys036"]) == Self.codexTitle)
         facts.listening[10] = []
         #expect(read(30, facts) == nil)
     }

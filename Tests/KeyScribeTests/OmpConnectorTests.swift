@@ -177,10 +177,9 @@ struct OmpConnectorTests {
         #expect(made.omp.kind.resumeCommand == "omp --resume")
         #expect(copy.reloadHint == "Already running omp here? Quit each open conversation and reopen it with omp --resume to connect it.")
         #expect(copy.uninstallMessage.contains("Each open conversation unloads the connector when you quit it and reopen it with omp --resume."))
-        #expect(copy.manualUninstallLead == "To remove the connector from omp, delete its folder in a terminal, then quit each open conversation and reopen it with omp --resume:")
         #expect(copy.stillConnected(1).hasSuffix("until you quit it and reopen it with omp --resume."))
         #expect(copy.stillConnected(2).hasSuffix("until you quit them and reopen them with omp --resume."))
-        for text in [copy.reloadHint, copy.uninstallMessage, copy.manualUninstallLead, copy.manualUninstallAfterDisconnect, copy.stillConnected(2)] {
+        for text in [copy.reloadHint, copy.uninstallMessage, copy.manualUninstallAfterDisconnect, copy.stillConnected(2)] {
             #expect(!text.contains("/reload"), "\(text)")
         }
     }

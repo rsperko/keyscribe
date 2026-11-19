@@ -73,8 +73,8 @@ struct AgentIntegrationRow: View {
         }
     }
 
-    private var available: Int { agents.rows.filter { $0.agent == id && $0.connected }.count }
-    private var open: Int { agents.rows.filter { $0.agent == id && !$0.lastSeen }.count }
+    private var available: Int { agents.rows.filter { $0.countsUnder == id && $0.connected }.count }
+    private var open: Int { agents.rows.filter { $0.countsUnder == id && !$0.lastSeen }.count }
 }
 
 private struct ConnectorRow: View {
@@ -317,6 +317,9 @@ private struct ConnectorFolderRow: View {
             }
             if setup.showsRemovalWarning {
                 IssueText(setup.copy.stillConnected(setup.lingering), severity: .advisory)
+            }
+            if let note = setup.uninstallWithoutToolNote {
+                Text(note).font(.caption).foregroundStyle(.secondary)
             }
             if !setup.manualUninstall.isEmpty {
                 manualUninstall
