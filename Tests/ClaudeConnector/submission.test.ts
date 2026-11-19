@@ -294,3 +294,14 @@ test('a confirmation lost with its connection is sent again once the connector s
   expect(typeof sent[0].handedAt).toBe('number')
   expect(typeof sent[0].seenAt).toBe('number')
 })
+
+for (const said of ['/clear', '!rm -rf build', '  !ls']) {
+  test(`a dictation submitted as ${JSON.stringify(said)} reaches the agent as words, never as a command or a shell line`, async ($, on) => {
+    const h = harness(on)
+    await h.connect($)
+    await h.deliver([submitCommand(said)])
+    await h.answerEvents()
+    expect(h.submits).toEqual(['​' + said])
+    expect(outcome(h)).toEqual(['ack', 'submitted'])
+  })
+}

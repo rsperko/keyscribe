@@ -541,7 +541,7 @@ function current(expected, gen) {
 }
 
 function asText(text) {
-  return text.startsWith('/') ? '​' + text : text
+  return runsAsCommand(text) ? '\u200b' + text : text
 }
 
 function refusal(reason) {
@@ -739,7 +739,7 @@ async function submitSteers($, held, target) {
 
 async function leaveInBox($, held, target) {
   if (!stillFor(target)) return
-  const runs = (one) => /^[/!]/.test(one.text)
+  const runs = (one) => runsAsCommand(one.text)
   const commands = held.filter(runs)
   if (commands.length) await lateRefuse($, commands, 'stopped')
   const fillable = held.filter((one) => !runs(one))
@@ -784,7 +784,7 @@ function promptRow($, e, text) {
 }
 
 async function fillBox($, id, text, expiresAt, gen, expected) {
-  if (/^[/!]/.test(text)) return holdSteer($, id, text, expiresAt, gen, expected)
+  if (runsAsCommand(text)) return holdSteer($, id, text, expiresAt, gen, expected)
   const now = await $.clock.now()
   if (!(now < expiresAt)) return refuse($, gen, id, 'expired')
   if (!current(expected, gen)) return refuse($, gen, id, 'sessionChanged')
@@ -807,7 +807,7 @@ async function fillBox($, id, text, expiresAt, gen, expected) {
 }
 
 function runsAsCommand(text) {
-  return /^[/!]/.test(text.trimStart())
+  return /^\u200b?\s*[/!]/.test(text)
 }
 
 async function joinDraft($, id, draft, text, expiresAt, gen, expected) {
@@ -874,7 +874,7 @@ async function refused($, gen, id, text, reason) {
 }
 
 async function leftInEmptyBox($, id, text) {
-  if (/^\u200b?[/!]/.test(text)) return false
+  if (runsAsCommand(text)) return false
   try {
     const box = await $.prompt.read()
     if (box.text.trim() || !submissions.has(id)) return false

@@ -383,7 +383,9 @@ every rule above applies to it, with these sharpenings:
   is local, bounded, and happens only right after a steered dictation. A dialog that comes through neither hook
   is not held. Never fill
   text that starts with `/` or `!`: Return runs them as a command or in the shell, and the box drops the invisible
-  character that keeps a submitted slash from running (measured on 2.1.325, 2026-11-15). A steered take follows
+  character that keeps a submitted slash from running (measured on 2.1.325, 2026-11-15). The connector puts the same
+  character before a submitted `!`, and checks both after leading spaces; that a submitted `!` would otherwise run in
+  the shell is not measured (`claude -p` on 2.1.328, 2026-11-19, passed a leading `!` to the model as words). A steered take follows
   only a turn that read it: the running turn once the connector reports it absorbed (the engine's `queued_command`
   attachment carrying the text, reported as `absorbed`), or the turn the message starts when the running one ended
   first, matched by its prompt digest (`followSteer`). It never claims a turn that did not read it, so its reply is

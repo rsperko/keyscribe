@@ -34,17 +34,19 @@ test('another message the running turn takes in is never reported as the dictati
   expect(h.events().filter((b: any) => b.op === 'absorbed')).toEqual([])
 })
 
-test('a dictation that starts with an exclamation mark never goes in the prompt box, where Return would run it in the shell, and joins the turn as text', async ($, on) => {
-  const h = harness(on)
-  await h.connect($)
-  await $.turn.start({ text: '', turnId: 't1' })
-  await h.deliver([boxCommand('!echo hi')])
-  await h.answerEvents()
-  expect(h.fills).toEqual([])
-  expect(outcome(h)).toEqual(['ack', 'submitted'])
-  await toolCall($, 'tu1')
-  expect(h.appended).toEqual([steered('!echo hi')])
-})
+for (const said of ['!echo hi', '  /clear']) {
+  test(`a dictation of ${JSON.stringify(said)} never goes in the prompt box, where Return would run it, and joins the turn as text`, async ($, on) => {
+    const h = harness(on)
+    await h.connect($)
+    await $.turn.start({ text: '', turnId: 't1' })
+    await h.deliver([boxCommand(said)])
+    await h.answerEvents()
+    expect(h.fills).toEqual([])
+    expect(outcome(h)).toEqual(['ack', 'submitted'])
+    await toolCall($, 'tu1')
+    expect(h.appended).toEqual([steered(said)])
+  })
+}
 
 test('a dictation for the prompt box whose clock read is pending when its session is cleared never fills the next session', async ($, on) => {
   const h = harness(on)

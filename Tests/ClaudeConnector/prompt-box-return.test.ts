@@ -29,15 +29,17 @@ test('a submission Claude Code turns away because a stop stands is put in the em
   expect(outcome(h)).toEqual(['ack', 'filled'])
 })
 
-test('a stopped submission that starts with a slash is never put in the box, where Return would run it as a command', async ($, on) => {
-  const h = harness(on)
-  h.downstream['prompt.submit'] = { drop: stopped }
-  await h.connect($)
-  await h.deliver([submitCommand('/resume')])
-  await h.answerEvents()
-  expect(h.fills).toEqual([])
-  expect(outcome(h)).toEqual(['ack', 'stopped'])
-})
+for (const said of ['/resume', '  !ls']) {
+  test(`a stopped submission of ${JSON.stringify(said)} is never put in the box, where Return would run it as a command or in the shell`, async ($, on) => {
+    const h = harness(on)
+    h.downstream['prompt.submit'] = { drop: stopped }
+    await h.connect($)
+    await h.deliver([submitCommand(said)])
+    await h.answerEvents()
+    expect(h.fills).toEqual([])
+    expect(outcome(h)).toEqual(['ack', 'stopped'])
+  })
+}
 
 test('a stopped submission never fills over what the user started typing meanwhile', async ($, on) => {
   const h = harness(on)

@@ -166,16 +166,18 @@ test('a late refusal whose connection drops before it lands is sent again on the
   expect(refusals.slice(-1)[0]).toMatchObject({ reason: 'draft', connection: hello.body.connection })
 })
 
-test('after Esc a held dictation that starts with a slash is reported, never put in the box, while the plain ones still are', async ($, on) => {
-  const h = harness(on)
-  await held($, h, [submitCommand('plain words'), { ...submitCommand('/resume'), id: 'r2' }])
-  h.downstream['prompt.submit'] = { drop: stopped }
-  await $.turn.complete(ended('aborted'))
-  await h.settle()
-  await h.answerEvents()
-  expect(h.box.text).toBe('plain words')
-  expect([lateOutcome(h, 'r1'), lateOutcome(h, 'r2')]).toEqual([['filled'], ['stopped']])
-})
+for (const said of ['/resume', '  !ls']) {
+  test(`after Esc a held dictation of ${JSON.stringify(said)} is reported, never put in the box, while the plain ones still are`, async ($, on) => {
+    const h = harness(on)
+    await held($, h, [submitCommand('plain words'), { ...submitCommand(said), id: 'r2' }])
+    h.downstream['prompt.submit'] = { drop: stopped }
+    await $.turn.complete(ended('aborted'))
+    await h.settle()
+    await h.answerEvents()
+    expect(h.box.text).toBe('plain words')
+    expect([lateOutcome(h, 'r1'), lateOutcome(h, 'r2')]).toEqual([['filled'], ['stopped']])
+  })
+}
 
 test('a held dictation that starts with a slash starts the next turn as text, never as a command', async ($, on) => {
   const h = harness(on)
