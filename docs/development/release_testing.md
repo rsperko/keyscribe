@@ -180,7 +180,10 @@ bb title. With Codex connected, it checks that an idle conversation takes a dict
 into the running turn, that one waiting on an approval holds it and sends it once the approval is answered, that
 interrupting the turn drops a held message, that “open” brings the conversation's terminal forward, that the reply is read aloud,
 that Settings shows when the hooks still need trust in `/hooks`, that removing the `thread-id` title item shows
-the plugin needs repair, and that uninstalling leaves `config.toml` as it was before the install. A routine release with no subsystem change is just the two dictations.
+the plugin needs repair, and that uninstalling leaves `config.toml` as it was before the install. With OpenCode turned on, it checks that an idle conversation takes a dictation, that a working one takes it into
+the running turn, that one waiting on an approval keeps it and adds it to the turn once the approval is answered, that
+the reply is read aloud, that “open” brings the conversation's terminal forward, and that Settings says the service
+isn't running after `opencode service stop`. A routine release with no subsystem change is just the two dictations.
 
 `scripts/verify-live.sh` remains the standalone companion — the same on-disk artifact checks plus the
 Settings commit-on-blur check — for when you want to exercise these outside a release.

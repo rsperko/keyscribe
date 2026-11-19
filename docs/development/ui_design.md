@@ -766,7 +766,10 @@ have no button. Any other bb page that shows no thread, such as its settings, ha
 conversation is in front when the terminal pane of the `codex` process whose title holds its thread id is in front,
 as for other agents, or, in a terminal whose pane titles cannot be read, when the focused window's title holds the
 start of exactly one listed Codex thread id; the `thread-id` item the plugin's install adds to Codex's terminal title
-puts it there. Being in front also means its reply is not read aloud while you look
+puts it there. An OpenCode conversation is in front when the terminal pane of an `opencode` process whose title is
+`OC | ` and that conversation's title is in front, or, in a terminal whose pane titles cannot be read, when the focused
+window's title is; never while OpenCode's window title setting is off, for a tab that isn't the one shown, or for a title
+two listed conversations share. Being in front also means its reply is not read aloud while you look
 at it, as for a terminal. Unknown, no terminal in front, a different app or window, or a
 front view that could belong to another session leaves the take with nothing focused. Recording still
 starts, since the take may name a conversation or be a command that needs none. The read runs beside the
@@ -2417,7 +2420,10 @@ and any folder `CODEX_HOME` names in the login shell, with **Add Folder…** for
 install adds the `thread-id` item to the home's terminal title (the connector copy's `installNote`). Its row reads
 broken, with the reason, while Codex has not trusted the plugin's hooks (type `/hooks` in Codex), while the title
 item the install added is missing (**Update** puts it back; nothing else does), or while `config.toml` cannot be
-read; Codex's app server not running reads as that, never as no conversations. The host is on exactly while any of
+read; Codex's app server not running reads as that, never as no conversations. OpenCode is a host with nothing to install: its row has
+only the on/off switch kept in `agents.hosts`, and reads, beside the switch, that OpenCode isn't installed (no
+`opencode` command found), that its service isn't running, or that the service didn't answer; never as no
+conversations. The host is on exactly while any of
 its setups is enrolled; its id in `agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host
 integration does, that it installs the plugin and keeps it up to date, and that uninstalling stops all of it);
 **Connect {host}** turns the host on and installs, and Cancel leaves it off. While the host is off, a caption under

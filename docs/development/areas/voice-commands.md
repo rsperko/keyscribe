@@ -963,6 +963,44 @@ every rule above applies to it, with these sharpenings:
   when a word of it starts with the thread id (`CodexPaneTitle`), so a session file name or path that contains the id,
   as an editor or browser shows it, is never that thread, while Codex in any terminal still is. Check `CodexHost` for Stop
   before documenting it for Codex.
+- **OpenCode is a host reached through its shared background service** (`OpencodeHost`, `OpencodeHTTP`, the
+  Kit's `Integrations/Opencode/`). OpenCode 2 runs one service per user that every `opencode` terminal window is a
+  client of; the first window starts it, it outlives the last one, and it registers its address, pid and password
+  in `service.json` in OpenCode's state folder (`XDG_STATE_HOME`, else `~/.local/state`). KeyScribe trusts that file
+  only for an address on this Mac and only while the process it names is `opencode serve --service` that started
+  no later than the file was written (`OpencodeHost.registered`), since a crashed service leaves the file behind
+  and nothing restarts it (measured with 2.3.2 on 2026-11-19: a clean stop deletes the file; a restart keeps the
+  port and password). It never starts or stops the service, never runs `opencode api`, which can start one, and
+  installs nothing into OpenCode. A `--standalone` or `--server` window has a server of its own and is not reached.
+  Every call is HTTP Basic auth as `opencode` with the file's password, bounded by `OpencodeHost.callTimeout`.
+- **OpenCode lists what a window shows, or what works, waits or was just dictated to.** OpenCode keeps every session
+  it ever had and has nothing like Codex's loaded list, so the scan reads the newest root, unarchived sessions and
+  keeps only those an `opencode` pane title shows, those `/api/session/active` names, those with a pending
+  permission or form, and those KeyScribe sent to within `OpencodeHost.recentDelivery`. A subagent session (one with
+  a `parentID`) is never listed. A pane title is `OC | <title>`, cut to 40 characters and `…`, and `OpenCode` on the
+  home page (`OpencodePaneTitle`); a title shared by two listed sessions names neither. The TUI setting that turns
+  the window title off (`terminal.title` in `cli.json`) leaves the terminal showing the last title it set, so while
+  it is off no pane title is read (`OpencodeInstall.showsWindowTitle`). OpenCode generates most titles, and a
+  `session.renamed` event carries a `location` only when OpenCode generated the title (2.3.2, 2026-11-19), so a
+  title is a name only once the stream saw the user set it; every other title reaches its session only after a
+  verb (`shownInstead`). A rename writes the title with `PATCH /api/session/{id}`.
+- **OpenCode delivery is one prompt call that steers** (`OpencodeHost.deliver`). It posts the text with
+  `delivery: "steer"`, any image as a `file://` URI the service reads, and a message id KeyScribe chose
+  (`OpencodeMessages.messageId`), which OpenCode keeps as the message's id; the answer naming that id reads as
+  accepted, and `confirm` looks that message up, or finds it still in the session's inbox. OpenCode puts a steer
+  that arrives while a permission or question is open in the session's inbox and adds it to the same turn once the
+  user answers (measured with 2.3.2 on 2026-11-19), so the hub holds nothing for an open prompt: the host answers
+  `queued` then, and `accepted` otherwise. A prompt from the API is stored exactly as a typed one.
+- **OpenCode turns, replies and prompts come from its event stream** (`OpencodeTurns`). While the hub watches,
+  the host follows `GET /api/event` (server-sent events, a heartbeat every few seconds); it opens the stream only then
+  and closes it on `unwatch`. An execution's start begins a turn, each inbox item it takes in names that turn with
+  the item's prompt digest (so a steered dictation follows the running turn), its last `session.text.ended` is the
+  reply, and `succeeded`, `interrupted` or `failed` ends it. A user item whose id is not KeyScribe's is `typed`.
+  `permission.asked` and `form.created` open a prompt (an agent question's form is titled `Questions`, so its first
+  field carries the question) and their replies close it. The stream never replays what was missed, so every
+  (re)connect reads the pending permissions, forms and active sessions again, and ends each turn that was running
+  and no longer is from the session's latest messages (an `idle` entry carries the outcome), with events that
+  arrived meanwhile applied after that read. A lost stream is reopened by the next scan, never on a timer.
 - **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
   process group, with content on standard input rather than in the arguments. Standard output (the only
   output parsed) and standard error are kept apart, each capped, and cut output is marked. A deadline or a

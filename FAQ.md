@@ -730,6 +730,32 @@ brings a Codex conversation's terminal forward, in the same terminals and multip
 agents. Both find the conversation's terminal from the thread id the `thread-id` item puts in its title, so a pane
 whose title shows something else (for example a zellij pane started as `zellij run -- codex`) is not found.
 
+### Can I talk to agents running in OpenCode?
+
+Yes, with OpenCode 2 or later. In **Settings ▸ Modes ▸ Agent**, turn on **OpenCode** under **Connections**. Nothing
+is installed into OpenCode: KeyScribe talks to the background service that OpenCode's windows share, the one the
+first `opencode` you start in a terminal runs. It never starts or stops that service; when it isn't running,
+Settings says so rather than showing no conversations. An OpenCode started with `--standalone` or `--server`, which
+runs a server of its own, and OpenCode 1 are not reached.
+
+KeyScribe lists the conversations an OpenCode window shows, and any that are working, waiting on you, or that you
+dictated to in the last few minutes. OpenCode writes most conversation titles itself, so a title reaches its
+conversation only when you say it in full after “tell”, “ask” or “open”; a title you set in OpenCode, or a name you
+give the conversation in KeyScribe, names it outright. Renaming a conversation in KeyScribe also sets its title in
+OpenCode.
+
+What you dictate to an idle conversation starts its next turn, and what you dictate while it is working joins the
+turn that is running, the way OpenCode takes a message you type mid-turn; any image you pasted goes with it. While a
+conversation waits on your approval or an answer, OpenCode keeps your message and adds it to the same turn once you
+answer. KeyScribe never answers an approval or a question for you.
+
+The reply to what you dictate is read aloud, and you hear what a conversation asks when it stops for your approval
+or an answer. Hearing the reply to something you typed in OpenCode isn't supported yet. While the terminal showing
+an OpenCode conversation is in front, dictation without a name goes to that conversation, and “open” brings its
+terminal forward. Both find the conversation from the window title OpenCode sets (`OC | ` and the conversation's
+title), so they don't work while that title is off in OpenCode's settings (**Terminal ▸ Window title**), for a
+conversation in a tab that isn't the one shown, or when two conversations in view have the same title.
+
 ### How do I rename a conversation?
 
 In the Agent mode, switch to the conversation, then say **“rename this conversation to”** and the new

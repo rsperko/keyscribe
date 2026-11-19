@@ -285,6 +285,21 @@ in the same `Application Support` folder:
   each one runs in, and the focused window's title; it uses a title only to find a Codex thread id in it and keeps
   nothing else it read. When a conversation stops for your approval or an answer, KeyScribe also reads the agent's
   latest message in that turn from the app server, in memory only, to describe the prompt.
+  If you turn on OpenCode, KeyScribe connects, as a local client, to the background service OpenCode runs on your Mac,
+  using the address and password OpenCode writes to its own state folder (`~/.local/state/opencode/service.json`),
+  and only when that address is on your Mac and the process the file names is OpenCode's service; it keeps the
+  password in memory only. It adds no network connection of its own, and what OpenCode itself sends is up to
+  OpenCode. From the service it reads each conversation's id, title, folder and start time, which ones are working,
+  and what each one is waiting on you for (the tool and what it asks about, or the question's text). While the Agent
+  mode needs it, it follows OpenCode's stream of conversation events, which carries each turn's start and end, its
+  reply, and each prompt sent, of which KeyScribe keeps only a short fingerprint, in memory, to tell your typed
+  prompts from its own. KeyScribe uses a reply only to read aloud the answer to what you dictated, under the same
+  rules as a connector's, and when a turn ended while it was not following, it reads that conversation's latest
+  messages, in memory only, for the reply. What it sends is the message you dictate, with any image you pasted as its
+  file path for OpenCode to read, and a name you give a conversation; to confirm a message arrived, it looks up only
+  that message. It reads OpenCode's terminal settings (`~/.config/opencode/cli.json`) only for whether the window
+  title is on, and, as for Codex, the titles of the terminal panes your running `opencode` processes are in and the
+  focused window's title, using a title only to find an OpenCode conversation's title in it.
   The Claude Code connector reports a short fingerprint of the prompt each turn starts with, never the prompt
   itself, so KeyScribe can tell which turn answers what you dictated. The fingerprint stays in memory and is
   not stored.

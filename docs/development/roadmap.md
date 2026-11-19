@@ -19,6 +19,11 @@ intentionally short. It records work with a concrete user outcome, not a running
   promising Stop or Stop and correct for a Codex conversation, check `CodexHost` for them; they were not built when
   Codex was added. Recheck the app server's control socket and the `thread-id` title item after each
   Codex update, since dictation and the conversation in front depend on them.
+- OpenCode 2 is connected as a host through its shared background service, with nothing installed into it. Not
+  built yet: hearing the reply to a prompt typed in OpenCode, joining a dictation to a draft in its prompt box,
+  opening a conversation in a background tab, and starting a new conversation by voice; each needs a plugin inside
+  OpenCode. Recheck `service.json`, the `OC | ` window title, and the `location` on a generated title's rename after
+  each OpenCode update.
 
 ### Make the writing loop better
 

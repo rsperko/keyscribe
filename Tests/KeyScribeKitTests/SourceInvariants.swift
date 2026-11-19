@@ -111,10 +111,11 @@ enum SourceInvariants {
             own: SourceInvariants.integrationTool
         ),
         SourceRule(
-            pattern: #""(PI_CODING_AGENT_DIR|CLAUDE_CONFIG_DIR|CODEX_HOME)""#,
+            pattern: #""(PI_CODING_AGENT_DIR|CLAUDE_CONFIG_DIR|CODEX_HOME|OPENCODE_CONFIG_DIR)""#,
             allowed: [
                 "Sources/KeyScribe/Integrations/Claude/ClaudeConnector.swift": 1,
                 "Sources/KeyScribeKit/Integrations/Codex/CodexInstall.swift": 1,
+                "Sources/KeyScribeKit/Integrations/Opencode/OpencodeInstall.swift": 1,
                 "Sources/KeyScribeKit/Integrations/Pi/PiAgent.swift": 1,
                 "Sources/KeyScribeKit/Integrations/Omp/OmpAgent.swift": 1,
                 "Sources/KeyScribeKit/Integrations/Claude/ClaudeRegistry.swift": 1,
@@ -149,6 +150,18 @@ enum SourceInvariants {
                 "Sources/KeyScribeKit/Features.swift": 1,
             ],
             reason: "Everything Codex needs lives in its own Integrations/Codex/ folder; shared code speaks AgentHost and "
+                + "AgentHostLocation, so another host is another adapter, never a branch "
+                + "(docs/development/areas/voice-commands.md). The composition root lists the hosts and the feature summary "
+                + "names the agents it works with.",
+            own: SourceInvariants.integrationTool
+        ),
+        SourceRule(
+            pattern: #"(?i)opencode"#,
+            allowed: [
+                "Sources/KeyScribe/AgentIntegrations.swift": 1,
+                "Sources/KeyScribeKit/Features.swift": 1,
+            ],
+            reason: "Everything OpenCode needs lives in its own Integrations/Opencode/ folder; shared code speaks AgentHost and "
                 + "AgentHostLocation, so another host is another adapter, never a branch "
                 + "(docs/development/areas/voice-commands.md). The composition root lists the hosts and the feature summary "
                 + "names the agents it works with.",

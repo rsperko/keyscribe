@@ -61,7 +61,7 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     public static let agents = Feature(
         id: "agents",
         title: "Talk to agents",
-        summary: "Send what you say to an agent conversation running in a terminal, such as Claude Code, Pi, omp or Codex, and hear when it finishes. Requires installing the agent connector."
+        summary: "Send what you say to an agent conversation running in a terminal, such as Claude Code, Pi, omp, Codex or OpenCode, and hear when it finishes. Requires installing the agent connector."
     )
 
     public static let askAboutSelection = Feature(
