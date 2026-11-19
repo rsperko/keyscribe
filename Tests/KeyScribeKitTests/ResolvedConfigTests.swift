@@ -199,6 +199,86 @@ struct ResolvedConfigTests {
             == AgentAddress.parse("Tell bickund to stop", names: names))
     }
 
+    nonisolated static let spokenBranches: [(said: String, name: String, body: String)] = [
+        ("Tell Ultimate 61 to run the tests.", "ultimate 61", "to run the tests."),
+        ("Tell ultimate sixty one to run the tests.", "ultimate 61", "to run the tests."),
+        ("Tell ultimate sixty-one to run the tests.", "ultimate 61", "to run the tests."),
+        ("Tell Ultimate 6 to run the tests.", "ultimate six", "to run the tests."),
+        ("Tell ultimate six to run the tests.", "ultimate six", "to run the tests."),
+        ("Tell Ultimate61 to run the tests.", "ultimate 61", "to run the tests."),
+        ("Tell Ultimate 14 to run the tests.", "ultimate 14", "to run the tests."),
+        ("Tell ultimate fourteen to run the tests.", "ultimate 14", "to run the tests."),
+        ("Tell Ultimate 105 to run the tests.", "ultimate 105", "to run the tests."),
+        ("Tell ultimate one hundred five to run the tests.", "ultimate 105", "to run the tests."),
+        ("Tell ultimate, run the tests.", "ultimate", "run the tests."),
+        ("Tell ultimate six more things are broken.", "ultimate six", "more things are broken."),
+        ("Tell ultimate one more thing.", "ultimate", "one more thing."),
+        ("Tell ultimate 61 tests are failing.", "ultimate 61", "tests are failing."),
+        ("Tell ultimate sixty one tests are failing.", "ultimate 61", "tests are failing."),
+    ]
+
+    @Test(arguments: spokenBranches)
+    func aBranchNumberReachesItsBranchWhetherTheEngineWritesItAsDigitsOrWords(said: String, name: String, body: String) throws {
+        let rc = resolved(modes: [Mode.agentMode])
+        let read = try #require(rc.agentAddressReader(for: said, mode: Mode.agentMode))
+        #expect(AgentAddress.parse(said, names: ["ultimate", "ultimate 6", "ultimate 14", "ultimate 61", "ultimate 105"], read: read) == .name(name, body: body))
+    }
+
+    enum Reading: String, Sendable, CaseIterable { case number, replacement, dictionary }
+    enum Other: String, Sendable, CaseIterable { case prefix, sibling, unrelated }
+
+    nonisolated static let rivalGrid: [(Reading, Other, Bool)] = Reading.allCases.flatMap { reading in
+        Other.allCases.flatMap { other in [true, false].map { (reading, other, $0) } }
+    }
+
+    static func rivalCase(_ reading: Reading, _ other: Other, literal: Bool) -> (said: String, mode: Mode, dictionary: [String], names: [String], hit: String) {
+        var mode = Mode.agentMode
+        var dictionary: [String] = []
+        let said: String, hit: String, sibling: String
+        switch reading {
+        case .number:
+            said = "Tell ultimate sixty one to check the pods."
+            hit = "ultimate 61"
+            sibling = "ultimate six"
+        case .replacement:
+            mode.replacements = .init(includeGlobal: true, rules: [.init(heard: "cube", replace: "kubernetes", regex: false)])
+            said = "Tell ultimate cube to check the pods."
+            hit = "ultimate kubernetes"
+            sibling = "ultimate cuba"
+        case .dictionary:
+            dictionary = ["Kubernetes"]
+            said = "Tell ultimate kubernetis to check the pods."
+            hit = "ultimate kubernetes"
+            sibling = "ultimate kubernetic"
+        }
+        let otherName = switch other {
+        case .prefix: "ultimate"
+        case .sibling: sibling
+        case .unrelated: "docs"
+        }
+        var names = [hit, otherName]
+        if literal, !names.contains("ultimate") { names.append("ultimate") }
+        return (said, mode, dictionary, names, hit)
+    }
+
+    static func rivalOutcome(_ reading: Reading, _ other: Other, literal: Bool, hit: String) -> AgentAddress {
+        let body = "to check the pods."
+        guard reading != .number, other == .sibling else { return .name(hit, body: body) }
+        let heard = reading == .replacement ? "cube" : "kubernetis"
+        let sibling = reading == .replacement ? "ultimate cuba" : "ultimate kubernetic"
+        return literal
+            ? .name("ultimate", body: "\(heard) \(body)")
+            : .ambiguous(spoken: "ultimate", names: [hit, sibling].sorted(), body: "\(heard) \(body)")
+    }
+
+    @Test(arguments: rivalGrid)
+    func aReadingPicksTheLongerNameUnlessAGuessedCorrectionCouldMeanASiblingToo(reading: Reading, other: Other, literal: Bool) throws {
+        let c = Self.rivalCase(reading, other, literal: literal)
+        let rc = resolved(modes: [c.mode], dictionary: c.dictionary)
+        let read = try #require(rc.agentAddressReader(for: c.said, mode: c.mode))
+        #expect(AgentAddress.parse(c.said, names: c.names, read: read) == Self.rivalOutcome(reading, other, literal: literal, hit: c.hit))
+    }
+
     @Test func aCorrectedAddressLeavesALiveEditAfterItInTheMessage() throws {
         let rc = resolved(replacements: [.init(heard: "Arsperco", replace: "rsperko", regex: false)])
         let text = "Tell Arsperco Green insert new line hello"

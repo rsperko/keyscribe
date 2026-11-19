@@ -227,14 +227,22 @@ public enum AgentAddress: Equatable, Sendable {
                 let length = (1..<longest).first { reading($0) == said } ?? longest
                 let heard = AgentHandles.matchKey(spoken(length))
                 let distance = editDistance(heard, said)
-                let rivals = normalized.filter { !hits.contains($0) && editDistance(heard, AgentHandles.matchKey($0)) <= distance }
+                let numbersOnly = AgentHandles.matchKey(InverseTextNormalizer.apply(spoken(length))) == said
+                func leads(_ name: String) -> Bool {
+                    let words = name.split(separator: " ")
+                    return hits.contains { $0.split(separator: " ").starts(with: words) }
+                }
+                let rivals = numbersOnly ? [] : normalized.filter {
+                    !hits.contains($0) && !leads($0) && editDistance(heard, AgentHandles.matchKey($0)) <= distance
+                }
                 return rivals.isEmpty ? .init(length: length, names: hits) : nil
             }
             return nil
         }
-        let found = SpokenNameMatch.leading(
+        let literal = SpokenNameMatch.leading(
             Array(bare[...]), names: normalized, limit: span, fold: assumeTold ? AgentHandles.singular : { $0 },
-            minimumWords: { assumeTold || $0 == .exact ? 1 : explicit ? 2 : .max }) ?? readName()
+            minimumWords: { assumeTold || $0 == .exact ? 1 : explicit ? 2 : .max })
+        let found = readName().flatMap { read in literal.map { read.length > $0.length } ?? true ? read : nil } ?? literal
         if rowNouns.contains(bare[0]), span > 1, found.map({ $0.length == 1 }) ?? true {
             let named = parse(
                 body(after: 1), names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: assumeTold)

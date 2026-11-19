@@ -302,8 +302,11 @@ every rule above applies to it, with these sharpenings:
 - **A spoken recipient is matched as heard first, then as the mode's replacements and dictionary read
   it.** The reading only picks the name (`AgentAddress.parse`'s `read`, built by
   `ResolvedConfig.agentAddressReader`); the message after it, near misses, and ties come from the words
-  as heard. A correction never picks between names: when the words as heard sound like another live
-  name too, the address stays as heard. A take that a whole-utterance replacement owns is never
+  as heard. A reading that covers more spoken words than the name heard as said wins, as the longest name does
+  when heard (“ultimate sixty one” reaches `ultimate 61`, not `ultimate`). A correction never picks between
+  names: when the words as heard sound like another live name too, the address stays as heard. A name made of the
+  first words of the name read is not such a rival (the longest name decides between them), and a reading that only
+  writes numbers as digits is exact, not a correction, so this check does not apply to it. A take that a whole-utterance replacement owns is never
   corrected into an address; only a name said as it is addresses it. Accepted edge: at the start of a
   longer take, replacement or dictionary output that equals a live session name addresses that session.
 - **Cancel withdraws the request itself, not just its HUD.** A message the user cancelled must not
