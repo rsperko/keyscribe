@@ -1294,6 +1294,36 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult?.isEmpty == false)
         #expect(out.outcome == .inserted)            // gate passed → a real rewrite was inserted (not fallback)
     }
+
+    @Test func scriptedTakesRunOneAfterAnotherAndInsertTheTextTheyCarry() async throws {
+        let supportDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-scripted-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        try FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        try ModeStore.write(mode(id: "plain"), to: modesDir)
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
+        let provider = try SpeechEngineProvider(engines: [FixedEngine(text: "what the engine heard")], activeId: "fixed")
+        let inserted = InsertSpy()
+        let capture = ScriptedCapture(FakeAudio(url: supportDir.appendingPathComponent("capture.wav")))
+        let engines = ScriptedEngines()
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir), history: HistoryStore(supportDir: supportDir),
+            hud: HUDSpy(), permits: { _ in true }, audio: capture,
+            insert: { _, method, paste, text, _ in await inserted.record(method, paste, text); return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") }, micStatus: { .granted }, accessibilityGranted: { true })
+        controller.engineForTake = engines.engine(for:)
+        let runner = ScriptedTakeRunner(target: controller, capture: capture, engines: engines, pause: .milliseconds(5))
+        let clip = supportDir.appendingPathComponent("clip.wav")
+        try Data("RIFF".utf8).write(to: clip)
+        let first = try #require(await runner.run(ScriptedTakeRequest(id: "a", wav: clip.path, transcript: "first take", mode: "plain", caller: getpid(), issued: Date())))
+        #expect(first.ok)
+        #expect(await inserted.text == "first take")
+        let second = try #require(await runner.run(ScriptedTakeRequest(id: "b", wav: clip.path, transcript: "second take", mode: "plain", caller: getpid(), issued: Date())))
+        #expect(second.ok, "\(second.problem ?? "")")
+        #expect(await inserted.text == "second take")
+    }
 }
 
 struct WarmupBiasTermsTests {

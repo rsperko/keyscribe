@@ -198,6 +198,8 @@ final class DictationController {
 
     func transcribeGateBusy() async -> Bool { await transcriber.gate.isBusy }
 
+    var engineForTake: (any SpeechEngine) -> any SpeechEngine = { $0 }
+
     private var hideTask: Task<Void, Never>?
     private var noticedReasoning: Set<String> = []
     private var dictationStarts = 0
@@ -214,6 +216,7 @@ final class DictationController {
         captureTruncated || (session?.captureLoss.isLost ?? false)
     }
     private(set) var lastRecord: DictationRecord?
+    private(set) var recordsPublished = 0
     private(set) var nextModeOverrideID: String?
     // Bumped by anything that must stop voice-command work already under way; every action re-checks it.
 
@@ -712,7 +715,7 @@ final class DictationController {
                 finishError("Microphone access is off", action: .openMicrophoneSettings)
                 return
             }
-            engine = provider.active
+            engine = engineForTake(provider.active)
             guard activeEngineUsable(engine) else {
                 finishError("The selected speech model is not installed", action: .openSpeechModels)
                 return
@@ -2447,6 +2450,7 @@ final class DictationController {
         building.outcome = outcome
         if let error { building.error = error }
         lastRecord = building
+        recordsPublished += 1
         log.debug("\(self.building.humanSummary(), privacy: .public)")
     }
 
@@ -2686,5 +2690,34 @@ extension DictationController: AgentTakeHost {
     }
     func cancelQuietly() {
         if machine.isBusy { finish(machine: .cancel, cue: .cancel, state: .hidden) }
+    }
+}
+
+extension DictationController: ScriptedTakeTarget {
+    func scriptedTakeMode(_ named: String?) -> ScriptedTakeMode? {
+        let enabled = config.modes.filter(\.enabled)
+        let mode: Mode?
+        if let named {
+            mode = enabled.first { $0.id == named || $0.name.caseInsensitiveCompare(named) == .orderedSame }
+        } else {
+            mode = enabled.first { $0.output == .agent }
+        }
+        return mode.map { ScriptedTakeMode(id: $0.id, sendsToAgents: $0.output == .agent) }
+    }
+
+    func pressForScriptedTake() { handleStart() }
+    func releaseForScriptedTake() { handleCommit() }
+    var isRecordingForScriptedTake: Bool { machine.state == .recording }
+    var isIdleForScriptedTake: Bool { !machine.isBusy }
+
+    func finishScriptedTake() async {
+        let task = dictationTask
+        await task?.value
+    }
+
+    var scriptedTakeMarks: ScriptedTakeMarks {
+        ScriptedTakeMarks(
+            records: recordsPublished, record: lastRecord, receipts: agentTake.receiptCount, receipt: agentTake.lastReceipt,
+            hud: hud.lastPresented.map { String(describing: $0) })
     }
 }

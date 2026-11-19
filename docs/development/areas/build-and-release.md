@@ -67,7 +67,15 @@ come back empty for every route a build registers (a route that opens a process 
 a front it could not read, or needs a special start to come forward fails it). Check a new route live with `--route-probe <pid>` (the
 open plan and places for one agent; add `--read-places` to run its place script and place sources too) and
 `--front-probe` (what reads as in front). A route's pane title read (`titleRead`, used to join a Codex conversation
-to its terminal) is checked with `--title-probe`, which lists each running agent process with the title read for it. Full from-source build, prerequisites, and signing live
+to its terminal) is checked with `--title-probe`, which lists each running agent process with the title read for it.
+Check an agent integration end to end, without speaking, with the development build's own binary while that app
+runs: `--agent-take "<text>"` makes a real take in the first Agent mode (or `--mode <name>`) that hears exactly
+`<text>`, and `--agent-take-wav <file>` makes one from a recorded or generated clip, so the take's speech model
+runs on it (corpus clips, or accents made with `say -v` or the voices corpus). Only the microphone, and for text the
+speech model, are replaced; the press, delivery, receipts, History and the reply are the real path. It exits zero
+only when the take published a successful result and, in an Agent mode, its agent was sent the message; a held
+or queued message is not delivered yet. A request whose command has stopped waiting, or that was left over when
+the app started, is dropped, never taken. Full from-source build, prerequisites, and signing live
 in **`BUILD.md`**.
 
 ## Build variants

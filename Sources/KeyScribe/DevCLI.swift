@@ -29,6 +29,12 @@ public enum DevCLI {
                                         permissions  Remove TCC grants (Mic/Accessibility/Automation) so macOS re-prompts.
                                         all          Wipe the whole support dir + first-run flag (shared models kept).
                                         eraseAll     Like all, plus erase the variant's BYOK Keychain keys (TCC grants kept).
+              --agent-take <text>     Development build only, while it runs: make a real take of <text> in the
+                                      Agent mode, as if spoken (macOS speaks it into the clip; the take hears
+                                      exactly <text>), print what the take did, and exit non-zero if refused.
+              --agent-take-wav <file> The same with a recorded clip, which the take's speech model hears.
+                --mode <name>           Use this mode instead of the first Agent mode.
+                --timeout <seconds>     How long to wait for the take (default 120).
               --benchmark <dir>       Run the STT benchmark over recordings in <dir> and exit.
                 --engines <a,b,...>     Limit the benchmark run to these engine ids.
                 --raw                   Emit raw per-clip benchmark output.
@@ -269,6 +275,17 @@ public enum DevCLI {
             }
             print(DiagnosticsCollector.collect(dictationLimit: limit).render(), terminator: "")
             exit(0)
+        }
+
+        let takeText: String? = CommandLine.arguments.firstIndex(of: "--agent-take").flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }
+        let takeClip: String? = CommandLine.arguments.firstIndex(of: "--agent-take-wav").flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }
+        if takeText != nil || takeClip != nil {
+            let argument = { (flag: String) -> String? in
+                CommandLine.arguments.firstIndex(of: flag).flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }
+            }
+            exit(ScriptedTakeCLI.run(
+                text: takeText, wav: takeClip, mode: argument("--mode"), timeout: argument("--timeout").flatMap(Double.init) ?? 120,
+                supportDir: KeyScribePaths.supportDir, variant: KeyScribePaths.variant))
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--voice-command"), i + 1 < CommandLine.arguments.count {

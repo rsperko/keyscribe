@@ -41,6 +41,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let menu = MenuBarController()
     private var hotkey: HotkeyMonitor!
     private var controller: DictationController!
+    private var scriptedTakes: ScriptedTakeInbox?
     private var firstRun: FirstRunController?
     private var settingsController: SettingsController!
     private var notices = NoticesController()
@@ -248,10 +249,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before the controller exists, so the first dictation already archives.
         CaptureArchive.publish(settings.audio)
         CaptureArchive.applyRetention()
+        let scriptedCapture = KeyScribePaths.variant.isDev ? ScriptedCapture(AudioCapture()) : nil
         controller = DictationController(
             settings: settings, provider: provider, config: config, history: history,
             replacementUsage: replacementUsage, hud: hud,
             permits: AIServiceCatalog.permits,
+            audio: scriptedCapture,
             pressSnapshot: ContextProbe.initialSnapshot,
             snapshot: { [hud] in ContextProbe.snapshot(excludingWindow: hud.hudWindowID) },
             snapshotAsync: { [hud] in await ContextProbe.snapshotAsync(excludingWindow: hud.hudWindowID) },
@@ -263,6 +266,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             llmClient: llmClient)
         controller.preloadActiveEngineIfNeeded()
+        if let scriptedCapture {
+            let engines = ScriptedEngines()
+            controller.engineForTake = engines.engine(for:)
+            scriptedTakes = ScriptedTakeInbox(
+                folder: ScriptedTakeInbox.folder(supportDir: KeyScribePaths.supportDir),
+                runner: ScriptedTakeRunner(target: controller, capture: scriptedCapture, engines: engines))
+            scriptedTakes?.start()
+        }
         hud.appearance = settings.hud.appearance
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
