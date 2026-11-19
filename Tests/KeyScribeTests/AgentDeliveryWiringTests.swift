@@ -43,7 +43,7 @@ struct AgentDeliveryWiringTests {
         weak var hub: AgentHub?
         func rehello(session: String) {}
         func silence(agents: Set<String>) {}
-        func enqueue(_ command: AgentCommand, for session: String) {
+        func enqueue(_ command: AgentCommand, for session: String, instance: String?) {
             sent.append((command, session))
             if case .submit = command { onSubmit?() }
             if case .check(let check, _, let request, _) = command {
@@ -74,6 +74,7 @@ struct AgentDeliveryWiringTests {
             Task { @MainActor [weak hub] in hub?.handle(.submitted(request: command.id, turn: "")) }
         }
         func isLive(session: String) -> Bool { live && !unreachable.contains(session) }
+        func isLive(instance: String) -> Bool { live }
         func forget(session: String) {}
         func withdraw(_ id: String) -> Bool { false }
     }
@@ -711,6 +712,13 @@ struct AgentDeliveryWiringTests {
             == .error(message: "docs didn\u{2019}t take the message: Work bb isn\u{2019}t open. Nothing sent.", action: nil, heard: HeardExcerpt(heard: "")))
         #expect(AgentOutput.spokenRefusal(.notSent("docs", reason: .hostRefused("Work bb isn\u{2019}t open.")))
             == "docs didn\u{2019}t take that: Work bb isn\u{2019}t open")
+    }
+
+    @Test func aHostsReasonKeepsTheCaseOfTheCopyNameItStartsWith() {
+        #expect(AgentOutput.receiptState(.notSent("docs", reason: .hostRefused("bb (Work) isn\u{2019}t open.")), mode: "Agent", heard: "")
+            == .error(message: "docs didn\u{2019}t take the message: bb (Work) isn\u{2019}t open. Nothing sent.", action: nil, heard: HeardExcerpt(heard: "")))
+        #expect(AgentOutput.receiptState(.notSent("docs", reason: .hostRefused("bb no longer lists this thread")), mode: "Agent", heard: "")
+            == .error(message: "docs didn\u{2019}t take the message: bb no longer lists this thread. Nothing sent.", action: nil, heard: HeardExcerpt(heard: "")))
     }
 
     @Test func aStoppedConversationSaysWhatHappenedAndHowToGetPastIt() {

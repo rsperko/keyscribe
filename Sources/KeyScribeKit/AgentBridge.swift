@@ -206,6 +206,16 @@ extension AgentEvent.Hello {
     public var resumesAfterGap: Bool { !features.contains("readiness") || gap != false }
 }
 
+public struct AgentAcceptedMessage: Equatable, Sendable {
+    public var digest: String
+    public var at: Date?
+
+    public init(digest: String, at: Date?) {
+        self.digest = digest
+        self.at = at
+    }
+}
+
 public struct AgentTurnInput: Equatable, Sendable {
     public enum Sender: String, CaseIterable, Sendable {
         case agent, task, schedule, other
@@ -213,10 +223,12 @@ public struct AgentTurnInput: Equatable, Sendable {
 
     public var from: Sender?
     public var prompt: String?
+    public var accepted: [AgentAcceptedMessage]?
 
-    public init(from: Sender?, prompt: String?) {
+    public init(from: Sender?, prompt: String?, accepted: [AgentAcceptedMessage]? = nil) {
         self.from = from
         self.prompt = prompt
+        self.accepted = accepted
     }
 }
 
@@ -236,6 +248,7 @@ public enum AgentBridgeCodec {
     public static let protocolVersion = 3
     public static let maxFrameBytes = 256 * 1024
     public static let refusalDetailLimit = 300
+    public static let acceptedLimit = 64
 
     public enum CodecError: Error, Equatable { case tooLarge, unknownOp(String), malformed }
 
@@ -246,6 +259,11 @@ public enum AgentBridgeCodec {
             self.instance = instance
             self.connection = connection
         }
+    }
+
+    private struct AcceptedWire: Codable {
+        var digest: String
+        var at: Double?
     }
 
     private struct Wire: Codable {
@@ -294,6 +312,7 @@ public enum AgentBridgeCodec {
         var definition: String?
         var prompt: String?
         var from: String?
+        var accepted: [AcceptedWire]?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -355,7 +374,10 @@ public enum AgentBridgeCodec {
             return .shown(session: try required(w.session), on: on, draft: w.draft ?? false, newConversation: w.newConversation ?? false)
         case "turnComplete":
             let from = w.from.flatMap(AgentTurnInput.Sender.init(rawValue:))
-            let after = from == nil && w.prompt == nil ? nil : AgentTurnInput(from: from, prompt: w.prompt)
+            let accepted = w.accepted.map {
+                $0.suffix(acceptedLimit).map { AgentAcceptedMessage(digest: $0.digest, at: $0.at.map { Date(timeIntervalSince1970: $0 / 1000) }) }
+            }
+            let after = from == nil && w.prompt == nil && accepted == nil ? nil : AgentTurnInput(from: from, prompt: w.prompt, accepted: accepted)
             return .turnComplete(session: try required(w.session), reason: w.reason ?? "", answer: w.answer ?? "", after: after)
         default:
             throw CodecError.unknownOp(w.op)
@@ -598,6 +620,10 @@ public struct AgentCommandQueue: Sendable {
 
     public func isLive(session: String, at now: Date) -> Bool {
         !activeInstances(session: session, at: now).isEmpty
+    }
+
+    public func isLive(instance: String, at now: Date) -> Bool {
+        registrations[instance].map { now.timeIntervalSince($0.lastSeen) <= window } ?? false
     }
 
     private mutating func requeue(where shouldRequeue: (InFlight) -> Bool) {

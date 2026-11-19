@@ -202,7 +202,7 @@ final class ClaudeConnector: AgentConnector {
         let found = AgentConnectorStatus.parse(pluginList: Data(output.utf8), pluginId: pluginId, bundledVersion: ClaudeConnectorFiles.version(for: script, surfaces: surfaces))
         let registered = switch found {
         case .ready, .outdated, .disabled: true
-        case .notInstalled, .unknown: false
+        case .notInstalled, .unknown, .notOpen: false
         }
         if target.removing { return registered || hasFiles(in: target) ? .removalUnfinished(nil) : .status(.notInstalled) }
         guard target.installation != nil else { return found == .unknown ? .status(.unknown) : .status(.notInstalled) }

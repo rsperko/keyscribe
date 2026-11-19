@@ -127,6 +127,16 @@ struct SpokenResultTests {
         #expect(SpokenResult.cause(after: AgentTurnInput(from: .task, prompt: nil), asked: nil) == .sender(.task))
     }
 
+    @Test func theCueNamesTheRequestWhenItIsTheLastMessageTheTurnTook() {
+        let asked = "also reply with two"
+        let first = AgentPromptDigest.of("reply with one")
+        let mine = AgentPromptDigest.of(asked)
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: first, accepted: [.init(digest: first, at: nil), .init(digest: mine, at: nil)]), asked: asked) == .request(asked))
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: nil, accepted: [.init(digest: mine, at: nil), .init(digest: first, at: nil)]), asked: asked) == nil)
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: mine, accepted: [.init(digest: first, at: nil)]), asked: asked) == nil)
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: mine, accepted: []), asked: asked) == nil)
+    }
+
     @Test func aSenderCueJoinsTheConversationNameWithoutAddingASentence() {
         #expect(SpokenResult.prefaced("Done.", name: "auth", cause: .sender(.agent)) == "auth, answering another agent: Done.")
         #expect(SpokenResult.prefaced("Done.", name: "", cause: .sender(.task)) == "After a background task: Done.")

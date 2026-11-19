@@ -13,7 +13,14 @@ struct AgentHubTests {
         var live: Set<String> = []
         var sent: [(AgentCommand, String)] = []
         var withdrawn: [String] = []
-        func enqueue(_ command: AgentCommand, for session: String) { sent.append((command, session)) }
+        var pinned: [String: String] = [:]
+        var liveInstances: Set<String> = []
+        func enqueue(_ command: AgentCommand, for session: String, instance: String?) {
+            sent.append((command, session))
+            if let instance { pinned[command.id] = instance }
+        }
+        var sessionsOf: (String) -> [String] = { _ in [] }
+        func isLive(instance: String) -> Bool { liveInstances.contains(instance) || sessionsOf(instance).contains(where: live.contains) }
         func withdraw(_ id: String) -> Bool {
             withdrawn.append(id)
             return true

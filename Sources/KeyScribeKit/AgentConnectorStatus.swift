@@ -6,4 +6,5 @@ public enum AgentConnectorStatus: Equatable, Sendable {
     case outdated(installed: String)
     case disabled
     case unknown
+    case notOpen
 }

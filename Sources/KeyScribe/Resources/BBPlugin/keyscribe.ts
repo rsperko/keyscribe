@@ -17,6 +17,7 @@ export type Pane = { threadId: string | null; isFocused: boolean }
 export type Bb = {
   listThreads: () => Promise<Thread[]>
   history: (thread: string) => Promise<string[]>
+  turnInputs: (thread: string, failed: boolean, since: number | null) => Promise<Accepted[] | null>
   interaction: (thread: string, id: string) => Promise<string | null>
   on: (event: string, handler: (payload: any) => void) => void
   compose: (window: string, thread: string | null, text: string) => Promise<Composed | null>
@@ -30,6 +31,7 @@ export type ComposeAsk = { id: string; window: string; thread: string | null; te
 export type ComposeAnswer = { id: string } & Composed
 export type Waiting = { kind?: string; title?: string; tool?: string; detail?: string }
 export type ReadAloud = boolean | "quiet" | null
+export type Accepted = { said: string; at: number }
 
 type Config = { protocol: number; socketPath: string; tokenPath: string; readyPath: string; installation: string; instance: string; version?: string; appName?: string }
 type Member = {
@@ -45,13 +47,14 @@ type Member = {
   resay: boolean
   unstarted: { turn: string; next: Next | undefined } | null
   input: { turn: string; from?: string; prompt?: string } | null
+  since: number | null
 }
 
 type Next = { said: string | null; from?: string }
 
 const senders: Record<string, string> = { agent: "agent", automation: "other", system: "other" }
 const senderOf = (initiator: unknown) => (typeof initiator === "string" ? senders[initiator] : undefined)
-const features = ["promptDigest", "readiness", "shown", "notify", "label", "merge", "start"]
+const features = ["promptDigest", "readiness", "shown", "notify", "label", "merge", "start", "accepted"]
 const newThreadPage = "new conversation"
 const labelLimit = 200
 const busy = new Set(["active", "starting", "stopping"])
@@ -67,6 +70,7 @@ const waitingCheck = 5000
 const waitingCheckLater = 30000
 const waitingCheckSlowsAfter = 60000
 const readAloudDeadline = 4000
+const recordDeadline = 3000
 const joinedLimit = 32
 const waitingTitleLimit = 300
 const waitingDetailLimit = 1000
@@ -350,6 +354,33 @@ function text(content: unknown): string | null {
   return parts.length ? parts.join("\n") : null
 }
 
+const turnStartSlack = 2000
+
+export function acceptedInEndedTurn(rows: unknown, failed: boolean, since: number | null): Accepted[] | null {
+  const list: unknown = Array.isArray(rows) ? rows : (rows as { events?: unknown } | null)?.events
+  if (!Array.isArray(list)) return null
+  const events = list.filter((e) => e && typeof e.seq === "number" && typeof e.type === "string").sort((a, b) => a.seq - b.seq)
+  const startedAt = new Map<string, number>()
+  for (const e of events) {
+    if (e.type === "turn/started" && typeof e.scope?.turnId === "string" && typeof e.createdAt === "number") startedAt.set(e.scope.turnId, e.createdAt)
+  }
+  const ends = failed ? ["turn/completed", "turn/started"] : ["turn/completed"]
+  const ours = (turn: unknown) => typeof turn === "string" && (since === null || (startedAt.get(turn) ?? -Infinity) >= since - turnStartSlack)
+  const turn = [...events].reverse().find((e) => ends.includes(e.type) && ours(e.scope?.turnId))?.scope?.turnId
+  if (typeof turn !== "string") return null
+  const asked = new Map<string, Accepted>()
+  for (const e of events) {
+    if (e.type !== "client/turn/requested" || typeof e.data?.requestId !== "string" || typeof e.createdAt !== "number") continue
+    const said = text(e.data.input) ?? ""
+    const first = typeof e.data.retryOf?.requestId === "string" ? asked.get(e.data.retryOf.requestId) : undefined
+    asked.set(e.data.requestId, { said, at: first?.at ?? e.createdAt })
+  }
+  const taken = events
+    .filter((e) => e.type === "turn/input/accepted" && e.scope?.turnId === turn)
+    .map((e) => asked.get(e.data?.clientRequestId))
+  return taken.every((entry) => entry !== undefined) ? taken as Accepted[] : null
+}
+
 function folder(path: string): string {
   const index = path.lastIndexOf("/")
   return index > 0 ? path.slice(0, index) : "/"
@@ -404,7 +435,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     if (found) return { member: found, added: false }
     const made: Member = {
       status, helloed: false, greeting: false, quiet: false, turn: busy.has(status) ? newTurn() : null, next: undefined, chain: Promise.resolve(),
-      waiting: null, unsaid: false, resay: false, unstarted: null, input: null,
+      waiting: null, unsaid: false, resay: false, unstarted: null, input: null, since: null,
     }
     members.set(thread, made)
     return { member: made, added: true }
@@ -828,7 +859,10 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   function arrived(thread: any, created: boolean) {
     if (!thread?.id || members.has(thread.id)) return
     const { member: m } = member(thread.id, thread.status)
-    if (created && m.turn) m.unstarted = { turn: m.turn, next: undefined }
+    if (created && m.turn) {
+      m.unstarted = { turn: m.turn, next: undefined }
+      m.since = host.now()
+    }
     changed()
   }
 
@@ -871,6 +905,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     m.next = undefined
     const turn = newTurn()
     m.turn = turn
+    m.since = host.now()
     m.unstarted = { turn, next }
     if (added) return changed()
     reportStart(thread.id, m)
@@ -961,10 +996,17 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     const turn = m.turn
     m.turn = null
     if (!turn) return
+    const record = new Promise<Accepted[] | null>((resolve) => {
+      const clear = host.after(recordDeadline, () => resolve(null))
+      bb.turnInputs(thread.id, reason === "error", m.since).then(resolve, () => resolve(null)).finally(clear)
+    })
+    m.since = null
     report(thread.id, async () => {
       const input = m.input?.turn === turn ? m.input : null
       if (input) m.input = null
-      return { op: "turnComplete", session: sessionOf(thread.id), reason, answer: answer.slice(0, answerLimit), from: input?.from, prompt: input?.prompt }
+      const body = { op: "turnComplete", session: sessionOf(thread.id), reason, answer: answer.slice(0, answerLimit), from: input?.from, prompt: input?.prompt }
+      const accepted = await record
+      return accepted === null ? body : { ...body, accepted: accepted.map(({ said, at }) => ({ digest: digestFor(thread.id, said), at })) }
     })
   }
   bb.on("thread.idle", ({ thread, lastAssistantText }) => ended(thread, "complete", typeof lastAssistantText === "string" ? lastAssistantText : ""))

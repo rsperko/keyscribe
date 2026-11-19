@@ -238,11 +238,11 @@ final class AgentsSettingsModel: ObservableObject {
         shown = conversations
         describeNewTerminals(conversations.compactMap(\.pid) + candidates.map(\.pid) + disconnected.compactMap(\.pid))
         var next = conversations.map { conversation in
-            let lastSeen = !conversation.reachable && lastSeen.contains(conversation.id)
+            let lastSeen = lastSeen.contains(conversation.id) && (!conversation.reachable || conversation.host != nil)
             return Row(
                 id: conversation.id, name: conversation.handle, folder: conversation.cwd,
                 state: lastSeen ? "Last seen" : AgentRoster.stateLabel(conversation, prompt: prompts[conversation.id]),
-                connected: conversation.reachable,
+                connected: conversation.reachable && !lastSeen,
                 agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil },
                 title: conversation.title, setup: conversation.setup,
                 key: conversation.pid.map { Self.key(pid: $0, milliseconds: conversation.startedAt.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }) } ?? conversation.id,
@@ -250,7 +250,7 @@ final class AgentsSettingsModel: ObservableObject {
                 readAloud: readAloud.contains(conversation.id) ? .thisReply : readNextAloud.contains(conversation.id) ? .nextReply : nil,
                 place: conversation.placeName, renamed: conversation.nameSource == .chosen,
                 surface: conversation.placeSurface, otherNames: conversation.otherNames, unreadSince: conversation.placeUnreadSince,
-                needsYou: conversation.reachable && Self.waitsOnUser.contains(conversation.state), host: conversation.host?.host)
+                needsYou: conversation.reachable && !lastSeen && Self.waitsOnUser.contains(conversation.state), host: conversation.host?.host)
         }
         next += candidates.map { candidate in
             Row(

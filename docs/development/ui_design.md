@@ -2520,10 +2520,11 @@ and no result sheet. Progress and the outcome appear in the folder's row and the
 A setup's status says what its files show: **Installed**, **Update available**, **Not installed**, the
 agent's own turned-off wording when the agent's configuration turns the connector off, **Uninstall not
 finished** with **Finish Uninstalling**, or a failure with what went wrong and **Try Again**, which repeats
-the step that failed. A failed install is not Installed: its conversations still offer **Connect…**. A setup
+the step that failed. A bb copy whose app is closed and whose server does not answer reads **Not open**, never an
+error, since its plugin can be checked only while that copy runs. A failed install is not Installed: its conversations still offer **Connect…**. A setup
 that is enrolled (its consent was given) but reads **Not installed**, because its files went missing outside the
 app, offers **Reinstall**, which installs again without the consent sheet; and any enrolled setup that reads
-failed, unknown or not installed still offers its Uninstall action, so a consent can always be taken back. Installed is
+failed, unknown, not open or not installed still offers its Uninstall action, so a consent can always be taken back. Installed is
 never Ready: a conversation is Ready only when its own connector has connected. When the app starts it
 updates the connector in every setup it is installed in, never one it is not installed in or one the agent
 has turned off; a conversation still running the previous connector says so under its row, and that

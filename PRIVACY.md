@@ -254,8 +254,9 @@ in the same `Application Support` folder:
   agent bb started is shown as that bb thread rather than a second time.
   The plugin runs inside bb and reports to KeyScribe, over the same local
   connection the connectors use, when each bb thread starts and finishes a turn, with the reply to that turn
-  and a short fingerprint of the prompt it started with, never the prompt itself. To make that fingerprint it
-  reads the thread's queued message or its most recent prompts inside bb, and keeps nothing it read. KeyScribe
+  and a short fingerprint of the prompt it started with and of each message the turn took in, with the time bb
+  recorded each, never the messages themselves. To make those fingerprints it reads the thread's queued message, its most recent prompts, and bb's
+  record of which messages the turn took, inside bb, and keeps nothing it read. KeyScribe
   uses a reply only to read aloud the answer to what you dictated, under the same rules as a connector's.
   When a thread stops for your approval or an answer, the plugin also reports what bb records about that
   request (described under Read Agent Replies Aloud above), and while it is open asks bb every few seconds whether it still

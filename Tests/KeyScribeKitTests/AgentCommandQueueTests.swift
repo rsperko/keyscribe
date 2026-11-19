@@ -148,6 +148,37 @@ struct AgentCommandQueueTests {
         #expect(!queue.isLive(session: "s1", at: at(1 + quiet)))
     }
 
+    @Test func oneInstanceOfASessionIsLiveOnlyWhileItselfIsHeardFrom() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "plugin", connection: "c1", at: t0)
+        queue.hello(session: "s1", instance: "inner", connection: "c2", at: at(quiet))
+        #expect(queue.isLive(session: "s1", at: at(quiet)))
+        #expect(queue.isLive(instance: "inner", at: at(quiet)))
+        #expect(!queue.isLive(instance: "plugin", at: at(quiet)))
+        #expect(!queue.isLive(instance: "never", at: t0))
+        queue.touch(instance: "plugin", connection: "c1", at: at(quiet))
+        #expect(queue.isLive(instance: "plugin", at: at(quiet)))
+        queue.forget(session: "s1")
+        #expect(!queue.isLive(instance: "plugin", at: at(quiet)))
+    }
+
+    @Test func aCommandPinnedToOneInstanceReachesItWhileAnotherInstanceSharesTheSession() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "plugin", connection: "c1", at: t0)
+        queue.hello(session: "s1", instance: "inner", connection: "c2", at: t0)
+        queue.enqueue(command("r1"), for: "s1", instance: "plugin", at: t0)
+        #expect(queue.poll(session: "s1", instance: "inner", connection: "c2", at: at(1)) == [])
+        #expect(queue.poll(session: "s1", instance: "plugin", connection: "c1", at: at(1)) == [command("r1")])
+    }
+
+    @Test func aTurnReportNamingMoreMessagesThanTheBoundKeepsTheNewest() throws {
+        let names = (0..<(AgentBridgeCodec.acceptedLimit + 3)).map { String(format: "%016x", $0) }
+        let json = #"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","accepted":["# + names.map { #"{"digest":"\#($0)"}"# }.joined(separator: ",") + "]}"
+        guard case .turnComplete(_, _, _, let after, _) = try AgentBridgeCodec.decodeEvent(Data(json.utf8)) else { Issue.record("not a turn end"); return }
+        #expect(after?.accepted?.count == AgentBridgeCodec.acceptedLimit)
+        #expect(after?.accepted?.last?.digest == names.last)
+    }
+
     @Test func retiringSomeInstancesWithdrawsOnlyTheirSessionsCommands() {
         var queue = AgentCommandQueue()
         queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
@@ -676,6 +707,13 @@ struct AgentBridgeCodecTests {
         (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done"}"#, .turnComplete(session: "s1", reason: "answer", answer: "done")),
         (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","from":"agent","prompt":"0123456789abcdef"}"#,
          .turnComplete(session: "s1", reason: "answer", answer: "done", after: AgentTurnInput(from: .agent, prompt: "0123456789abcdef"))),
+        (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","accepted":[{"digest":"aaaaaaaaaaaaaaaa","at":5000},{"digest":"bbbbbbbbbbbbbbbb"}]}"#,
+         .turnComplete(session: "s1", reason: "answer", answer: "done",
+                       after: AgentTurnInput(from: nil, prompt: nil, accepted: [
+                           .init(digest: "aaaaaaaaaaaaaaaa", at: Date(timeIntervalSince1970: 5)), .init(digest: "bbbbbbbbbbbbbbbb", at: nil),
+                       ]))),
+        (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","accepted":[]}"#,
+         .turnComplete(session: "s1", reason: "answer", answer: "done", after: AgentTurnInput(from: nil, prompt: nil, accepted: []))),
         (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","from":"user"}"#,
          .turnComplete(session: "s1", reason: "answer", answer: "done")),
         (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","from":"martian","prompt":"0123456789abcdef"}"#,

@@ -166,13 +166,15 @@ final class BBHost: AgentHost {
         var carried: Set<AgentHostLocation> = []
         var listedNow: [String: Bool] = [:]
         var firstUnlisted: String?
+        var withThreads: String?
         var problem: String?
         defer { retryLaunched(listedNow) }
         for build in builds {
             func lastSeen(_ said: String) -> [BBThreads.Thread] {
                 listedNow[build.folder] = false
-                firstUnlisted = firstUnlisted ?? said
                 let kept = listed[build.folder] ?? []
+                if !kept.isEmpty { withThreads = withThreads ?? said }
+                firstUnlisted = firstUnlisted ?? said
                 carried.formUnion(kept.map { AgentHostLocation(host: Self.kind.id, instance: build.folder, native: $0.id) })
                 return kept
             }
@@ -196,7 +198,7 @@ final class BBHost: AgentHost {
                 shownInstead[location.conversationKey] = thread.shownInstead
             }
         }
-        if let unlisted = problem ?? firstUnlisted, !listedNow.values.contains(true) { return .unreadable(unlisted) }
+        if let unlisted = problem ?? withThreads ?? firstUnlisted, !listedNow.values.contains(true) { return .unreadable(unlisted) }
         return .found(sessions, titles: titles, shownInstead: shownInstead, carried: carried, problem: problem)
     }
 

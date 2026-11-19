@@ -550,6 +550,36 @@ struct BBHostTests {
         #expect(await broken.scan() == .unreadable("bb (Acme) could not list its threads. Try again in a moment."))
     }
 
+    @Test func everyCopyClosedNamesACopyWhoseThreadsWereListedOverOneThatNeverHadAny() async {
+        final class Open: @unchecked Sendable { var folders: Set<String> = [] }
+        let open = Open()
+        open.folders = [Self.usual.folder, Self.acme.folder]
+        let builds = [Self.usual, Self.acme]
+        let listing = #"[{"id":"thr_abc1","status":"idle","visibility":"visible","environmentPath":"/src"}]"#
+        let acme = Self.acme.folder
+        let bb = BBHost(
+            home: Self.home, enrolled: { builds.map(\.folder) }, describe: { folder in builds.first { $0.folder == folder } },
+            installed: { _ in true }, isOpen: { open.folders.contains($0.folder) }, serving: { _ in false },
+            run: { _, _, _, environment in
+                HostCLI.Output(status: 0, stdout: Data((environment["BB_DATA_DIR"] == acme ? listing : "[]").utf8), stderr: "", truncated: false)
+            },
+            activate: { _ in }, frontmost: { _ in nil }, frontApp: { nil }, dataFolder: { _ in nil })
+        _ = await bb.scan()
+        open.folders = []
+        #expect(await bb.scan() == .unreadable("bb (Acme) isn\u{2019}t open. Open bb (Acme) to reach its threads."))
+    }
+
+    @Test func aClosedCopyWithNoThreadsBesideOneThatListsIsNeverReported() async {
+        let builds = [Self.usual, Self.acme]
+        let bb = BBHost(
+            home: Self.home, enrolled: { builds.map(\.folder) }, describe: { folder in builds.first { $0.folder == folder } },
+            installed: { _ in true }, isOpen: { $0 == Self.acme }, serving: { _ in false },
+            run: { _, _, _, _ in HostCLI.Output(status: 0, stdout: Data("[]".utf8), stderr: "", truncated: false) },
+            activate: { _ in }, frontmost: { _ in nil }, frontApp: { nil }, dataFolder: { _ in nil })
+        guard case .found(_, _, _, _, let problem) = await bb.scan() else { Issue.record("expected a listing"); return }
+        #expect(problem == nil)
+    }
+
     @Test func aFolderNoAppIsKnownToUseSaysSoRatherThanThatBbIsNotOpen() async {
         let runner = Runner()
         let orphan = BBBuild(folder: "/Users/a/.work-bb", name: BBBuilds.fallbackName)

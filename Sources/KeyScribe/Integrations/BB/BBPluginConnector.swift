@@ -129,6 +129,7 @@ final class BBPluginConnector: AgentConnector {
     private let home: URL
     private let find: @MainActor () async -> [BBBuild]
     private let isOpen: @MainActor (BBBuild) -> Bool
+    private let serving: @MainActor (BBBuild) -> Bool
     private(set) var builds: [BBBuild] = []
     private var preferred: BBBuild?
     private var added: [String: BBBuild] = [:]
@@ -142,6 +143,7 @@ final class BBPluginConnector: AgentConnector {
         run: @escaping Run = { try await HostCLI.run($0, subcommand: $1, input: $2, environment: $3, timeout: .seconds(120)) },
         find: (@MainActor () async -> [BBBuild])? = nil,
         isOpen: @escaping @MainActor (BBBuild) -> Bool = BBBuildFinder.isOpen,
+        serving: @escaping @MainActor (BBBuild) -> Bool = { BBBuildFinder.serves(folder: $0.folder) },
         isDataFolder: @escaping (String) -> Bool = BBBuildFinder.isDataFolder,
         describe: ((String) -> BBBuild?)? = nil
     ) {
@@ -160,6 +162,7 @@ final class BBPluginConnector: AgentConnector {
             return await Task.detached { BBBuildFinder.find(home: path, apps: apps, also: declared) }.value
         }
         self.isOpen = isOpen
+        self.serving = serving
     }
 
     private var usualFolder: URL { home.appendingPathComponent(BBBuilds.usualFolder, isDirectory: true) }
@@ -227,7 +230,7 @@ final class BBPluginConnector: AgentConnector {
         let installed = config["version"] as? String ?? ""
         let listing = try? await output(tool, ["plugin", "list", "--json"], subcommand: "plugin list", target: target)
         guard let listing, listing.status == 0, let found = BBPluginFiles.listed(listing.stdout, id: id, folder: plugin.path) else {
-            return .status(.unknown)
+            return await reachable(target.folder) ? .status(.unknown) : .status(.notOpen)
         }
         guard let plugin = found else { return .status(.notInstalled) }
         if !plugin.enabled || plugin.status == "disabled" { return .status(.disabled) }
@@ -238,6 +241,11 @@ final class BBPluginConnector: AgentConnector {
             return .broken("bb kept the plugin\u{2019}s earlier version running: \(detail)")
         }
         return filesCurrent(sources, target: target, installation: installation) ? .status(.ready) : .status(.outdated(installed: installed))
+    }
+
+    @MainActor private func reachable(_ folder: URL) -> Bool {
+        let build = builds.first { $0.folder == folder.path } ?? added[folder.path] ?? BBBuild(folder: folder.path, name: BBBuilds.fallbackName)
+        return isOpen(build) || serving(build)
     }
 
     func install(tool: String, target: ConnectorTarget) async throws {

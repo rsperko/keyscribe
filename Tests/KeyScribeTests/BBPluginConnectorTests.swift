@@ -33,14 +33,14 @@ struct BBPluginConnectorTests {
 
     private func connector(
         _ home: URL, _ agents: URL, calls: Calls, id: String = "keyscribe-dev", sources: [String: String]? = Self.sources, builds: [BBBuild] = [],
-        open: @escaping @MainActor (BBBuild) -> Bool = { _ in false }
+        open: @escaping @MainActor (BBBuild) -> Bool = { _ in false }, serving: @escaping @MainActor (BBBuild) -> Bool = { _ in false }
     ) -> BBPluginConnector {
         BBPluginConnector(
             agentsDir: agents, pluginName: id, home: home, sources: sources, isExecutable: { _ in true },
             run: { argv, subcommand, _, environment in
                 calls.record(argv, environment)
                 return calls.answer(subcommand)
-            }, find: { builds }, isOpen: open)
+            }, find: { builds }, isOpen: open, serving: serving)
     }
 
     private func target(_ home: URL, installation: String? = "inst-bb", removing: Bool = false) -> ConnectorTarget {
@@ -142,6 +142,18 @@ struct BBPluginConnectorTests {
         #expect(await plugin.check(tool: tool, target: target(home)) == .status(.ready))
         calls.set("plugin list", listing(agents, detail: "reload failed: SyntaxError"))
         #expect(await plugin.check(tool: tool, target: target(home)) == .broken("bb kept the plugin\u{2019}s earlier version running: reload failed: SyntaxError"))
+        calls.set("plugin list", status: 1, #"{"ok":false,"error":{"code":"server_unavailable","message":"bb is not running"}}"#)
+        #expect(await plugin.check(tool: tool, target: target(home)) == .status(.notOpen))
+    }
+
+    @Test(arguments: [(true, false), (false, true)])
+    func aCopyThatIsOpenOrServedButDoesNotAnswerIsUnknownNotClosed(open: Bool, served: Bool) async throws {
+        let (home, agents) = scratch()
+        try? FileManager.default.createDirectory(at: home.appendingPathComponent(".bb/bin"), withIntermediateDirectories: true)
+        let calls = Calls()
+        let plugin = connector(home, agents, calls: calls, open: { _ in open }, serving: { _ in served })
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
+        try await plugin.install(tool: tool, target: target(home))
         calls.set("plugin list", status: 1, #"{"ok":false,"error":{"code":"server_unavailable","message":"bb is not running"}}"#)
         #expect(await plugin.check(tool: tool, target: target(home)) == .status(.unknown))
     }

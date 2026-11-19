@@ -264,8 +264,11 @@ final class AgentOutput {
     }
 
     private static func sentence(_ text: String) -> String {
-        let capitalized = text.prefix(1).uppercased() + text.dropFirst()
-        return capitalized.hasSuffix("?") || capitalized.hasSuffix(".") ? capitalized : capitalized + "."
+        finished(text.prefix(1).uppercased() + text.dropFirst())
+    }
+
+    private static func finished(_ text: String) -> String {
+        text.hasSuffix("?") || text.hasSuffix(".") ? text : text + "."
     }
 
     private static func askAdvice(_ reason: AgentRecipient.AskReason) -> String? {
@@ -413,7 +416,7 @@ final class AgentOutput {
             case .stopped: "\(name)\u{2019}s last turn was interrupted, so it takes only a message you type. \(nothingSent) Type one there, then dictate again."
             case .expired: "\(name) didn\u{2019}t take it in time. \(nothingSent)"
             case .refused: "\(name) refused the message. \(nothingSent)"
-            case .hostRefused(let why): "\(name) didn\u{2019}t take the message: \(Self.sentence(why)) \(nothingSent)"
+            case .hostRefused(let why): "\(name) didn\u{2019}t take the message: \(Self.finished(why)) \(nothingSent)"
             case .disconnected: "\(name) is disconnected. \(nothingSent)"
             case .hostTakesNoMessages(let host): "\(name) is in \(host), which doesn\u{2019}t take messages from \(Branding.appName). \(nothingSent)"
             case .newConversationNotInFront(let host): "\(host)\u{2019}s page for a new conversation is no longer in front. \(nothingSent)"

@@ -79,8 +79,9 @@ struct AgentOutputTests {
     }
 
     private final class NoTransport: AgentTransport {
-        func enqueue(_ command: AgentCommand, for session: String) {}
+        func enqueue(_ command: AgentCommand, for session: String, instance: String?) {}
         func isLive(session: String) -> Bool { false }
+        func isLive(instance: String) -> Bool { false }
         func forget(session: String) {}
         func withdraw(_ id: String) -> Bool { false }
         func rehello(session: String) {}

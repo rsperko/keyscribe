@@ -588,6 +588,32 @@ every rule above applies to it, with these sharpenings:
   as sent. A turn with another prompt, or none (a message the host itself injects), is never followed;
   messages the host merges into one turn match none and are sent without a spoken reply. Without a
   connector reporting digests, a hosted dictation is sent and never followed.
+- **A host that names what each turn took has one attribution source: the turn's end.** Its plugin advertises
+  `accepted` and lists, in `turnComplete`'s `accepted`, every message the turn took, in order, from the host's own
+  record of the turn: each message's digest and the time the host recorded it. For such a conversation nothing binds
+  a dictation to a turn earlier: a turn's start, or a dictation delivered into a running turn, only proves arrival (a
+  matching start reports an unclear delivery as sent) and lets an approval or question in that turn be described
+  (`AgentHub.attendHosted`). At the end each listed message takes the oldest waiting dictation that carries it
+  (`AgentHub.claim`, `HostFollow.carries`): the same digest, recorded while that dictation was being sent (from the
+  moment the send began to the moment the host answered, within `AgentHub.sendSlack`; a send the host queued has no
+  end), and a wait that had not run out when the turn started. So the same words typed in the host, before the
+  dictation or after its turn ended, never take its reply; two dictations with the same text are each read for the
+  turn that took them; a long turn still takes a dictation it took at its start. The reply is read once, for the
+  dictation the turn took last, or for none when the agent's read-aloud tool asked for it; a turn that took none
+  leaves them waiting. The host's send command gives no request id to match on (bb 0.49's `thread tell` answers only
+  `sent` or `queued`, and records no sender for a message it sends; checked 2026-11-19), so the time the host recorded is the identity
+  available. The window rests on where bb stamps that time (read from bb 0.49's server source, 2026-11-19): a message
+  it sends at once is recorded inside the send request, before it answers; one it queues is recorded when it
+  dispatches it, which is why a queued send has no end; a retry keeps its original's time (`retryOf`, followed by
+  the plugin); and it emits `thread.idle` only after the turn's `turn/completed` is stored, so the record is complete
+  when the plugin asks. Each turn end logs how long after its send began bb recorded each message it claimed, which is
+  the measurement to check when the window is in doubt: 0.25 to 0.29 s, both into an idle thread and steered into a
+  running turn (bb 0.49, `thread tell --mode auto`, measured 2026-11-19). A list that is absent (the host could not give its record)
+  and one that is empty mean different things: an empty list takes nothing, while an absent one falls back to the
+  digest of the prompt the turn started with plus every dictation the host took at once (not queued, not answered
+  unclearly) after the turn started (`AgentHub.claimSteered`), which is a guess, and the log says the record was
+  missing. Part of the guess: a dictation sent after the host ended the turn but before that end reached the app
+  (at most the plugin's deadline for the record) is taken for the turn that ended, not the one it started.
 - **Agents and setups are isolated at the bridge.** Each enrolled setup has its own installation id
   (`ConnectorSetups`), and retiring one installation's connectors leaves every other setup's and agent's
   sessions connected. Inside the app a conversation id is
@@ -705,9 +731,11 @@ every rule above applies to it, with these sharpenings:
   app path's resolved form is kept for the life of the app, so a symlink retargeted while it runs keeps its old
   answer until relaunch. A build that is closed or
   could not be read keeps the threads it last listed, as Last seen, while the others are listed fresh
-  (`AgentHostScan.found`'s `carried`); only when no build could be read is the list unreadable. A closed build is
+  (`AgentHostScan.found`'s `carried`); only when no build could be read is the list unreadable, and then its problem
+  names a closed build whose threads were listed this run before one that never had any. A closed build is
   not a problem while another build lists, since a copy the user is not running is not a fault; a build that could
-  not list is, and its problem names that build. Delivery uses `--mode auto`, which steers a
+  not list is, and its problem names that build. A carried thread is not counted as available in Settings, since
+  its build cannot be reached. Delivery uses `--mode auto`, which steers a
   running turn and starts one when the thread is idle, as typing in bb does. The hub holds nothing back for an open
   approval: bb queues the message itself and answers `queued` (measured with bb 0.49.0 on 2026-11-15, Claude Code in
   a thread stopped on a command approval). The approval stayed open, the message sat in bb's queue as
@@ -787,14 +815,41 @@ every rule above applies to it, with these sharpenings:
   one long poll serves all of them (a poll that lists `members` is answered with every member's commands and the
   members the bridge no longer knows, which say hello again on their own). It reports only what it saw: a
   `turnStarted` whose `prompt` is the digest of the queued row bb dispatched, or else of the newest prompt in the
-  thread's history that is not still queued, and none for a row bb itself queued; a `turnComplete` only for a turn
+  thread's history that is not still queued, and none for a row bb itself queued (bb emits `message.dispatched` only
+  for a row it queued, never for a message sent at once or steered into a running turn, so that prompt is a guess);
+  a `turnComplete` only for a turn
   it saw start or found running when it loaded, naming the sender bb records for a row an agent, an automation or bb
   itself queued (never for one a plugin queued, since that can be the user's own dictation), and the newest row the
-  running turn took in when another was dispatched while it ran. Delivery stays bb's command, so the hub's digest follow matches the dictation exactly as for an
-  agent's own connector. While it is live for a thread it holds that thread: an agent's own connector there is sent
-  back and not filed until the plugin stops, so a thread never reports its turns twice. It lists bb's threads page by page, and a thread
-  it had not listed says hello as soon as bb reports it working. Events the app cannot take are dropped, never
-  replayed.
+  running turn took in when another was dispatched while it ran. Its `turnComplete` also lists, as `accepted`, the
+  digest of every message bb accepted into the turn that ended, read from bb's own record of that turn
+  (`client/turn/requested` joined to `turn/input/accepted` by request id, `acceptedInEndedTurn`), each with the time bb
+  recorded its request (a retry's original request's), and a joined draft named by the dictation it carried; a record
+  bb cannot give within its deadline, or one with a message it cannot place (no request to join, no number for its
+  time), sends no list rather than an empty or shorter one. A message with no text (an image alone) is placed and
+  listed, and matches no dictation. A message bb or another thread's agent sends is recorded the same way as the
+  user's (read from bb 0.49's server source, 2026-11-19). Delivery stays bb's command. bb's thread events carry no turn id, so the turn that ended
+  is chosen by when it started: the newest one bb records as completed (or, for a failed turn, completed or started)
+  that started no earlier than the plugin saw this turn begin, give or take a moment; if none did, no list is sent
+  rather than the previous turn's. The record is asked for the moment the turn ends, not after earlier reports land.
+  While the plugin is live for a thread it holds that thread: an agent's own connector there is sent back and not
+  filed. The plugin itself is never filed; only an agent is. Whether the plugin holds is read from its own
+  connection wherever it is asked (`AgentHub.pluginHolds`), the hand-off of the agent's read-aloud request included,
+  and afresh on every pass, never remembered: a thread whose plugin holds it but
+  has an agent filed is unfiled and the agent asked to say hello again, which stops once the filing is gone, and a
+  thread whose plugin does not hold it and has nothing filed has its agent asked again, which stops once the agent
+  files. So a thread never reports its turns twice, whatever order the plugin goes silent, the agent says hello and
+  the plugin is heard from again. It lists bb's threads page by page, and a thread it had not listed says hello as
+  soon as bb reports it working. Events the app cannot take are dropped, never replayed.
+- **One connector holds a conversation, and everything about it comes from that connector.** What a connector can
+  do is kept by its instance, never by the session id a plugin and an agent filed under it share
+  (`AgentHub.holder(of:)`): the host's plugin while its own instance is live, else the agent's live connector, else
+  the one that said hello last. A hello replaces the earlier instance of the same role in that conversation, since a
+  reconnecting connector comes back as a new instance, but a plugin that is only silent keeps its place, since it
+  polls again without a new hello. The holder's features decide every capability (draft joining, prompt digests,
+  labels, focus, steer, checks, images, starts), its version alone is compared with the bundled one, and every
+  command for the conversation goes to its instance while it is live (`AgentHub.send`). Liveness is that instance's
+  (`AgentTransport.isLive(instance:)`), never the conversation's, which another connector may keep up. The send line
+  logs the plugin's state: no hello, not connected, or holding with or without draft joining.
 - **bb's plugin reports the prompt a thread waits on, as Pi's connector does.** On bb's `interaction.pending` it
   sends `waiting` with what bb records for that request (`waitingFor`, bounded like Pi's, with a title only where bb
   gives one), and repeats it in the thread's hello while it is open. Whether a prompt is open is state, not an

@@ -3,19 +3,16 @@ import Foundation
 import KeyScribeKit
 
 protocol AgentTransport: AnyObject {
-    func enqueue(_ command: AgentCommand, for session: String)
+    func enqueue(_ command: AgentCommand, for session: String, instance: String?)
     func isLive(session: String) -> Bool
+    func isLive(instance: String) -> Bool
     func withdraw(_ id: String) -> Bool
     func forget(session: String)
     func rehello(session: String)
     func silence(agents: Set<String>)
 }
 
-extension AgentBridgeServer: AgentTransport {
-    func enqueue(_ command: AgentCommand, for session: String) {
-        enqueue(command, for: session, instance: nil)
-    }
-}
+extension AgentBridgeServer: AgentTransport {}
 
 enum AgentReceipt: Equatable {
     enum PromptBoxCause: Equatable { case afterStop, awaitingReturn, besideText, joinedDraft, joinedDraftMidTurn }
@@ -160,9 +157,15 @@ final class AgentHub {
     private var requests: [String: Request] = [:]
     private var waiters: [String: CheckedContinuation<AgentReceipt, Never>] = [:]
     private var focusWaiters: [String: CheckedContinuation<TerminalSelection, Never>] = [:]
-    private var features: [String: Set<String>] = [:]
     private var installations: [String: String] = [:]
-    private(set) var loadedVersions: [String: String] = [:]
+    private struct Connector {
+        let session: String
+        let isHost: Bool
+        let features: Set<String>
+        let codeVersion: String?
+    }
+    private var connectors: [String: Connector] = [:]
+    private var sessionInstances: [String: [String]] = [:]
     private var environments: [String: [String: String]] = [:]
     private var prompts: [String: Int] = [:]
     private var typedCounts: [String: Int] = [:]
@@ -186,7 +189,6 @@ final class AgentHub {
     private var hostStarts: [String: CheckedContinuation<HostStart, Never>] = [:]
     private var startFollows: [String: [HostFollow]] = [:]
     private var newConversationShown: [String: String] = [:]
-    private var hostOwned: Set<String> = []
     var promptBoxCheckWait: Duration = .seconds(1)
     private var connectorNames: [String: String?] = [:]
     private var registryNames: [String: String?] = [:]
@@ -487,7 +489,7 @@ final class AgentHub {
                 return (directory.conversations + disconnected).contains { $0.id == thread } ? nil : .notListed(copy.name)
             }
             if let page = newConversationShown[slot], transport.isLive(session: page) {
-                return features[page]?.contains("start") == true ? nil : .cannotStart(copy.name)
+                return features(of: page).contains("start") ? nil : .cannotStart(copy.name)
             }
             return .nothingShown(copy.name)
         }
@@ -522,7 +524,7 @@ final class AgentHub {
     private func startCarrier(_ source: HostDiscovery, instance: String?) -> String? {
         guard source.isEnabled, let carrier = shown(in: newConversationShown, host: source.kind.id, instance: instance),
               transport.isLive(session: carrier),
-              features[carrier]?.contains("start") == true, !exclusions.excludes(carrier)
+              features(of: carrier).contains("start"), !exclusions.excludes(carrier)
         else { return nil }
         return carrier
     }
@@ -545,7 +547,7 @@ final class AgentHub {
         let at = now()
         let copy = Self.slot(host, Self.instance(of: carrier))
         var follows = startFollows[copy, default: []] + [HostFollow(
-            prompt: AgentPromptDigest.of(text), request: request, expires: at.addingTimeInterval(Self.hostTurnWait), known: known)]
+            prompt: AgentPromptDigest.of(text), request: request, expires: at.addingTimeInterval(Self.hostTurnWait), known: known, sentAt: at)]
         let dropped = follows.enumerated().filter { index, follow in
             (follow.expires ?? .distantFuture) <= at || index < follows.count - Self.hostFollowLimit
         }.map(\.element.request)
@@ -554,7 +556,7 @@ final class AgentHub {
         startFollows[copy] = follows
         let wire = makeId()
         let wait = receiptTimeout
-        transport.enqueue(.start(id: wire, expectedSession: carrier, text: text, expiresAt: deadline(after: wait)), for: carrier)
+        send(.start(id: wire, expectedSession: carrier, text: text, expiresAt: deadline(after: wait)), to: carrier)
         Task { [weak self] in
             try? await Task.sleep(for: wait)
             self?.hostStarts.removeValue(forKey: wire)?.resume(returning: .unknown)
@@ -618,7 +620,8 @@ final class AgentHub {
     static let focusTimeout: Duration = .seconds(3)
 
     func focusInPlace(_ session: String, definition: String, within timeout: Duration = focusTimeout) async -> TerminalSelection {
-        guard transport.isLive(session: session), let features = features[session] else { return .notFound }
+        guard transport.isLive(session: session), holder(of: session) != nil else { return .notFound }
+        let features = features(of: session)
         guard features.contains("focus"), features.contains("focusDefinitions") else {
             return directory.conversations.first(where: { $0.id == session }).map(runsOlderConnector) == true ? .outdated : .unsupported
         }
@@ -628,7 +631,7 @@ final class AgentHub {
             await withCheckedContinuation { continuation in
                 guard !Task.isCancelled else { return continuation.resume(returning: .notFound) }
                 focusWaiters[id] = continuation
-                transport.enqueue(.focus(id: id, expectedSession: session, expiresAt: expiresAt, definition: definition), for: session)
+                send(.focus(id: id, expectedSession: session, expiresAt: expiresAt, definition: definition), to: session)
                 Task { [weak self] in
                     try? await Task.sleep(for: timeout)
                     self?.abandonFocus(id)
@@ -640,9 +643,13 @@ final class AgentHub {
     }
 
     func runsOlderConnector(_ conversation: AgentConversation) -> Bool {
-        guard features[conversation.id] != nil, !hostOwned.contains(conversation.id), let bundled = bundledVersion(conversation.runningAgent)
+        runsOlderConnector(conversation, holder: holder(of: conversation.id))
+    }
+
+    private func runsOlderConnector(_ conversation: AgentConversation, holder: String?) -> Bool {
+        guard let connector = holder.flatMap({ connectors[$0] }), !connector.isHost, let bundled = bundledVersion(conversation.runningAgent)
         else { return false }
-        return loadedVersions[conversation.id] != bundled
+        return connector.codeVersion != bundled
     }
 
     var olderConnectors: Set<String> { Set(directory.conversations.filter(runsOlderConnector).map(\.id)) }
@@ -710,7 +717,7 @@ final class AgentHub {
         waitingPrompts[id] = nil
         lastUsed[id] = nil
         onSilence?(id)
-        transport.enqueue(.quiet(id: makeId(), expectedSession: id), for: id)
+        send(.quiet(id: makeId(), expectedSession: id), to: id)
         refresh()
         onChange?()
     }
@@ -719,7 +726,7 @@ final class AgentHub {
         guard exclusions.isKnown, exclusions.remove(id) else { return }
         if let other = counterpart(of: id) { _ = exclusions.remove(other) }
         saveExclusions()
-        transport.enqueue(.admit(id: makeId(), expectedSession: id), for: id)
+        send(.admit(id: makeId(), expectedSession: id), to: id)
         refresh()
         onChange?()
         Task { [weak self] in await self?.rescan(rereadingTitles: true) }
@@ -919,7 +926,7 @@ final class AgentHub {
         var entries: [AgentSession] = []
         var shown: [String: String] = [:]
         var nativeNames: [String: String?] = [:]
-        let hidden = Set(inHosts.keys).union(filed.filter { $0.key != $0.value.session }.values.map(\.session))
+        let hidden = Set(inHosts.keys).union(filed.values.map(\.session))
         let inner = Dictionary(
             (lastScan.values.joined()).compactMap { entry -> (String, AgentSession)? in
                 inHosts[AgentSessionID.make(agent: entry.agent, native: entry.id)].map { ($0, entry) }
@@ -1107,10 +1114,9 @@ final class AgentHub {
     }
 
     private func forgetConnectorState(keepingEnvironments keptEnvironment: ((String) -> Bool)? = nil, keeping kept: (String) -> Bool) {
-        features = features.filter { kept($0.key) }
         lastEndedTurn = lastEndedTurn.filter { kept($0.key) }
-        hostOwned = hostOwned.filter(kept)
-        loadedVersions = loadedVersions.filter { kept($0.key) }
+        sessionInstances = sessionInstances.filter { kept($0.key) }
+        connectors = connectors.filter { kept($0.value.session) }
         environments = environments.filter { keptEnvironment?($0.key) ?? kept($0.key) }
         prompts = prompts.filter { kept($0.key) }
         connectorNames = connectorNames.filter { kept($0.key) }
@@ -1122,7 +1128,7 @@ final class AgentHub {
     }
 
     var connectorStateSessions: Set<String> {
-        Set(features.keys).union(environments.keys).union(prompts.keys).union(connectorNames.keys)
+        Set(sessionInstances.keys).union(environments.keys).union(prompts.keys).union(connectorNames.keys)
             .union(connectorNamesAt.keys).union(labels.keys).union(lastEndedTurn.keys)
     }
 
@@ -1158,12 +1164,13 @@ final class AgentHub {
 
     private func sendLabels() {
         for conversation in directory.conversations where conversation.connectorLive {
-            guard features[conversation.id]?.contains("label") == true else { continue }
-            let reload = runsOlderConnector(conversation) ? kind(of: conversation.id).map(Self.updateStep) : nil
+            let holder = holder(of: conversation.id)
+            guard let holder, connectors[holder]?.features.contains("label") == true else { continue }
+            let reload = runsOlderConnector(conversation, holder: holder) ? kind(of: conversation.id).map(Self.updateStep) : nil
             let label = Self.footerLabel(conversation.handle, reload: reload)
             guard labels[conversation.id] != label else { continue }
             labels[conversation.id] = label
-            transport.enqueue(.status(id: makeId(), expectedSession: conversation.id, text: label), for: conversation.id)
+            send(.status(id: makeId(), expectedSession: conversation.id, text: label), to: conversation.id, via: holder)
         }
     }
 
@@ -1194,15 +1201,16 @@ final class AgentHub {
                 }
             }
             remember(asked: text, for: request)
-            let follows = conversation.connectorLive && features[id]?.contains("promptDigest") == true || source.host.reportsTurns(at: location)
+            let follows = conversation.connectorLive && features(of: id).contains("promptDigest") || source.host.reportsTurns(at: location)
             if follows {
                 delivering[request] = id
-                hostFollows[id, default: []].append(HostFollow(prompt: AgentPromptDigest.of(text), request: request, expires: nil))
+                hostFollows[id, default: []].append(HostFollow(prompt: AgentPromptDigest.of(text), request: request, expires: nil, sentAt: now()))
                 if hostFollows[id, default: []].count > Self.hostFollowLimit { hostFollows[id]?.removeFirst() }
             }
+            let joins = pluginHolds(id) && features(of: id).contains("merge")
             Log.agents.info(
-                "sending to \(handle, privacy: .private) through \(source.kind.displayName, privacy: .public): in front \(inFront), text in its box \(self.showsDraft(id)), plugin joins it \(self.hostOwned.contains(id) && self.joinsDrafts(id) && self.transport.isLive(session: id))")
-            if inFront, images.isEmpty, showsDraft(id), hostOwned.contains(id), joinsDrafts(id), transport.isLive(session: id) {
+                "sending to \(handle, privacy: .private) through \(source.kind.displayName, privacy: .public): in front \(inFront), text in its box \(self.showsDraft(id)), images \(images.count), \(self.pluginState(id), privacy: .public)")
+            if inFront, images.isEmpty, showsDraft(id), joins {
                 startTrace(request, in: id)
                 let joined = await joinDraft(text, in: id)
                 let waitEnds = now().addingTimeInterval(Self.hostTurnWait)
@@ -1214,7 +1222,7 @@ final class AgentHub {
                         $0.confirmed = now()
                     }
                     settleHostDelivery(request, in: id, expires: waitEnds)
-                    if follows, running[id] != nil, let turn = turns[id] { follow(turn, of: id, for: request) }
+                    if follows, running[id] != nil, let turn = turns[id] { followRunning(turn, of: id, for: request) }
                     return .sentWithDraft(handle)
                 case .kept(let reason):
                     if queuing { outbox.finish(request) }
@@ -1263,7 +1271,7 @@ final class AgentHub {
             switch answer {
             case .accepted:
                 settleHostDelivery(request, in: id, expires: waitEnds)
-                if follows, !source.host.reportsDeliveredTurns, running[id] != nil, let turn = turns[id] { follow(turn, of: id, for: request) }
+                if follows, !source.host.reportsDeliveredTurns, running[id] != nil, let turn = turns[id] { followRunning(turn, of: id, for: request) }
                 return .sent(handle)
             case .queued where queuing:
                 stopFollowingHosted(request, in: id)
@@ -1350,7 +1358,7 @@ final class AgentHub {
         }
         if let session = event.session, let agent = AgentSessionID.agent(of: session) {
             discoveries.first { $0.kind.id == agent }?.observe(event.renamingSession(AgentSessionID.native))
-            if let inner = filed[session]?.session, inner != session, let (innerAgent, innerNative) = AgentSessionID.split(inner) {
+            if let inner = filed[session]?.session, let (innerAgent, innerNative) = AgentSessionID.split(inner) {
                 discoveries.first { $0.kind.id == innerAgent }?.observe(event.renamingSession { _ in innerNative })
             }
         }
@@ -1364,10 +1372,8 @@ final class AgentHub {
                 trace(request) { $0.reconnects += 1 }
             }
             resume(hello)
-            features[hello.session] = Set(hello.features)
-            if hosts.contains(where: { $0.kind.id == hello.agent }) { hostOwned.insert(hello.session) } else { hostOwned.remove(hello.session) }
+            register(hello)
             installations[hello.session] = hello.installation
-            loadedVersions[hello.session] = hosts.contains { $0.kind.id == hello.agent } ? nil : hello.codeVersion
             environments[hello.session] = hello.environment
             prompts[hello.session] = hello.prompts
             waitingPrompts[hello.session] = hello.waiting
@@ -1481,7 +1487,9 @@ final class AgentHub {
             if let awaited = awaitingResult[session], awaited != turn { stopAwaiting(session) }
             if let named = takeNamed(turn, in: session) { follow(turn, of: session, for: named) }
             if nextRequested.remove(session) != nil { waitForReply(turn, of: session, requested: true) }
-            if let prompt, !followHosted(turn, of: session, prompt: prompt), let waiting = hostFollows[session]?.filter({ !$0.named }), !waiting.isEmpty {
+            if reportsAccepted(session) {
+                attendHosted(turn, of: session, prompt: prompt)
+            } else if let prompt, !followHosted(turn, of: session, prompt: prompt), let waiting = hostFollows[session]?.filter({ !$0.named }), !waiting.isEmpty {
                 Log.agents.info("a turn in \(self.handle(of: session) ?? "a conversation", privacy: .private) matched none of the \(waiting.count) dictations sent to it, so its reply won't be read aloud")
             }
             let awaitsAbsorbed = prompt == nil && nextTyped[session]?.prompt != nil
@@ -1499,7 +1507,7 @@ final class AgentHub {
             handingOff[session] = nil
             running[session] = now()
             turns[session] = turn
-            if hostOwned.contains(session) { Task { [weak self] in await self?.rescan(rereadingTitles: false) } }
+            if hasHostPlugin(session) { Task { [weak self] in await self?.rescan(rereadingTitles: false) } }
         case .turnComplete(let session, let reason, let answer, let after, let turn):
             let hosted = hosts.contains { $0.kind.id == AgentSessionID.agent(of: session) }
             let ended = turn ?? (hosted ? turns[session] : nil)
@@ -1509,6 +1517,7 @@ final class AgentHub {
             for (id, entry) in requests where entry.message.conversation == session && entry.turnDuringHandOff != nil {
                 requests[id]?.turnDuringHandOff = .ended
             }
+            let startedAt = running[session] ?? now()
             running[session] = nil
             turns[session] = nil
             let named = ended.flatMap { takeNamed($0, in: session) }
@@ -1519,6 +1528,8 @@ final class AgentHub {
             }
             if let named {
                 report(reason: reason, answer: answer, after: after, of: session, origin: named, wasRequested: false)
+            } else if hosted, reportsAccepted(session) {
+                settleHostedTurn(reason: reason, answer: answer, after: after, of: session, awaited: awaitedHere, startedAt: startedAt)
             } else if awaitedHere {
                 let wasRequested = requested.contains(session)
                 let origin = awaitedRequests[session]
@@ -1586,7 +1597,17 @@ final class AgentHub {
         var expires: Date?
         var known: Set<String> = []
         var named = false
+        var sentAt: Date = .distantPast
+        var answeredAt: Date?
+
+        func carries(_ message: AgentAcceptedMessage) -> Bool {
+            guard prompt == message.digest else { return false }
+            guard let at = message.at else { return true }
+            return at >= sentAt.addingTimeInterval(-AgentHub.sendSlack) && answeredAt.map { at <= $0.addingTimeInterval(AgentHub.sendSlack) } ?? true
+        }
     }
+
+    nonisolated static let sendSlack: TimeInterval = 1
 
     private struct EndedTurn {
         var turn: String
@@ -1634,7 +1655,10 @@ final class AgentHub {
 
     private func settleHostDelivery(_ request: String, in conversation: String, expires: Date?) {
         delivering[request] = nil
-        if let index = hostFollows[conversation]?.firstIndex(where: { $0.request == request }) { hostFollows[conversation]?[index].expires = expires }
+        if let index = hostFollows[conversation]?.firstIndex(where: { $0.request == request }) {
+            hostFollows[conversation]?[index].expires = expires
+            if expires != nil { hostFollows[conversation]?[index].answeredAt = now() }
+        }
         guard let speak = heldResults.removeValue(forKey: request), !exclusions.excludes(conversation) else { return }
         speak()
     }
@@ -1667,6 +1691,84 @@ final class AgentHub {
         return true
     }
 
+    private func reportsAccepted(_ session: String) -> Bool { features(of: session).contains("accepted") }
+
+    private func attendHosted(_ turn: String, of session: String, prompt: String?) {
+        let at = now()
+        let copy = AgentSessionID.agent(of: session).map { Self.slot($0, Self.instance(of: session)) }
+        let starting = copy.flatMap { startFollows[$0] }?.filter { !$0.known.contains(session) } ?? []
+        let pending = ((hostFollows[session] ?? []) + starting).filter { !$0.named && $0.expires.map { $0 > at } ?? true }
+        if let prompt, let arrived = pending.first(where: { $0.prompt == prompt }) {
+            if delivering[arrived.request] != nil { matched.insert(arrived.request) }
+            announceSent(arrived.request, in: session)
+        }
+        if !pending.isEmpty { attend(turn, of: session) }
+    }
+
+    private func followRunning(_ turn: String, of session: String, for request: String) {
+        if reportsAccepted(session) { attend(turn, of: session) } else { follow(turn, of: session, for: request) }
+    }
+
+    private func attend(_ turn: String, of session: String) {
+        guard awaitingResult[session] == nil else { return }
+        waitForReply(turn, of: session, requested: false)
+    }
+
+    private func settleHostedTurn(reason: String, answer: String, after: AgentTurnInput?, of session: String, awaited: Bool, startedAt: Date) {
+        let waiting = hostFollows[session]?.filter { !$0.named }.count ?? 0
+        let taken = after?.accepted ?? after?.prompt.map { [AgentAcceptedMessage(digest: $0, at: nil)] } ?? []
+        var (claimed, lags) = claim(taken, in: session, startedAt: startedAt)
+        if after?.accepted == nil { claimed += claimSteered(in: session, startedAt: startedAt) }
+        let wasRequested = awaited && requested.contains(session)
+        if awaited { stopAwaiting(session) }
+        let handle = handle(of: session) ?? "a conversation"
+        if let accepted = after?.accepted {
+            Log.agents.info(
+                "a turn in \(handle, privacy: .private) ended having taken \(accepted.count) messages, \(claimed.count) of the \(waiting) dictations waiting on it, recorded \(lags.map { String(format: "%.2f", $0) }.joined(separator: ", "), privacy: .public) s after each send began")
+        } else if waiting > 0 {
+            Log.agents.notice(
+                "a turn in \(handle, privacy: .private) ended without its host's record of what it took, so \(claimed.count) of the \(waiting) dictations waiting on it were matched by the prompt it started with")
+        }
+        let origin = claimed.last
+        guard origin != nil || wasRequested else { return }
+        report(reason: reason, answer: answer, after: after, of: session, origin: origin, wasRequested: wasRequested)
+    }
+
+    private func claim(_ taken: [AgentAcceptedMessage], in session: String, startedAt: Date) -> ([String], [TimeInterval]) {
+        var claimed: [HostFollow] = []
+        var lags: [TimeInterval] = []
+        let copy = AgentSessionID.agent(of: session).map { Self.slot($0, Self.instance(of: session)) }
+        for message in taken {
+            let fits = { (follow: HostFollow) in !follow.named && follow.carries(message) && follow.expires.map { $0 > startedAt } ?? true }
+            var found: HostFollow?
+            if let index = hostFollows[session]?.firstIndex(where: fits) {
+                found = hostFollows[session]?.remove(at: index)
+            } else if let copy, let index = startFollows[copy]?.firstIndex(where: { fits($0) && !$0.known.contains(session) }) {
+                found = startFollows[copy]?.remove(at: index)
+            }
+            guard let found else { continue }
+            claimed.append(found)
+            if let at = message.at { lags.append(at.timeIntervalSince(found.sentAt)) }
+        }
+        return (arrived(claimed.map(\.request), in: session), lags)
+    }
+
+    private func claimSteered(in session: String, startedAt: Date) -> [String] {
+        let steered = (hostFollows[session] ?? []).filter {
+            !$0.named && $0.answeredAt != nil && $0.sentAt > startedAt && uncertainHosted[$0.request] == nil
+        }.map(\.request)
+        hostFollows[session]?.removeAll { steered.contains($0.request) }
+        return arrived(steered, in: session)
+    }
+
+    private func arrived(_ requests: [String], in session: String) -> [String] {
+        for request in requests {
+            if delivering[request] != nil { matched.insert(request) }
+            announceSent(request, in: session)
+        }
+        return requests
+    }
+
     private func announceSent(_ request: String, in session: String) {
         if let doubted = uncertainHosted.removeValue(forKey: request) {
             onNotice?(doubted.withDraft ? .sentWithDraft(doubted.handle) : .sent(doubted.handle), request, session)
@@ -1696,11 +1798,7 @@ final class AgentHub {
 
     func filing(for hello: AgentEvent.Hello) -> String? {
         if isHostsOwn(hello) {
-            if let holder = filed[hello.session], holder.instance != hello.instance {
-                filed[hello.session] = nil
-                transport.rehello(session: hello.session)
-            }
-            filed[hello.session] = Filing(session: hello.session, instance: hello.instance)
+            if filed.removeValue(forKey: hello.session) != nil { transport.rehello(session: hello.session) }
             return nil
         }
         filed = filed.filter { $0.value.session != hello.session }
@@ -1708,7 +1806,11 @@ final class AgentHub {
             rehelloAsked.remove(hello.session)
             return nil
         }
-        if let holder = filed[claimed], holder.instance != hello.instance, transport.isLive(session: claimed) {
+        if pluginHolds(claimed) {
+            rehelloAsked.insert(hello.session)
+            return nil
+        }
+        if let holder = filed[claimed], holder.instance != hello.instance, transport.isLive(instance: holder.instance) {
             rehelloAsked.insert(hello.session)
             return nil
         }
@@ -1728,9 +1830,15 @@ final class AgentHub {
             if transport.isLive(session: conversation) { transport.rehello(session: conversation) }
         }
         var released: Set<String> = []
-        for (conversation, holder) in filed where holder.session == conversation && !transport.isLive(session: conversation) {
-            filed[conversation] = nil
-            released.insert(conversation)
+        for conversation in Set(sessionInstances.keys).filter(hasHostPlugin) {
+            if pluginHolds(conversation) {
+                if filed[conversation] != nil {
+                    filed[conversation] = nil
+                    transport.rehello(session: conversation)
+                }
+            } else if filed[conversation] == nil {
+                released.insert(conversation)
+            }
         }
         var claims: [String: String] = [:]
         var seen: Set<String> = []
@@ -1806,8 +1914,7 @@ final class AgentHub {
     }
 
     private func heldByItsHost(_ session: String) -> String? {
-        guard let conversation = hostedConversation(claimedBy: session), conversation != session,
-              filed[conversation]?.session == conversation, transport.isLive(session: conversation)
+        guard let conversation = hostedConversation(claimedBy: session), conversation != session, pluginHolds(conversation)
         else { return nil }
         return conversation
     }
@@ -1955,7 +2062,7 @@ final class AgentHub {
             Log.agents.notice("delivery confirmed late: \(fact.value, privacy: .public)")
         }
         let conversation = requests[request]?.message.conversation
-        if let conversation, turn.isEmpty, features[conversation]?.contains("steer") == true, let entry = requests[request] {
+        if let conversation, turn.isEmpty, features(of: conversation).contains("steer"), let entry = requests[request] {
             steered.append(Steered(wire: entry.wire, request: request, handle: entry.handle, conversation: conversation))
             if steered.count > Self.steeredLimit, let oldest = steered.first { forgetSteered { $0.wire == oldest.wire } }
             followSteer(of: conversation, for: request, text: entry.message.text)
@@ -1967,7 +2074,7 @@ final class AgentHub {
         }
         let handle = requests[request]?.handle ?? ""
         settle(request, report.withDraft ? .sentWithDraft(handle) : .sent(handle))
-        if let conversation, handingOff[conversation] == request, features[conversation]?.contains("steer") == true {
+        if let conversation, handingOff[conversation] == request, features(of: conversation).contains("steer") {
             handingOff[conversation] = nil
             releaseHeld()
         }
@@ -1984,11 +2091,11 @@ final class AgentHub {
     private func doubt(_ request: String, askingConnector: Bool = true) {
         guard let entry = requests[request], !entry.timedOut, entry.check == nil else { return }
         let conversation = entry.message.conversation
-        guard askingConnector, features[conversation]?.contains("check") == true else { return leaveUncertain(request, follows: true) }
+        guard askingConnector, features(of: conversation).contains("check") else { return leaveUncertain(request, follows: true) }
         let check = "check-\(request)-\(entry.attempt)"
         requests[request]?.check = check
         trace(request) { $0.check = .asked }
-        transport.enqueue(.check(id: check, expectedSession: conversation, request: entry.wire, expiresAt: deadline(after: checkWait)), for: conversation)
+        send(.check(id: check, expectedSession: conversation, request: entry.wire, expiresAt: deadline(after: checkWait)), to: conversation)
         let wait = checkWait
         Task { [weak self] in
             try? await Task.sleep(for: wait)
@@ -2036,7 +2143,7 @@ final class AgentHub {
             settle(request, .kept(handle, reason: .inPromptBox(reason == "joined" ? .joinedDraft : .joinedDraftMidTurn)))
         case "filled":
             filledWires[request] = entry.wire
-            settle(request, Self.filled(handle: handle, features: features[entry.message.conversation]))
+            settle(request, Self.filled(handle: handle, features: features(of: entry.message.conversation)))
         case "dialog": settle(request, .kept(handle, reason: .dialog))
         default: settle(request, .notSent(handle, reason: Self.notSent(reason)))
         }
@@ -2090,7 +2197,7 @@ final class AgentHub {
            source.host.queuesInHub {
             return true
         }
-        return features[id]?.contains("steer") == true && busyAndFree(id)
+        return features(of: id).contains("steer") && busyAndFree(id)
     }
 
     private func busyAndFree(_ id: String) -> Bool {
@@ -2099,19 +2206,61 @@ final class AgentHub {
         return conversation.state == .working || (conversation.state == .idle && running[id] != nil)
     }
 
-    func checksPromptBox(_ id: String) -> Bool { features[id]?.contains("box") == true }
+    func checksPromptBox(_ id: String) -> Bool { features(of: id).contains("box") }
 
-    func joinsDrafts(_ id: String) -> Bool { features[id]?.contains("merge") == true }
+    func joinsDrafts(_ id: String) -> Bool { features(of: id).contains("merge") }
 
     func showsDraft(_ id: String) -> Bool {
         guard let conversation = directory.conversations.first(where: { $0.id == id }), let (source, _) = host(of: conversation) else { return false }
         return shownWithDraft[Self.slot(source.kind.id, conversation.host?.instance)] == id
     }
 
+    private func register(_ hello: AgentEvent.Hello) {
+        let isHost = hosts.contains { $0.kind.id == hello.agent }
+        if let earlier = connectors[hello.instance]?.session, earlier != hello.session {
+            sessionInstances[earlier]?.removeAll { $0 == hello.instance }
+        }
+        connectors[hello.instance] = Connector(
+            session: hello.session, isHost: isHost, features: Set(hello.features), codeVersion: isHost ? nil : hello.codeVersion)
+        let replaced = (sessionInstances[hello.session] ?? []).filter { $0 != hello.instance && connectors[$0]?.isHost == isHost }
+        for instance in replaced { connectors[instance] = nil }
+        sessionInstances[hello.session, default: []].removeAll { $0 == hello.instance || replaced.contains($0) }
+        sessionInstances[hello.session, default: []].append(hello.instance)
+    }
+
+    private func holder(of session: String) -> String? {
+        let known = sessionInstances[session] ?? []
+        if let plugin = plugin(of: session), transport.isLive(instance: plugin) { return plugin }
+        return known.last { connectors[$0]?.isHost == false && transport.isLive(instance: $0) } ?? known.last
+    }
+
+    private func plugin(of session: String) -> String? {
+        sessionInstances[session]?.last { connectors[$0]?.isHost == true }
+    }
+
+    private func features(of session: String) -> Set<String> {
+        holder(of: session).flatMap { connectors[$0]?.features } ?? []
+    }
+
+    private func hasHostPlugin(_ session: String) -> Bool { plugin(of: session) != nil }
+
+    private func pluginHolds(_ session: String) -> Bool { plugin(of: session).map(transport.isLive(instance:)) ?? false }
+
+    private func pluginState(_ session: String) -> String {
+        guard hasHostPlugin(session) else { return "no plugin has said hello for it" }
+        guard pluginHolds(session) else { return "its plugin is not connected" }
+        return features(of: session).contains("merge") ? "its plugin holds it and joins drafts" : "its plugin holds it but does not join drafts"
+    }
+
+    private func send(_ command: AgentCommand, to session: String, via holder: String? = nil) {
+        let holder = holder ?? self.holder(of: session)
+        transport.enqueue(command, for: session, instance: holder.flatMap { transport.isLive(instance: $0) ? $0 : nil })
+    }
+
     private func joinDraft(_ text: String, in id: String) async -> HostJoin {
         let wire = makeId()
         let wait = receiptTimeout
-        transport.enqueue(.submit(id: wire, expectedSession: id, text: text, expiresAt: deadline(after: wait), merge: true), for: id)
+        send(.submit(id: wire, expectedSession: id, text: text, expiresAt: deadline(after: wait), merge: true), to: id)
         Task { [weak self] in
             try? await Task.sleep(for: wait)
             self?.hostJoins.removeValue(forKey: wire)?.resume(returning: .unknown)
@@ -2134,7 +2283,7 @@ final class AgentHub {
         guard let wire = filledWires.removeValue(forKey: request) else { return false }
         let check = makeId()
         let wait = promptBoxCheckWait
-        transport.enqueue(.check(id: check, expectedSession: conversation, request: wire, expiresAt: deadline(after: wait)), for: conversation)
+        send(.check(id: check, expectedSession: conversation, request: wire, expiresAt: deadline(after: wait)), to: conversation)
         Task { [weak self] in
             try? await Task.sleep(for: wait)
             self?.promptBoxChecks.removeValue(forKey: check)?.resume(returning: false)
@@ -2159,12 +2308,12 @@ final class AgentHub {
         remember(asked: message.text, for: message.id)
         startTrace(message.id, in: message.conversation)
         handingOff[message.conversation] = message.id
-        transport.enqueue(
+        send(
             .submit(
                 id: entry.wire, expectedSession: message.conversation, text: message.text,
                 expectedPrompts: prompts[message.conversation], expiresAt: deadline(after: receiptTimeout),
                 images: takesImages(message.conversation) ? message.images : [], box: box, merge: merge),
-            for: message.conversation)
+            to: message.conversation)
         let timeout = receiptTimeout
         Task { [weak self] in
             try? await Task.sleep(for: timeout)
@@ -2339,7 +2488,7 @@ final class AgentHub {
         if let conversation = directory.conversations.first(where: { $0.id == session }), let (source, _) = deliveringHost(of: conversation) {
             return source.host.takesImages
         }
-        return features[session]?.contains("images") == true
+        return features(of: session).contains("images")
     }
 
     static func filled(handle: String, features: Set<String>?) -> AgentReceipt {

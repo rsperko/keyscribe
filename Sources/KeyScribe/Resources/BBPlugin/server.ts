@@ -6,12 +6,14 @@ import { request } from "node:http"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
-  appNameOf, composeChannel, keyscribe, readAloudReply, rpcContract, type ComposeAnswer, type Composed, type Exchange, type Response, type WindowReport,
+  acceptedInEndedTurn, appNameOf, composeChannel, keyscribe, readAloudReply, rpcContract, type ComposeAnswer, type Composed, type Exchange, type Response, type WindowReport,
 } from "./keyscribe.ts"
 
 const pageSize = 200
 const pageLimit = 10
 const historyLimit = "8"
+const turnRecord = ["client/turn/requested", "turn/started", "turn/input/accepted", "turn/completed"]
+const turnRecordLimit = 100
 const responseLimit = 512 * 1024
 const startDeadline = 1000
 const composeDeadline = 6000
@@ -117,6 +119,8 @@ export default async function plugin(bb: BbPluginApi) {
       return found
     },
     history: async (threadId) => (await bb.sdk.threads.promptHistory({ threadId, limit: historyLimit })).map((entry) => said(entry.input)),
+    turnInputs: async (threadId, failed, since) =>
+      acceptedInEndedTurn(await bb.sdk.threads.events.list({ threadId, types: turnRecord, order: "desc", limit: turnRecordLimit }), failed, since),
     interaction: (threadId, interactionId) => interactionStatus(bb.sdk, threadId, interactionId),
     on: (event, handler) => bb.events.on(event as any, handler as any),
     compose: relay.compose,

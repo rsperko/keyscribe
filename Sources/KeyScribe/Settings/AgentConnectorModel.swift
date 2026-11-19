@@ -253,7 +253,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     private var isUnconfirmed: Bool {
         switch state {
-        case .status(.notInstalled), .status(.unknown), .failed: true
+        case .status(.notInstalled), .status(.unknown), .status(.notOpen), .failed: true
         default: false
         }
     }

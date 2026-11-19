@@ -276,6 +276,14 @@ final class AgentBridgeServer: @unchecked Sendable {
         }
     }
 
+    func isLive(instance: String) -> Bool {
+        queue.sync {
+            let now = Date()
+            touchParked(at: now)
+            return commands.isLive(instance: instance, at: now)
+        }
+    }
+
     var nextWake: Date? { queue.sync { wake } }
 
     private func touchParked(at now: Date) {

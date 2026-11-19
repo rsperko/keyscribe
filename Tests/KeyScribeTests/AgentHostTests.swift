@@ -165,7 +165,11 @@ struct AgentHostTests {
         hostConfirmDelay: Duration = .seconds(3), receiptTimeout: Duration = .milliseconds(50),
         heldLimit: Duration = .milliseconds(100)
     ) -> AgentHub {
-        AgentHub(
+        transport.sessionsOf = { instance in
+            if instance.hasPrefix("plugin/") { return [Self.id(String(instance.dropFirst("plugin/".count)))] }
+            return instance == "i1" ? transport.live.filter { $0.hasPrefix("claude:") } + [Self.id("t1")] : []
+        }
+        return AgentHub(
             transport: transport, discovery: [claude], names: names, focus: focus, front: front,
             receiptTimeout: receiptTimeout, handOffLimit: handOffLimit, scanDeadline: .seconds(30), places: places,
             hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostAllowed: allowed, hostDeadline: hostDeadline,
@@ -535,6 +539,209 @@ struct AgentHostTests {
         #expect(origins == ["q2"])
     }
 
+    private func accepting(_ host: FakeHost, clock: AgentHubTests.Clock = AgentHubTests.Clock()) async -> (AgentHub, FakeTransport) {
+        host.conversations = [Self.thread("t1")]
+        host.reportsTurns = true
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport, now: { clock.now })
+        await hub.rescan()
+        transport.live.insert(Self.id("t1"))
+        transport.liveInstances.insert(Self.pluginInstance)
+        hub.handle(.hello(Self.pluginHello(Self.id("t1"), features: ["promptDigest", "merge", "accepted"])))
+        await hub.rescan()
+        return (hub, transport)
+    }
+
+    private func ended(
+        _ hub: AgentHub, _ answer: String, took accepted: [String]?, at: Date? = nil, prompt: String? = nil, from: AgentTurnInput.Sender? = nil
+    ) {
+        hub.handle(.turnComplete(
+            session: Self.id("t1"), reason: "complete", answer: answer,
+            after: AgentTurnInput(
+                from: from, prompt: prompt.map(AgentPromptDigest.of),
+                accepted: accepted?.map { AgentAcceptedMessage(digest: AgentPromptDigest.of($0), at: at) })))
+    }
+
+    @Test(arguments: Digest.allCases, [false, true])
+    func aTurnReadsItsReplyOnceForTheLastDictationItsHostSaysItTookHoweverItsStartWasReported(start: Digest, steered: Bool) async {
+        let (hub, _) = await accepting(FakeHost())
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        _ = await hub.deliver("reply with one", to: Self.id("t1"), request: "q1")
+        let prompt: String? = switch start {
+        case .right: AgentPromptDigest.of("reply with one")
+        case .wrong: AgentPromptDigest.of("something typed in bb")
+        case .absent: nil
+        }
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: prompt))
+        var accepted = ["reply with one"]
+        if steered {
+            _ = await hub.deliver("also reply with two", to: Self.id("t1"), request: "q2")
+            accepted.append("also reply with two")
+        }
+        ended(hub, "One. Two.", took: accepted)
+        #expect(origins == [steered ? "q2" : "q1"])
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: nil))
+        ended(hub, "Done.", took: [], from: .task)
+        #expect(origins.count == 1)
+    }
+
+    @Test func twoDictationsWithTheSameTextAreEachReadForTheTurnThatTookThem() async {
+        let (hub, _) = await accepting(FakeHost())
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        _ = await hub.deliver("continue", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: AgentPromptDigest.of("continue")))
+        _ = await hub.deliver("continue", to: Self.id("t1"), request: "q2")
+        ended(hub, "First.", took: ["continue"])
+        #expect(origins == ["q1"])
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: AgentPromptDigest.of("continue")))
+        ended(hub, "Second.", took: ["continue"])
+        #expect(origins == ["q1", "q2"])
+    }
+
+    enum Twin: Sendable, CaseIterable { case typedBeforeTheDictation, sentAfterTheTurnEnded }
+
+    @Test(arguments: Twin.allCases)
+    func theSameWordsTypedInTheHostNeverTakeADictationsReply(twin: Twin) async {
+        let clock = AgentHubTests.Clock()
+        let (hub, _) = await accepting(FakeHost(), clock: clock)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        let typedAt = clock.now
+        clock.now += twin == .typedBeforeTheDictation ? 5 : 30
+        _ = await hub.deliver("yes", to: Self.id("t1"), request: "q1")
+        ended(hub, "Typed one.", took: ["yes"], at: typedAt)
+        #expect(origins.isEmpty)
+        let dictatedAt = clock.now
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: nil))
+        ended(hub, "Dictated one.", took: ["yes"], at: dictatedAt)
+        #expect(origins == ["q1"])
+    }
+
+    enum Sent: Sendable, CaseIterable { case beforeTheTurnStarted, whileItRan, afterTheHostEndedItBeforeTheAppHeard, afterItEnded }
+    enum TypedTwin: Sendable, CaseIterable { case none, beforeTheDictation, afterTheDictation }
+    enum Record: Sendable, CaseIterable { case present, empty, absent }
+
+    nonisolated static let acceptedGrid: [(Sent, TypedTwin, Record)] = Sent.allCases.flatMap { sent in
+        TypedTwin.allCases.flatMap { twin in Record.allCases.map { (sent, twin, $0) } }
+    }
+
+    @Test(arguments: acceptedGrid)
+    func aDictationsReplyIsReadOnceForTheTurnThatTookItHoweverItsEventsAndTheHostsRecordArrive(sent: Sent, twin: TypedTwin, record: Record) async {
+        let clock = AgentHubTests.Clock()
+        let (hub, _) = await accepting(FakeHost(), clock: clock)
+        var read: [(String?, String)] = []
+        hub.onResult = { _, _, answer, _, origin, _ in read.append((origin, answer)) }
+        let words = "yes do it"
+        let typedBefore = clock.now
+        clock.now += 10
+        var dictatedAt: Date?
+        func dictate() async {
+            dictatedAt = clock.now
+            _ = await hub.deliver(words, to: Self.id("t1"), request: "q1")
+            clock.now += 5
+        }
+        if sent == .beforeTheTurnStarted { await dictate() }
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: AgentPromptDigest.of(sent == .beforeTheTurnStarted ? words : "typed in bb")))
+        clock.now += 5
+        if sent == .whileItRan { await dictate() }
+        clock.now += 5
+        var took: [(String, Date)] = []
+        switch twin {
+        case .none: break
+        case .beforeTheDictation: took.append((words, typedBefore))
+        case .afterTheDictation: took.append((words, clock.now))
+        }
+        if let dictatedAt { took.append((words, dictatedAt)) }
+        took.sort { $0.1 < $1.1 }
+        if sent == .afterTheHostEndedItBeforeTheAppHeard {
+            clock.now += 2
+            await dictate()
+        }
+        let accepted: [AgentAcceptedMessage]? = switch record {
+        case .present: took.map { AgentAcceptedMessage(digest: AgentPromptDigest.of($0.0), at: $0.1) }
+        case .empty: []
+        case .absent: nil
+        }
+        hub.handle(.turnComplete(
+            session: Self.id("t1"), reason: "complete", answer: "first",
+            after: AgentTurnInput(from: nil, prompt: AgentPromptDigest.of(sent == .beforeTheTurnStarted ? words : "typed in bb"), accepted: accepted)))
+        if sent == .afterItEnded { await dictate() }
+        clock.now += 5
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: nil))
+        ended(hub, "second", took: [words], at: dictatedAt)
+        let firstTookIt = switch sent {
+        case .beforeTheTurnStarted, .whileItRan: record != .empty
+        case .afterTheHostEndedItBeforeTheAppHeard: record == .absent
+        case .afterItEnded: false
+        }
+        #expect(read.map(\.0) == ["q1"])
+        #expect(read.map(\.1) == [firstTookIt ? "first" : "second"])
+    }
+
+    @Test(arguments: [true, false])
+    func aTurnWhoseHostCouldNotGiveItsRecordFallsBackToThePromptItStartedWith(promptKnown: Bool) async {
+        let (hub, _) = await accepting(FakeHost())
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        _ = await hub.deliver("reply with one", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        ended(hub, "One.", took: nil, prompt: promptKnown ? "reply with one" : nil)
+        #expect(origins == (promptKnown ? ["q1"] : []))
+    }
+
+    @Test func aDictationWhoseWaitRanOutBeforeATurnStartedIsNeverTakenForThatTurn() async {
+        let clock = AgentHubTests.Clock()
+        let (hub, _) = await accepting(FakeHost(), clock: clock)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        _ = await hub.deliver("continue", to: Self.id("t1"), request: "q1")
+        clock.now += AgentHub.hostTurnWait + 1
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: AgentPromptDigest.of("continue")))
+        ended(hub, "Typed later.", took: ["continue"])
+        #expect(origins.isEmpty)
+    }
+
+    @Test func aLongTurnThatStartedWithinTheWaitStillTakesItsDictationWhenItEnds() async {
+        let clock = AgentHubTests.Clock()
+        let (hub, _) = await accepting(FakeHost(), clock: clock)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        _ = await hub.deliver("refactor it", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        clock.now += AgentHub.hostTurnWait * 3
+        ended(hub, "Refactored.", took: ["refactor it"])
+        #expect(origins == ["q1"])
+    }
+
+    @Test(arguments: [nil, [String]()])
+    func aTurnThatTookNoneOfTheDictationsReadsNothingAndLeavesThemForTheTurnThatDoes(took: [String]?) async {
+        let (hub, _) = await accepting(FakeHost())
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        _ = await hub.deliver("reply with one", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: AgentPromptDigest.of("reply with one")))
+        ended(hub, "Done.", took: took, from: .task)
+        #expect(origins.isEmpty)
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: nil))
+        ended(hub, "One.", took: ["reply with one"])
+        #expect(origins == ["q1"])
+    }
+
+    @Test func aReplyAskedForWithTheToolIsReadEvenWhenTheTurnTookNoDictation() async {
+        let (hub, _) = await accepting(FakeHost())
+        hub.speaks = { true }
+        var read: [(String?, Bool)] = []
+        hub.onResult = { _, _, _, requested, origin, _ in read.append((origin, requested)) }
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        #expect(hub.notify(session: Self.id("t1"), turn: "turn-1", on: true))
+        ended(hub, "Done.", took: ["typed in bb"])
+        #expect(read.map(\.0) == [nil])
+        #expect(read.map(\.1) == [true])
+    }
+
     enum Arrival: Sendable, CaseIterable { case beforeStart, betweenStartAndEnd, afterEnd }
     enum Digest: Sendable, CaseIterable { case right, wrong, absent }
 
@@ -707,13 +914,189 @@ struct AgentHostTests {
         host.conversations = [Self.thread("t1")]
         let hub = makeHub(host, transport: transport)
         await hub.rescan()
-        var hello = Self.hello(Self.id("t1"), features: features)
-        hello.agent = "example"
         transport.live.insert(Self.id("t1"))
-        hub.handle(.hello(hello))
+        transport.liveInstances.insert(Self.pluginInstance)
+        hub.handle(.hello(Self.pluginHello(Self.id("t1"), features: features)))
         await hub.rescan()
         if draft { hub.handle(.shown(session: Self.id("t1"), on: true, draft: true)) }
         return hub
+    }
+
+    static let pluginInstance = "plugin-1/t1"
+
+    static func pluginHello(_ session: String, features: [String]) -> AgentEvent.Hello {
+        var hello = hello(session, features: features)
+        hello.agent = "example"
+        hello.instance = pluginInstance
+        hello.connection = "plugin-1"
+        return hello
+    }
+
+    enum HolderEvent: Sendable { case listed, pluginHello, innerHello }
+    enum PluginEnd: Sendable, CaseIterable { case live, silent, backAfterTheAgentFiled, backBeforeTheAgentSaidHello }
+
+    nonisolated static let holderOrders: [[HolderEvent]] = [
+        [.listed, .pluginHello, .innerHello], [.listed, .innerHello, .pluginHello], [.pluginHello, .listed, .innerHello],
+        [.pluginHello, .innerHello, .listed], [.innerHello, .listed, .pluginHello], [.innerHello, .pluginHello, .listed],
+    ]
+
+    nonisolated static let holderGrid: [([HolderEvent], PluginEnd, Bool)] = holderOrders.flatMap { order in
+        PluginEnd.allCases.flatMap { end in [true, false].map { (order, end, $0) } }
+    }
+
+    @Test(arguments: holderGrid)
+    func whoHoldsAThreadDependsOnlyOnWhetherItsPluginIsConnectedWhateverOrderTheyArrivedIn(order: [HolderEvent], end: PluginEnd, rescans: Bool) async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        let hub = makeHub(host, transport: transport, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1", "HOME": "/x"]])
+        hub.speaks = { true }
+        await hub.rescan()
+        transport.live.insert(Self.id("t1"))
+        var innerSession = "claude:s1"
+        func innerHello() -> AgentEvent.Hello {
+            var hello = Self.hello("claude:s1", features: ["promptDigest", "steer"])
+            if let filed = hub.filing(for: hello) { hello.session = filed }
+            innerSession = hello.session
+            return hello
+        }
+        func step() async { if rescans, !host.conversations.isEmpty { await hub.rescan() } }
+        for event in order {
+            switch event {
+            case .listed:
+                host.conversations = [Self.thread("t1")]
+                await hub.rescan()
+            case .pluginHello:
+                let hello = Self.pluginHello(Self.id("t1"), features: ["promptDigest", "merge"])
+                _ = hub.filing(for: hello)
+                transport.liveInstances.insert(Self.pluginInstance)
+                hub.handle(.hello(hello))
+            case .innerHello:
+                transport.liveInstances.insert("i1")
+                hub.handle(.hello(innerHello()))
+            }
+            await step()
+        }
+        switch end {
+        case .live:
+            break
+        case .silent:
+            transport.liveInstances.remove(Self.pluginInstance)
+            await step()
+            hub.handle(.hello(innerHello()))
+        case .backAfterTheAgentFiled:
+            transport.liveInstances.remove(Self.pluginInstance)
+            await step()
+            hub.handle(.hello(innerHello()))
+            await step()
+            transport.liveInstances.insert(Self.pluginInstance)
+        case .backBeforeTheAgentSaidHello:
+            transport.liveInstances.remove(Self.pluginInstance)
+            await step()
+            transport.liveInstances.insert(Self.pluginInstance)
+            await step()
+            hub.handle(.hello(innerHello()))
+        }
+        await step()
+        let pluginHolds = end != .silent
+        if end == .backAfterTheAgentFiled {
+            await hub.rescan()
+            #expect(transport.rehelloed.contains(Self.id("t1")))
+        }
+        #expect((hub.filing(for: Self.hello("claude:s1")) == nil) == pluginHolds)
+        if pluginHolds { innerSession = "claude:s1" }
+        _ = hub.notify(session: innerSession, turn: "", on: true)
+        #expect(hub.readNextAloud == [Self.id("t1")])
+        hub.handle(.shown(session: Self.id("t1"), on: true, draft: true))
+        let receipt = await deliverAnswering(hub, transport) { .submitted(request: $0, turn: "") }
+        if pluginHolds {
+            #expect(receipt == .sentWithDraft("docs"))
+            #expect(joinCommands(transport).map { transport.pinned[$0.id] } == [Self.pluginInstance])
+        } else {
+            #expect(joinCommands(transport).isEmpty)
+            #expect(host.delivered.map(\.0) == ["run the tests"])
+        }
+    }
+
+    @Test func aPluginHeardFromAgainBeforeAnyRescanStillSendsBackTheAgentFiledWhileItWasSilent() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host, transport: transport, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1", "HOME": "/x"]])
+        await hub.rescan()
+        transport.live.insert(Self.id("t1"))
+        let plugin = Self.pluginHello(Self.id("t1"), features: ["promptDigest", "merge"])
+        _ = hub.filing(for: plugin)
+        transport.liveInstances.insert(Self.pluginInstance)
+        hub.handle(.hello(plugin))
+        await hub.rescan()
+        transport.liveInstances.remove(Self.pluginInstance)
+        transport.liveInstances.insert("i1")
+        var inner = Self.hello("claude:s1", features: ["promptDigest"])
+        #expect(hub.filing(for: inner) == Self.id("t1"))
+        inner.session = Self.id("t1")
+        hub.handle(.hello(inner))
+        transport.liveInstances.insert(Self.pluginInstance)
+        let before = transport.rehelloed.filter { $0 == Self.id("t1") }.count
+        await hub.rescan()
+        #expect(transport.rehelloed.filter { $0 == Self.id("t1") }.count == before + 1)
+        #expect(hub.filing(for: Self.hello("claude:s1")) == nil)
+        await hub.rescan()
+        #expect(transport.rehelloed.filter { $0 == Self.id("t1") }.count == before + 1)
+    }
+
+    @Test func anAgentFiledInsideAThreadNeverTurnsOffItsHostPluginsDraftJoining() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        var inner = Self.hello(Self.id("t1"), features: ["promptDigest"])
+        inner.agent = "claude"
+        hub.handle(.hello(inner))
+        let receipt = await deliverAnswering(hub, transport) { .submitted(request: $0, turn: "") }
+        #expect(receipt == .sentWithDraft("docs"))
+        #expect(host.delivered.isEmpty)
+    }
+
+    @Test func anAgentInsideAThreadIsNotFiledWhileTheHostPluginHoldsItEvenWhenThePluginSaidHelloBeforeTheThreadWasListed() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        let hub = makeHub(host, transport: transport, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1", "HOME": "/x"]])
+        await hub.rescan()
+        let plugin = Self.pluginHello(Self.id("t1"), features: ["promptDigest", "merge"])
+        #expect(hub.filing(for: plugin) == nil)
+        transport.live.insert(Self.id("t1"))
+        transport.liveInstances.insert(Self.pluginInstance)
+        hub.handle(.hello(plugin))
+        host.conversations = [Self.thread("t1")]
+        await hub.rescan()
+        #expect(hub.filing(for: Self.hello("claude:s1")) == nil)
+        transport.liveInstances.remove(Self.pluginInstance)
+        #expect(hub.filing(for: Self.hello("claude:s1")) == Self.id("t1"))
+    }
+
+    @Test func aJoinGoesToTheHostPluginsOwnConnectionNotToAnAgentSharingTheThread() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        _ = await deliverAnswering(hub, transport) { .submitted(request: $0, turn: "") }
+        let wire = joinCommands(transport).first?.id ?? ""
+        #expect(transport.pinned[wire] == Self.pluginInstance)
+    }
+
+    @Test func aDraftIsNotJoinedWhileTheHostPluginsOwnConnectionIsSilentEvenIfAnotherConnectorKeepsTheThreadLive() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        transport.liveInstances.remove(Self.pluginInstance)
+        let receipt = await deliverAnswering(hub, transport) { .submitted(request: $0, turn: "") }
+        #expect(joinCommands(transport).isEmpty)
+        #expect(receipt == .sent("docs"))
+        #expect(host.delivered.map(\.0) == ["run the tests"])
     }
 
     private func joinCommands(_ transport: FakeTransport) -> [(id: String, text: String)] {
@@ -927,6 +1310,7 @@ struct AgentHostTests {
             transport.live.insert(id)
             var hello = Self.hello(id, features: ["promptDigest", "merge", "start"])
             hello.agent = "example"
+            hello.instance = "plugin/" + id
             hub.handle(.hello(hello))
         }
         await hub.rescan()
@@ -2100,6 +2484,7 @@ struct AgentHostTests {
         let transport = FakeTransport()
         let hub = await joined(FakeHost(), transport: transport)
         #expect(hub.filing(for: Self.hostHello("t1")) == nil)
+        hub.handle(.hello(Self.hostHello("t1")))
         #expect(transport.rehelloed == [Self.id("t1")])
         #expect(hub.filing(for: Self.hello("claude:s1")) == nil)
         await hub.rescan()
@@ -2335,6 +2720,7 @@ struct AgentHostTests {
         let transport = FakeTransport()
         let hub = await joined(FakeHost(), transport: transport)
         #expect(hub.filing(for: Self.hostHello("t1")) == nil)
+        hub.handle(.hello(Self.hostHello("t1")))
         #expect(hub.filing(for: Self.hello("claude:s1")) == nil)
         transport.live = ["claude:s1"]
         await hub.rescan()
@@ -2558,7 +2944,6 @@ struct AgentHostTests {
         hello.codeVersion = "0.1.0-plugin"
         #expect(hub.filing(for: hello) == nil)
         hub.handle(.hello(hello))
-        #expect(hub.loadedVersions[Self.id("t1")] == nil)
         #expect(hub.olderConnectors.isEmpty)
     }
 

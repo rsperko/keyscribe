@@ -546,6 +546,21 @@ struct AgentsSettingsModelTests {
         #expect(model.rows.first { $0.name == "backend" }?.lastSeen == false)
     }
 
+    @Test func aHostedConversationLastSeenInACopyThatCannotBeReachedIsLastSeenAndNotCountedAvailable() {
+        let (model, _, _) = makeModel()
+        var listed = conversation("docs", pid: 1)
+        listed.connectorLive = false
+        listed.host = AgentHostLocation(host: "bb", instance: "/Users/me/.bb", native: "thr_a")
+        var carried = conversation("api", pid: 2)
+        carried.connectorLive = false
+        carried.host = AgentHostLocation(host: "bb", instance: "/Users/me/.bb-work", native: "thr_b")
+        model.show([listed, carried], lastSeen: ["api"])
+        #expect(model.rows.first { $0.name == "api" }?.state == "Last seen")
+        #expect(model.rows.first { $0.name == "api" }?.connected == false)
+        #expect(model.rows.first { $0.name == "docs" }?.connected == true)
+        #expect(model.conversationsSummary == "1 available")
+    }
+
     @Test func aSetupFoundAfterThePaneOpenedIsCheckedWithoutReopeningIt() async {
         let (model, _, _) = makeModel()
         await model.refresh()

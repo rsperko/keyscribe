@@ -475,6 +475,7 @@ extension ConnectorSetupModel {
         case .status(.outdated): "Update available"
         case .status(.disabled): copy.disabledLabel
         case .status(.unknown): "Unknown"
+        case .status(.notOpen): "Not open"
         }
     }
 

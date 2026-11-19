@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { ComposerAnswers, commandAnswer, composeInto, keyscribe, promptDigest, readAloudReply, rowLabel, shownThread, waitingFor, type Bb, type Composed, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
+import { ComposerAnswers, acceptedInEndedTurn, commandAnswer, composeInto, keyscribe, promptDigest, readAloudReply, rowLabel, shownThread, waitingFor, type Bb, type Composed, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
 
 type Request = { path: string; body: any; auth: string; answer: (status: number, text?: string) => void; settled: boolean; cancelled: boolean }
 
-function harness(options: { threads?: { id: string; status: string }[]; history?: Record<string, string[]>; ready?: boolean } = {}) {
+function harness(options: { threads?: { id: string; status: string }[]; history?: Record<string, string[]>; inputs?: Record<string, string[] | null>; ready?: boolean } = {}) {
+  const at = 5_000
   const handlers = new Map<string, (payload: any) => void>()
   const logs: string[] = []
   const configuration: string[] = []
@@ -24,6 +25,8 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
   }
   const threads = options.threads ?? [{ id: "thr_a", status: "idle" }, { id: "thr_b", status: "active" }]
   const history = options.history ?? {}
+  const inputs = options.inputs ?? {}
+  const asks: Array<{ thread: string; failed: boolean; since: number | null }> = []
   const interactions: Record<string, string | Error> = {}
   const checked: string[] = []
   let labelChanges = 0
@@ -32,6 +35,10 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
   const bb: Bb = {
     listThreads: async () => threads,
     history: async (thread) => history[thread] ?? [],
+    turnInputs: async (thread, failed, since) => {
+      asks.push({ thread, failed, since })
+      return inputs[thread]?.map((said) => ({ said, at })) ?? null
+    },
     interaction: async (thread, id) => {
       checked.push(`${thread}/${id}`)
       const status = interactions[id]
@@ -117,7 +124,7 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
   return {
     bb, host, files, requests, open, sent, emit, settle, advance, answerHellos, answerEvents, timers, logs, configuration, watchers, appStarted,
     interactions, checked, labelChanges: () => labelChanges,
-    composes, composing,
+    composes, composing, asks,
   }
 }
 
@@ -145,7 +152,7 @@ test("says hello for every thread under its conversation key with what it knows,
   assert.equal(a.installation, "I9")
   assert.equal(a.pid, 0)
   assert.equal(a.idle, true)
-  assert.deepEqual(a.features, ["promptDigest", "readiness", "shown", "notify", "label", "merge", "start"])
+  assert.deepEqual(a.features, ["promptDigest", "readiness", "shown", "notify", "label", "merge", "start", "accepted"])
   assert.equal(hellos.find((b) => b.session === session("thr_b")).idle, false)
   assert.equal(new Set(hellos.map((b) => b.connection)).size, 1)
   assert.equal(new Set(hellos.map((b) => b.instance)).size, 3)
@@ -272,6 +279,122 @@ test("a reply after another agent’s message names that agent, and one after a 
     [undefined, promptDigest("and grape")],
   ])
   assert.deepEqual(h.sent("turnStarted").map((b) => b.prompt), [promptDigest("found a race"), promptDigest("say kiwi"), promptDigest("say fig")])
+})
+
+test("a turn that took several messages reports every one bb accepted into it, read from bb's own record", async () => {
+  const h = await connected({ inputs: { thr_a: ["say kiwi", "and grape"] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "Kiwi and grape." })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => b.accepted), [[{ digest: promptDigest("say kiwi"), at: 5_000 }, { digest: promptDigest("and grape"), at: 5_000 }]])
+})
+
+test("a joined draft bb accepted is reported as the dictation it carried", async () => {
+  const h = await connected({ history: { thr_a: ["half a thought run the tests"] }, inputs: { thr_a: ["half a thought run the tests"] } })
+  await shownIn(h, "thr_a")
+  await mergeCommand(h)
+  await h.answerEvents()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "Tests pass." })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => b.accepted), [[{ digest: promptDigest("run the tests"), at: 5_000 }]])
+})
+
+test("a turn whose record bb could not give reports no accepted messages rather than an empty list", async () => {
+  const h = await connected()
+  h.bb.turnInputs = async () => { throw new Error("gone") }
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "done" })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => "accepted" in b), [false])
+})
+
+test("the messages a turn took are the ones bb accepted into the turn that ended, each with when bb recorded it", () => {
+  const row = (seq: number, createdAt: number, type: string, scope: object, data: object) => ({ seq, createdAt, type, scope, data })
+  const asked = (seq: number, at: number, requestId: string, said: string) =>
+    row(seq, at, "client/turn/requested", { kind: "thread" }, { requestId, input: [{ type: "text", text: said, mentions: [] }] })
+  const took = (seq: number, at: number, turnId: string, clientRequestId: string) =>
+    row(seq, at, "turn/input/accepted", { kind: "turn", turnId }, { clientRequestId })
+  const rows = [
+    row(64, 9_000, "turn/completed", { kind: "turn", turnId: "t2" }, { status: "completed" }),
+    took(49, 8_000, "t2", "creq_two"),
+    asked(48, 8_000, "creq_two", "also reply with two"),
+    took(35, 7_000, "t2", "creq_one"),
+    row(34, 7_000, "turn/started", { kind: "turn", turnId: "t2" }, {}),
+    asked(33, 7_000, "creq_one", "reply with one"),
+    row(31, 2_000, "turn/completed", { kind: "turn", turnId: "t1" }, { status: "completed" }),
+    took(15, 1_000, "t1", "creq_zero"),
+    row(14, 1_000, "turn/started", { kind: "turn", turnId: "t1" }, {}),
+    asked(1, 1_000, "creq_zero", "reply with ready"),
+  ]
+  const two = [{ said: "reply with one", at: 7_000 }, { said: "also reply with two", at: 8_000 }]
+  assert.deepEqual(acceptedInEndedTurn(rows, false, 7_000), two)
+  assert.deepEqual(acceptedInEndedTurn({ events: rows }, false, null), two)
+  assert.equal(acceptedInEndedTurn(rows, false, 20_000), null)
+  assert.equal(acceptedInEndedTurn([asked(1, 1_000, "creq_zero", "reply with ready")], false, null), null)
+  assert.equal(acceptedInEndedTurn("nonsense", false, null), null)
+  const failedUnrecorded = [row(70, 12_000, "turn/started", { kind: "turn", turnId: "t3" }, {}), took(71, 12_000, "t3", "creq_three"),
+    asked(69, 12_000, "creq_three", "try three"), ...rows]
+  assert.deepEqual(acceptedInEndedTurn(failedUnrecorded, true, 12_000), [{ said: "try three", at: 12_000 }])
+  assert.equal(acceptedInEndedTurn(failedUnrecorded, false, 12_000), null)
+  const failedRecorded = [row(72, 13_000, "turn/completed", { kind: "turn", turnId: "t3" }, { status: "failed" }), ...failedUnrecorded]
+  assert.deepEqual(acceptedInEndedTurn(failedRecorded, true, 12_000), [{ said: "try three", at: 12_000 }])
+})
+
+test("a turn whose record bb could not give in time reports no accepted messages, and later reports still land", async () => {
+  const h = await connected()
+  h.bb.turnInputs = () => new Promise(() => {})
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "done" })
+  await h.advance(10_000)
+  await h.answerEvents()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => "accepted" in b), [false])
+  assert.equal(h.sent("turnStarted").length, 2)
+})
+
+test("a turn bb took a message into that its record cannot place gives no list rather than a shorter one", () => {
+  const row = (seq: number, createdAt: unknown, type: string, scope: object, data: object) => ({ seq, createdAt, type, scope, data })
+  const asked = (seq: number, at: unknown, requestId: string, said: string, retryOf?: string) =>
+    row(seq, at, "client/turn/requested", { kind: "thread" },
+      { requestId, input: [{ type: "text", text: said, mentions: [] }], ...(retryOf ? { retryOf: { requestId: retryOf, attempt: 1 } } : {}) })
+  const took = (seq: number, at: number, turnId: string, clientRequestId: string) =>
+    row(seq, at, "turn/input/accepted", { kind: "turn", turnId }, { clientRequestId })
+  const turn = (accepted: object[]) => [
+    row(90, 9_000, "turn/completed", { kind: "turn", turnId: "t1" }, { status: "completed" }),
+    ...accepted,
+    row(10, 1_000, "turn/started", { kind: "turn", turnId: "t1" }, {}),
+  ]
+  assert.equal(acceptedInEndedTurn(turn([took(20, 2_000, "t1", "creq_one"), took(21, 2_000, "t1", "creq_gone"), asked(5, 1_000, "creq_one", "one")]), false, null), null)
+  assert.equal(acceptedInEndedTurn(turn([took(20, 2_000, "t1", "creq_one"), asked(5, "1970-01-01T00:00:01Z", "creq_one", "one")]), false, null), null)
+  assert.deepEqual(acceptedInEndedTurn(turn([]), false, null), [])
+  const pictureOnly = row(6, 1_500, "client/turn/requested", { kind: "thread" }, { requestId: "creq_picture", input: [{ type: "image", path: "/x.png" }] })
+  assert.deepEqual(
+    acceptedInEndedTurn(turn([took(20, 2_000, "t1", "creq_picture"), took(21, 2_000, "t1", "creq_one"), pictureOnly, asked(5, 1_000, "creq_one", "one")]), false, null),
+    [{ said: "", at: 1_500 }, { said: "one", at: 1_000 }])
+  const fromAnotherThread = row(7, 1_700, "client/turn/requested", { kind: "thread" },
+    { requestId: "creq_child", initiator: "agent", senderThreadId: "thr_child", input: [{ type: "text", text: "child finished", mentions: [] }] })
+  assert.deepEqual(
+    acceptedInEndedTurn(turn([took(20, 2_000, "t1", "creq_child"), fromAnotherThread]), false, null),
+    [{ said: "child finished", at: 1_700 }])
+  assert.deepEqual(
+    acceptedInEndedTurn(turn([took(20, 8_000, "t1", "creq_retry"), asked(15, 7_000, "creq_retry", "one", "creq_one"), asked(5, 1_000, "creq_one", "one")]), false, null),
+    [{ said: "one", at: 1_000 }])
+})
+
+test("a failed turn's record is asked for as a failed turn, and the record is asked for when the turn ends, before earlier reports land", async () => {
+  const h = await connected({ inputs: { thr_a: ["say kiwi"] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.emit("thread.failed", { thread: { id: "thr_a", status: "error" } })
+  assert.deepEqual(h.asks.map((a) => [a.thread, a.failed, typeof a.since]), [["thr_a", true, "number"]])
+  await h.answerEvents()
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => [b.reason, b.accepted]), [["error", [{ digest: promptDigest("say kiwi"), at: 5_000 }]]])
 })
 
 test("a turn bb started at once is named by the newest prompt in its history that is not still queued", async () => {
