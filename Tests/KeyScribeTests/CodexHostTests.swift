@@ -439,9 +439,9 @@ struct CodexHostTests {
         let reads = Reads()
         let (host, daemon, _) = try rig(script, panes: { _ in
             reads.count += 1
-            return CodexPanes(panes: [
-                CodexPane(pid: 101, title: "⠋ app | 019a8b2c-1111-7abc-8def-01234..."), CodexPane(pid: 102, title: "zsh"),
-                CodexPane(pid: 103, title: "app | 019a8b2c-2222-7abc-8def-01234..."), CodexPane(pid: 104, title: "019a8b2c-2222-7abc-8def-01234..."),
+            return HostPanes(panes: [
+                HostPane(pid: 101, title: "⠋ app | 019a8b2c-1111-7abc-8def-01234..."), HostPane(pid: 102, title: "zsh"),
+                HostPane(pid: 103, title: "app | 019a8b2c-2222-7abc-8def-01234..."), HostPane(pid: 104, title: "019a8b2c-2222-7abc-8def-01234..."),
             ])
         })
         defer { daemon.stop() }
@@ -461,8 +461,8 @@ struct CodexHostTests {
         let (host, daemon, _) = try rig(panes: { _ in
             reads.count += 1
             return reads.count == 1
-                ? CodexPanes(panes: [CodexPane(pid: 101, title: "⠋ app | 019a8b2c-1111-7abc-8def-01234...")])
-                : CodexPanes(panes: [], unread: [101])
+                ? HostPanes(panes: [HostPane(pid: 101, title: "⠋ app | 019a8b2c-1111-7abc-8def-01234...")])
+                : HostPanes(panes: [], unread: [101])
         })
         defer { daemon.stop() }
         _ = await host.scan()

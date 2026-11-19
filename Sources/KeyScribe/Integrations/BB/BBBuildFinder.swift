@@ -157,13 +157,6 @@ enum BBBuildFinder {
         _ = AppActivation.bringForward(pid: running.processIdentifier)
     }
 
-    @MainActor static func frontApp() -> AgentHostApp? {
-        guard let running = NSWorkspace.shared.frontmostApplication else { return nil }
-        return AgentHostApp(
-            bundle: running.bundleIdentifier ?? "", pid: Int(running.processIdentifier), name: running.localizedName ?? "",
-            path: running.bundleURL.map { ConnectorFolders.canonical($0).path })
-    }
-
     @MainActor static func frontmost(among bundles: Set<String>) -> AgentHostApp? {
         guard let running = NSWorkspace.shared.frontmostApplication else { return nil }
         let path = running.bundleURL.map { ConnectorFolders.canonical($0).path }

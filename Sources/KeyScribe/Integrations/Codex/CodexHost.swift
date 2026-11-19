@@ -2,22 +2,12 @@ import AppKit
 import Foundation
 import KeyScribeKit
 
-struct CodexPane: Equatable, Sendable {
-    var pid: Int
-    var title: String
-}
-
-struct CodexPanes: Equatable, Sendable {
-    var panes: [CodexPane]
-    var unread: Set<Int> = []
-}
-
 @MainActor
 final class CodexHost: AgentHost {
     typealias Connect = @Sendable (
         _ home: String, _ onNotification: @escaping @Sendable (CodexNotification) -> Void, _ onClose: @escaping @Sendable () -> Void
     ) async -> CodexDaemonClient?
-    typealias Panes = @Sendable (_ home: String) async -> CodexPanes
+    typealias Panes = @Sendable (_ home: String) async -> HostPanes
 
     nonisolated static let homeVariable = AgentProcesses.Rule.codex.setupVariable
     nonisolated static let kind = AgentKind(id: CodexThread.agent, displayName: "Codex", connectorName: "Codex plugin")
@@ -49,7 +39,7 @@ final class CodexHost: AgentHost {
         var listedAt: Date?
         var notices = 0
         var foreignPrompt: [String: Date] = [:]
-        var panes: (at: Date, panes: [CodexPane])?
+        var panes: (at: Date, panes: [HostPane])?
     }
 
     private let enrolled: @MainActor () -> [String]
@@ -67,7 +57,7 @@ final class CodexHost: AgentHost {
     init(
         enrolled: @escaping @MainActor () -> [String], installed: @escaping () -> Bool = { CodexInstall.find() != nil },
         connect: @escaping Connect = CodexHost.connect, panes: Panes? = nil,
-        frontmost: @escaping @MainActor () -> (app: AgentHostApp, title: String)? = CodexHost.frontmost,
+        frontmost: @escaping @MainActor () -> (app: AgentHostApp, title: String)? = HostFront.window,
         confirmEvery: TimeInterval = 0.1, confirmFor: TimeInterval = 2,
         now: @escaping () -> Date = Date.init
     ) {
@@ -94,27 +84,14 @@ final class CodexHost: AgentHost {
     }
 
     nonisolated static func panes(surfaces: ResolvedSurfaces) -> Panes {
-        let table = AgentProcessTable(surfaces: surfaces)
-        let titles = TerminalTitleReader(surfaces: surfaces)
+        let read = HostPaneReader.reading(.codex, surfaces: surfaces)
         return { home in
             let wanted = ConnectorFolders.canonical(URL(fileURLWithPath: home)).path
-            let found = await Task.detached { table.found(.codex).candidates }.value.filter { candidate in
+            return await read { candidate in
                 candidate.tool.map { CodexInstall.accepts($0) } ?? true
                     && candidate.setup.map { ConnectorFolders.canonical(URL(fileURLWithPath: $0)).path == wanted } == true
             }
-            guard !found.isEmpty else { return CodexPanes(panes: []) }
-            let read = await titles.titles(of: found.map(\.pid))
-            return CodexPanes(
-                panes: found.compactMap { candidate in read.titles[candidate.pid].map { CodexPane(pid: candidate.pid, title: $0) } }, unread: read.unread)
         }
-    }
-
-    static func frontmost() -> (app: AgentHostApp, title: String)? {
-        guard let app = NSWorkspace.shared.frontmostApplication, let bundle = app.bundleIdentifier,
-              let title = ContextProbe.focusedWindowTitle(pid: app.processIdentifier)
-        else { return nil }
-        let window = ContextProbe.focusedState(pid: app.processIdentifier).windowId
-        return (AgentHostApp(bundle: bundle, pid: Int(app.processIdentifier), name: app.localizedName ?? bundle, window: window), title)
     }
 
     private var folders: [String] {
@@ -167,7 +144,7 @@ final class CodexHost: AgentHost {
     private func processes(showing ids: [String], in folder: String) async -> [String: Int] {
         guard let panes, !ids.isEmpty else { return [:] }
         let home = home(folder)
-        let current: [CodexPane]
+        let current: [HostPane]
         if let known = home.panes, now().timeIntervalSince(known.at) < Self.paneLifetime {
             current = known.panes
         } else {

@@ -47,8 +47,6 @@ public enum BBBuilds {
 
     public static func serves(runtime: Data?, started: (Int32) -> Date?) -> Bool { localServer(runtime: runtime, started: started) != nil }
 
-    static let recordWrittenWithin: TimeInterval = 2
-
     private static func localServer(runtime: Data?, started: (Int32) -> Date?) -> String? {
         struct Runtime: Decodable {
             var pid: Int32?
@@ -56,10 +54,9 @@ public enum BBBuilds {
             var startedAt: String?
         }
         guard let record = runtime.flatMap({ try? JSONDecoder().decode(Runtime.self, from: $0) }),
-              let pid = record.pid, pid > 0, let recorded = record.startedAt.flatMap(instant), let began = started(pid),
-              began <= recorded.addingTimeInterval(recordWrittenWithin), let text = record.serverUrl,
-              let url = URL(string: text), ["http", "https"].contains(url.scheme), let host = url.host(percentEncoded: false),
-              ["127.0.0.1", "localhost", "::1"].contains(host)
+              let pid = record.pid, pid > 0, let recorded = record.startedAt.flatMap(instant),
+              LocalServiceRecord.trusts(processStarted: started(pid), recordedAt: recorded), let text = record.serverUrl,
+              LocalServiceRecord.loopback(text) != nil
         else { return nil }
         return text
     }

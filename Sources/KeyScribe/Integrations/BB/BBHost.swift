@@ -53,7 +53,7 @@ final class BBHost: AgentHost {
         run: @escaping Run = { try await HostCLI.run($0, subcommand: $1, input: $2, environment: $3) },
         activate: @escaping @MainActor (BBBuild) -> Void = BBBuildFinder.bringForward,
         frontmost: @escaping @MainActor (Set<String>) -> AgentHostApp? = BBBuildFinder.frontmost(among:),
-        frontApp: @escaping @MainActor () -> AgentHostApp? = BBBuildFinder.frontApp,
+        frontApp: @escaping @MainActor () -> AgentHostApp? = HostFront.app,
         dataFolder: (@Sendable (String) -> String?)? = nil,
         appsChanging: @escaping @MainActor (@escaping @MainActor (_ app: String, _ launched: Bool) -> Void) -> StopWatching
             = BBBuildFinder.watchLaunches,
