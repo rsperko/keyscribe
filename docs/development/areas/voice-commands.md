@@ -384,6 +384,30 @@ every rule above applies to it, with these sharpenings:
   start; a connector's turn end carries no turn id and claims the turn awaited, as before. A delivery that stays
   uncertain because the host could not confirm it later is never matched by text and stays uncertain, without a reply
   read aloud.
+- **Ultimate is a host whose extension delivers.** One Ultimate process serves one project and many conversations, so
+  `UltimateHost` lists them from the project's own files (`UltimateProjects`: the lock names the live process and
+  port, `conversations.json` the top-level conversations; the root, the lander, side chats and subagents are never
+  listed), names each conversation's project as its workspace (`AgentHostScan.found`'s `workspaces`, carried as
+  `AgentPlace.workspace`: a qualifier that tells two `@ultimate`s apart by project, never a label that names a
+  conversation or answers on its own), and declares its extension the delivery route (`.connector`), so every
+  dictation takes the bridge `submit` path with its receipts, steering and checks. The extension
+  (`Resources/UltimateConnector/`) runs inside each Ultimate process that loads `~/.ultimate/extensions`, and only one
+  whose state home is under the installed setup's `projects/` (`served`), so a preview instance stays silent. It
+  observes, never hooks: commits for input, reply and placement records and the task graph for busy, so nothing it
+  does sits in a run's path and a crash replays nothing. It submits with `whenBusy: 'steer'` and the bridge request id
+  as Ultimate's `requestId`, so a repeated command never submits twice, and emits Ultimate's `user.input` event, which
+  Ultimate's automations and keep-warm count as the user's own activity. A receipt waits for the input entry Ultimate
+  places; a placement and its entry can arrive in either order and before `submit` returns, so the extension matches
+  them from whichever side comes last. A standing agent's handle (`@ultimate`) is its name; any other title is a name
+  only when it differs from the title Ultimate's summaries generated. An untitled branch is named by the number
+  Ultimate shows for it (`ultimate 61`), given as the listing's explicit name so a title the user gives still wins.
+  The conversation in front is the latest focused page's report, trusted only while the app process that was frontmost
+  at that report still is (`UltimateHost.focusedWindow`); “open” switches Ultimate's shared UI state through its
+  loopback `/api/ui` and activates that process. A rename in KeyScribe retitles a branch through the conversations
+  extension's `rename` action on the same loopback API (`UltimateHost.rename`); a standing agent's `@name` title is
+  fixed in Ultimate, so its rename stays in KeyScribe. The extension takes `label` and shows the name to say in
+  `composer.status`, read through its `label` action while the page is visible. Measured against Ultimate `1c5d0565`
+  (2026-11-19); `make test-ultimate-live` drives a real headless Ultimate through all of it.
 - **A dictation for the conversation in front is typed into it, so it is the user's own prompt.** A connector's own
   prompt runs once the agent is idle (Claude Code queues a plugin's prompt behind the turn; measured on 2.1.325,
   2026-11-14), and only a prompt the user enters is recorded as theirs. So for the conversation in front,

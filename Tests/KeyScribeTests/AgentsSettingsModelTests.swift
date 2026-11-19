@@ -998,6 +998,20 @@ struct AgentsSettingsModelTests {
         #expect(!(await setup(model).details(folders: [])).contains("not found"))
         #expect(Set(connector.toolsSeen) == [ConnectorFolders.canonical(folder).path])
     }
+
+    @Test func ultimateConnectsFromItsUserFolderWithNoUltimateCommandAnywhere() async {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-ultimate-settings-\(UUID().uuidString)")
+        let home = dir.appendingPathComponent("home", isDirectory: true)
+        try? FileManager.default.createDirectory(at: home.appendingPathComponent(".ultimate/projects"), withIntermediateDirectories: true)
+        let connector = UltimateConnector(agentsDir: dir, pluginName: "keyscribe-dev", home: home, sources: UltimateConnectorTests.sources)
+        let model = AgentsSettingsModel(describeTerminal: Terminals().describe, agentsDir: dir, connectors: [connector])
+        await model.refresh()
+        #expect(setup(model).state == .status(.notInstalled))
+        #expect(!setup(model).toolMissing)
+        await setup(model).install()
+        #expect(setup(model).state == .status(.ready))
+        #expect(!(await setup(model).details(folders: [])).contains("not found"))
+    }
 }
 
 struct ClaudeCLITests {

@@ -180,7 +180,11 @@ bb title. With Codex connected, it checks that an idle conversation takes a dict
 into the running turn, that one waiting on an approval holds it and sends it once the approval is answered, that
 interrupting the turn drops a held message, that “open” brings the conversation's terminal forward, that the reply is read aloud,
 that Settings shows when the hooks still need trust in `/hooks`, that removing the `thread-id` title item shows
-the plugin needs repair, and that uninstalling leaves `config.toml` as it was before the install. A routine release with no subsystem change is just the two dictations.
+the plugin needs repair, and that uninstalling leaves `config.toml` as it was before the install. With Ultimate
+connected, it checks that `make test-ultimate-live` passes against the Ultimate you ship with, that an idle
+conversation and a working one take a dictation, that a dictation to the conversation shown in a focused Ultimate page
+joins the text in its box, that a conversation asking a question holds dictation until you answer it, that “open”
+switches the page and brings its window forward, and that uninstalling removes only the extension's folder. A routine release with no subsystem change is just the two dictations.
 
 `scripts/verify-live.sh` remains the standalone companion — the same on-disk artifact checks plus the
 Settings commit-on-blur check — for when you want to exercise these outside a release.

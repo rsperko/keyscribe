@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-omp-connector test-bb-plugin test-codex-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
+.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-omp-connector test-bb-plugin test-ultimate-connector test-ultimate-live test-codex-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -58,6 +58,12 @@ test-omp-connector: ## Run the omp connector's behavior tests (needs Node 22.18 
 
 test-bb-plugin: ## Run the bb plugin's behavior tests (needs Node 22.18 or later; never needed to build)
 	./scripts/test-bb-plugin.sh
+
+test-ultimate-connector: ## Run the Ultimate connector's behavior tests (needs Node 22.18 or later; never needed to build)
+	./scripts/test-ultimate-connector.sh
+
+test-ultimate-live: ## Drive a real headless Ultimate through the connector (ULTIMATE_CLONE=<clone>, ULTIMATE_NODE=<node 26>; spends a few cents of the model ULTIMATE_MODEL names)
+	timeout 600 "$${ULTIMATE_NODE:-node}" Tests/UltimateConnector/e2e/live.ts
 
 voice-kit: ## Build the voice kit to hand out: make voice-kit [STUDY=accents] [APP=Name] → voice-kit/dist/
 	zsh voice-kit/package.sh $(if $(APP),--app '$(APP)') $(STUDY)

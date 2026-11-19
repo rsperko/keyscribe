@@ -55,7 +55,7 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   what it asks. For Pi and omp, which tool call a prompt belongs to is a best guess, so another tool's arguments can be
   sent; for a bb thread it is the request bb itself is waiting on, along with a question's options or a plan's text.
   A Codex conversation's prompt is handled the same way: what can be sent is the tool and command an approval is
-  for, or the question's text. When an agent finishes an instruction you
+  for, or the question's text. For an Ultimate conversation it is the question it asks you and its options. When an agent finishes an instruction you
   dictated, or work you asked it to have KeyScribe read aloud, a longer final reply is sent to the service you chose
   under Replies, only to be summarized into a sentence or two to read aloud or show, together with the words you
   dictated when the reply came right after them, so the summary can open by naming what you asked; a short reply is read without it,
@@ -286,6 +286,25 @@ in the same `Application Support` folder:
   each one runs in, and the focused window's title; it uses a title only to find a Codex thread id in it and keeps
   nothing else it read. When a conversation stops for your approval or an answer, KeyScribe also reads the agent's
   latest message in that turn from the app server, in memory only, to describe the prompt.
+  If you install KeyScribe's extension in Ultimate, KeyScribe writes it into Ultimate's user folder, and Ultimate
+  loads it into every project it runs on your Mac. KeyScribe reads, for each running Ultimate project, the files
+  Ultimate keeps in that user folder that say which process serves it and which conversations it has: each
+  conversation's id, folder, label, title and when it last had input or an answer. It keeps the ids, folders and
+  times, and uses the title of a standing agent such as @ultimate as that conversation's name. The extension runs
+  inside Ultimate and reports to KeyScribe, over the same local connection the connectors use, when a conversation
+  starts and finishes a turn, with the reply to that turn and a short fingerprint of the prompt it started with,
+  never the prompt itself, and the name you gave a conversation in Ultimate. KeyScribe uses a reply only to read
+  aloud the answer to what you dictated or asked to hear, under the same rules as a connector's. When a
+  conversation asks you a question, the extension reports the question's text and its options. It submits what you
+  dictate, with any image you pasted, as your own message in that conversation. Each open Ultimate page tells the
+  extension whether it has focus, which conversation it shows and whether its message box has text; when you
+  dictate to the conversation in front, the page hands that text to the extension inside Ultimate, which sends it
+  with what you said, and it never reaches KeyScribe. KeyScribe
+  keeps which conversation is in front in memory only, and trusts it only while the window that reported it is
+  still the one in front. To show a conversation, KeyScribe asks that project's Ultimate, over its local address,
+  to switch its pages to it. While KeyScribe isn't running the extension sends nothing, and for a conversation you
+  disconnected it sends nothing but that conversation's identity. Ultimate's own voice features are separate from
+  KeyScribe, and what they send is up to Ultimate.
   The Claude Code connector reports a short fingerprint of the prompt each turn starts with, never the prompt
   itself, so KeyScribe can tell which turn answers what you dictated. The fingerprint stays in memory and is
   not stored.

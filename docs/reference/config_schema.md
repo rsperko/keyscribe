@@ -505,6 +505,11 @@ a hello on any other protocol is refused with `426` and is never registered or s
   when bb refused the send after the dictation went in, leaving both in the box; any other refusal means nothing
   went in. A turn the joined message starts is reported under the digest of the dictation alone, so KeyScribe
   follows its reply. The receipt says the text already in the box was sent too.
+  Ultimate's extension works the same way through the Ultimate page that reports the conversation in front: that
+  page reads its message box, the extension sends the box's text and the dictation as one message, and the page
+  clears the box only when it still holds exactly what was sent. It treats `merge` as "join a draft if the page in
+  front has one": with no such page, an empty box, or a page that does not take up the request within a second,
+  the dictation is sent alone, and a box that starts with `/` or `!` refuses the submit as `draft`.
 - **A `start` command starts a new conversation from a host's new-conversation page.** A host's plugin whose
   hello lists `start` sends `shown` with `on: false` and `newConversation: true` while the window it reports in
   front shows a page that starts a conversation and no thread (bb's new-thread page), carried on any of its

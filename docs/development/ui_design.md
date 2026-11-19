@@ -371,7 +371,9 @@ deliberate name for one conversation beats a place that can hold several. The sa
 other places a conversation can run in, closest first: a tmux window the user renamed and a tmux session
 the user named (only while tmux shows its status line, and a window name only while tmux does not let
 programs rename windows), a Zellij tab the user renamed (a Zellij pane title follows the program's own
-title, so it is not a name), a bb thread's title as bb shows it, a Codex conversation's title, a Ghostty
+title, so it is not a name), a bb thread's title as bb shows it, a Codex conversation's title, an Ultimate
+standing agent's handle or a title the user gave an Ultimate conversation (never one Ultimate generated; an untitled
+Ultimate branch is called `ultimate` and the number Ultimate shows, `ultimate 61` for #61), a Ghostty
 terminal or tab name the user set (a tab only in a window without splits, since Ghostty does not say which
 split belongs to which tab), and an iTerm tab title the user set. A title a program writes into its
 terminal is never a name, and a terminal app is read only when it already allows the app to script it,

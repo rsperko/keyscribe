@@ -577,7 +577,8 @@ folder. If you dictate to a copy of bb that isn't connected, KeyScribe names tha
 plugin is missing or not connected, so you know which row to fix. When the copy is connected but nothing can be
 sent yet, KeyScribe says what is still missing and what to do about it.
 For Codex, each Codex home is listed: `~/.codex`, and a folder `CODEX_HOME` names in your shell's startup
-files; choose **Add Folder…** for another.
+files; choose **Add Folder…** for another. For Ultimate, its user folder `~/.ultimate` is listed; choose **Add Folder…** if you run Ultimate with
+another one.
 
 ### How do I choose which conversation hears me?
 
@@ -605,7 +606,7 @@ A conversation waiting on you, for an approval or an answer, holds the message u
 ### Can I type part of a message and say the rest?
 
 Yes, in the conversation in front of you. When its prompt box already has text, KeyScribe adds what you say
-after it and sends the whole message, as if you had pressed Return, in Claude Code, Pi and bb; the receipt says
+after it and sends the whole message, as if you had pressed Return, in Claude Code, Pi, bb and Ultimate; the receipt says
 your typed text went with it. In Claude Code, if the box changed or the conversation left the front before
 KeyScribe could press Return, the joined message stays in the box for you to send. A conversation that is not in
 front of you never gets text you left in its box sent along: KeyScribe says its prompt box already has text and
@@ -729,6 +730,41 @@ terminal showing a Codex conversation is in front, dictation without a name goes
 brings a Codex conversation's terminal forward, in the same terminals and multiplexers it works in for other
 agents. Both find the conversation's terminal from the thread id the `thread-id` item puts in its title, so a pane
 whose title shows something else (for example a zellij pane started as `zellij run -- codex`) is not found.
+
+### Can I talk to Ultimate?
+
+Yes. In **Settings ▸ Modes ▸ Agent**, choose **Connect…** beside **Ultimate** under **Connections** to install the
+extension. KeyScribe writes a small extension into Ultimate's user folder (`~/.ultimate`), and Ultimate loads it at
+once into every project it runs on your Mac; nothing restarts. If you turn it off in Ultimate's Extensions panel,
+Settings says so.
+
+KeyScribe lists @ultimate, your other standing agents and your branches in every project whose Ultimate is
+running. The project root, the lander, side chats and subagents are not listed, since you don't talk to them
+directly. A standing agent is named by its handle, so “tell ultimate …” reaches @ultimate; with Ultimate running in
+two projects, each is called by its project too, such as “app ultimate” and “web ultimate”. A branch is named by a
+title you gave it in Ultimate, or a KeyScribe name; the titles Ultimate writes for branches on its own are never
+used as names. A branch you haven't named is called “ultimate” and the number Ultimate shows for it, so “tell
+ultimate 61 …” reaches #61. The longest name wins, so while #61 is open, “tell ultimate 61 tests are failing” goes to
+#61, not to @ultimate; say “tell ultimate there are 61 failing tests” instead. A number said as a word counts too:
+while #6 is open, “tell ultimate six more things are broken” goes to #6. Ultimate gives its own conversations the
+first numbers in a project, so the branches you start are usually numbered above twenty; naming a branch ends the
+overlap.
+
+When you rename a branch in KeyScribe, by voice or in Settings, KeyScribe also sets that name as its Ultimate title.
+A standing agent keeps its handle in Ultimate, so a new name for it works only in KeyScribe. While KeyScribe is
+running, the line under Ultimate's message box shows the name to say for the conversation on screen.
+
+What you dictate is sent as your own message, with any image you pasted. A conversation that is working takes it
+into the running turn, the way typing there does. While an Ultimate page is the window in front, dictation without
+a name goes to the conversation it shows, and if its message box already has text, what you say is added after it
+and both are sent together. When a conversation asks you a question, you hear it, and what you dictate to that
+conversation waits until you answer the question in Ultimate. “Open” switches Ultimate's open pages to the
+conversation and brings forward the window KeyScribe last saw it in.
+
+The reply to what you dictate is read aloud when the turn ends. You can also ask an agent to have KeyScribe read its
+reply aloud, or use **Read this reply aloud when done** in Ultimate's command palette. Uninstalling removes only the
+extension's folder; Ultimate, its projects and its settings stay as they were. Ultimate's own voice input, read-aloud
+and narrator are separate from KeyScribe and can speak too; turn them off in Ultimate if you hear replies twice.
 
 ### How do I rename a conversation?
 
