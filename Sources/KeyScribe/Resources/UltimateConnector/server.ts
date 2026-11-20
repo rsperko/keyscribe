@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises'
 import { request } from 'node:http'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { appNameOf, keyscribe, readAloudReply, readAloudToolName, waitingFor } from './keyscribe.ts'
+import { appNameOf, keyscribe, namedByUser, readAloudReply, readAloudToolName, waitingFor } from './keyscribe.ts'
 import type { Config, Exchange, Image, PageReport, Response, Summary, Waiting } from './keyscribe.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -115,6 +115,7 @@ function start(host: Host, config: Config) {
   const harness = host.harness()
   const busy = new Set<number>()
   const generated = new Map<number, string | undefined>()
+  const titled = new Map<number, string | undefined>()
   const summaries = host.doc('ultimate.conversation-summaries')
   const board = host.doc('board')
 
@@ -134,7 +135,7 @@ function start(host: Host, config: Config) {
     addressable().map((c) => ({
       id: c.id,
       title: c.title,
-      named: c.label === standing ? c.title !== undefined : c.title !== undefined && generated.has(c.id) && generated.get(c.id) !== c.title,
+      named: c.label === standing ? c.title !== undefined : namedByUser(titled.get(c.id), generated.get(c.id)),
       cwd: c.cwd,
       busy: busy.has(c.id),
     }))
@@ -230,7 +231,10 @@ function start(host: Host, config: Config) {
           else if (change.record.kind === 'ultimate.conversation-summaries' && change.conversationId !== undefined) {
             generated.set(change.conversationId, change.value?.generatedTitle)
             refresh()
-          } else if (change.record.kind === 'ultimate.metadata') refresh()
+          } else if (change.record.kind === 'ultimate.metadata') {
+            if (change.conversationId !== undefined) titled.set(change.conversationId, change.value?.title)
+            refresh()
+          }
         }
       }
     },
@@ -260,7 +264,10 @@ function start(host: Host, config: Config) {
 
   void (async () => {
     for (const c of addressable()) {
-      if (c.label === standing || !summaries) continue
+      if (c.label === standing) continue
+      const metadata = await harness.snapshot(host.metadata, c.id, context).catch(() => undefined)
+      titled.set(c.id, metadata?.title)
+      if (!summaries) continue
       const value = await harness.snapshot(summaries, c.id, context).catch(() => undefined)
       generated.set(c.id, value?.generatedTitle)
     }

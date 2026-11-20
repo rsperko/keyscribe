@@ -163,6 +163,10 @@ function remember<K, V>(map: Map<K, V>, key: K, value: V) {
   }
 }
 
+export function namedByUser(title: string | undefined, generatedTitle: string | undefined): boolean {
+  return title !== undefined && title !== generatedTitle
+}
+
 export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Promise<Config | null>) {
   const connection = "ultimate-" + host.random()
   const members = new Map<number, Member>()

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
-  joined, keyscribe, promptDigest, readAloudReply, readAloudToolName, waitingFor,
+  joined, keyscribe, namedByUser, promptDigest, readAloudReply, readAloudToolName, waitingFor,
   type Host, type Image, type Summary, type Ultimate,
 } from "../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts"
 
@@ -445,6 +445,14 @@ test("the page shows no name while the conversation is quiet, after the connecti
   await retired.command({ op: "status", id: "s1", expectedSession: session(61), text: "\u201Clogin fix\u201D" })
   await retired.command({ op: "retire", id: "r", expectedSession: session(61) })
   assert.equal(retired.connector.label(61), null)
+})
+
+test("only a title the user or the conversation's creator gave names it, never its first message or a summary", () => {
+  assert.equal(namedByUser(undefined, undefined), false, "a conversation Ultimate titles from its first message")
+  assert.equal(namedByUser(undefined, "One-word kiwi reply"), false, "a summary that has not written a title")
+  assert.equal(namedByUser("One-word kiwi reply", "One-word kiwi reply"), false, "a title the summary wrote")
+  assert.equal(namedByUser("release notes", undefined), true, "a rename, which clears the generated title, or a title given at creation")
+  assert.equal(namedByUser("release notes", "One-word kiwi reply"), true, "a title the user set after a summary")
 })
 
 test("the app retiring the extension stops it", async () => {

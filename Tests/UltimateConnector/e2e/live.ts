@@ -38,7 +38,7 @@ writeFileSync(join(extension, "keyscribe.json"), JSON.stringify({
 
 type Event = Record<string, any>
 const events: Event[] = []
-const queued: Event[] = []
+const unacknowledged = new Map<string, Event>()
 let parked: ServerResponse | null = null
 const body = (request: IncomingMessage) => new Promise<string>((resolve) => {
   let text = ""
@@ -49,23 +49,24 @@ const server = createServer(async (request, response) => {
   assert.equal(request.headers.authorization, "Bearer live-token")
   const parsed = JSON.parse(await body(request))
   if (request.url === "/poll") {
-    if (queued.length) return response.end(JSON.stringify(queued.splice(0)))
+    if (unacknowledged.size) return response.end(JSON.stringify([...unacknowledged.values()]))
     parked?.end("[]")
     parked = response
     return
   }
   events.push(parsed)
+  if (parsed.op === "ack") unacknowledged.delete(parsed.request)
   if (parsed.op === "notify") return response.end(JSON.stringify({ spoken: true }))
   response.end(JSON.stringify(parsed.op === "hello" ? { quiet: false } : {}))
 })
 await new Promise<void>((resolve) => server.listen(socketPath, resolve))
 
 function send(command: Event) {
-  queued.push(command)
+  unacknowledged.set(command.id, command)
   if (parked) {
     const waiting = parked
     parked = null
-    waiting.end(JSON.stringify(queued.splice(0)))
+    waiting.end(JSON.stringify([...unacknowledged.values()]))
   }
 }
 
@@ -133,6 +134,17 @@ try {
   await action("conversations", "rename", { id: created.id, title: "renamed live" })
   const retitled = await until("the renamed title", () => events.find((e) => e.op === "title" && e.session === session && e.text === "renamed live"), 30)
   console.log("renamed:", retitled.text)
+
+  const untitled = (await (await api("/api/conversations", {})).json()) as { id: number }
+  const branch = `${untitled.id}@${realpathSync(home)}`
+  const greeted = await until("the untitled branch's hello", () => events.find((e) => e.op === "hello" && e.session === branch), 60)
+  assert.equal(greeted.title, undefined)
+  send({ op: "submit", id: "live-untitled", expectedSession: branch, text: "Reply with exactly one word: kiwi", expiresAt: Date.now() + 30_000 })
+  await until("the untitled branch's reply", () => events.find((e) => e.op === "turnComplete" && e.session === branch), 180)
+  await new Promise((resolve) => setTimeout(resolve, 8000))
+  const named = events.filter((e) => e.op === "title" && e.session === branch && e.text)
+  assert.deepEqual(named, [], "a branch titled from its first message or a summary is never reported as named")
+  console.log("an untitled branch stays unnamed after its first reply")
 
   const said = "Reply with exactly one word: pineapple"
   send({ op: "submit", id: "live-1", expectedSession: session, text: said, expiresAt: Date.now() + 30_000 })
