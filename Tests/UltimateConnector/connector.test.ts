@@ -270,6 +270,7 @@ test("a dictation for a working conversation is confirmed when queued and report
   const [absorbed] = h.events("absorbed")
   assert.equal(absorbed.turn, turn)
   assert.equal(absorbed.prompt, promptDigest("also check the docs"))
+  assert.equal(absorbed.request, "req-3")
   assert.equal(h.events("submitted").length, 1)
 })
 

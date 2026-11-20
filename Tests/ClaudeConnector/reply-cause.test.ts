@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { absorbedText, digest, harness, steered, submitCommand, toolCall } from './support'
+import { absorbedText, digest, harness, steered, submitCommand, toolCall, queuedCommand } from './support'
 
 const completed = (h: any) => h.events().filter((b: any) => b.op === 'turnComplete')
 
@@ -26,7 +26,7 @@ test('a reply after another agent’s message the turn took in says it came afte
   const h = harness(on)
   await dictated($, h, 'Yes to all four.')
   await $.prompt.submit({ text: 'Found a race in the cache.', origin: { kind: 'peer' }, turnId: 't1', wait: false } as any)
-  await $.prompt.attachment({ type: 'queued_command', text: absorbedText('Found a race in the cache.'), origin: { kind: 'engine' } } as any)
+  await $.session.append(queuedCommand('Found a race in the cache.') as any)
   await $.turn.complete({ turnId: 't1', answer: 'The race is real.', durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
   await h.answerEvents()
   expect(completed(h)).toMatchObject([{ from: 'agent', prompt: digest('Found a race in the cache.') }])
@@ -45,7 +45,7 @@ test('a reply after a background task’s notice says it came after that task, a
 test('a reply after something the turn took in that nobody can place names neither a sender nor a prompt', async ($, on) => {
   const h = harness(on)
   await dictated($, h, 'Yes to all four.')
-  await $.prompt.attachment({ type: 'queued_command', text: absorbedText('from nowhere'), origin: { kind: 'engine' } } as any)
+  await $.session.append(queuedCommand('from nowhere') as any)
   await $.turn.complete({ turnId: 't1', answer: 'Hm.', durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
   await h.answerEvents()
   const [done] = completed(h)
@@ -94,7 +94,7 @@ test('a message from someone else that never joined its turn is forgotten within
   await h.connect($)
   await $.turn.start({ text: 'typed by me', turnId: 't1' })
   await $.prompt.submit({ text: 'ok', origin: { kind: 'peer' }, turnId: 't1', wait: false } as any)
-  await $.prompt.attachment({ type: 'queued_command', text: absorbedText('ok then, run the tests'), origin: { kind: 'engine' } } as any)
+  await $.session.append(queuedCommand('ok then, run the tests') as any)
   await $.turn.complete({ turnId: 't1', answer: 'Ran.', durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
   await $.turn.start({ text: 'typed next', turnId: 't2' })
   await $.turn.complete({ turnId: 't2', answer: 'Next.', durationMs: 5, isAborted: false, usage: null, reason: 'answer' })

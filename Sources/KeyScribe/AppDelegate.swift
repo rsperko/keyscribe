@@ -898,10 +898,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         (self?.settings.stt.eviction ?? .fastest, self?.settings.stt.evictionIdleSeconds.map(Double.init))
                     },
                     inFront: { [weak hub = runtime.hub] id in
-                        guard let hub else { return false }
-                        if let hosted = await hub.hostShows(id) { return hosted }
-                        let candidates = hub.frontCandidates
-                        return await AgentFront.withoutAsking(surfaces).shown(among: candidates) { _ in }?.id == id
+                        await hub?.showsInFront(id, glancing: AgentFront.withoutAsking(surfaces)) ?? false
                     },
                     duck: { [weak self] in self?.lowerOtherAudio(for: "replies", $0) },
                     mayShow: { [weak self] in

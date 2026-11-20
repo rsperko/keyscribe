@@ -12,7 +12,8 @@ final class AgentProcessTable: @unchecked Sendable {
     private let resolve: @Sendable (String) -> AgentProcesses.Resolved?
     private let tools: ToolEnvironment?
     private let lock = NSLock()
-    private var listed: (at: Date, agents: Set<String>, processes: [TerminalProcess]?)?
+    private var listed: (at: Date, generation: Int, agents: Set<String>, processes: [TerminalProcess]?, found: [String: AgentProcesses.Found])?
+    private var listings = 0
     private var seen: [String: [AgentCandidate]] = [:]
 
     init(
@@ -32,13 +33,17 @@ final class AgentProcessTable: @unchecked Sendable {
     }
 
     func found(_ rule: AgentProcesses.Rule) -> AgentProcesses.Found {
-        let processes = lock.withLock {
+        let (listing, processes, known): (Int, [TerminalProcess]?, AgentProcesses.Found?) = lock.withLock {
             if !rules.contains(where: { $0.agent == rule.agent }) { rules.append(rule) }
-            if let listed, listed.agents.contains(rule.agent), now().timeIntervalSince(listed.at) < maxAge { return listed.processes }
+            if let listed, listed.agents.contains(rule.agent), now().timeIntervalSince(listed.at) < maxAge {
+                return (listed.generation, listed.processes, listed.found[rule.agent])
+            }
             let fresh = list(rules)
-            listed = (now(), Set(rules.map(\.agent)), fresh)
-            return fresh
+            listings += 1
+            listed = (now(), listings, Set(rules.map(\.agent)), fresh, [:])
+            return (listings, fresh, nil)
         }
+        if let known { return known }
         let earlier = lock.withLock { seen[rule.agent] ?? [] }.filter { isRunning($0.pid) }
         var found: AgentProcesses.Found
         if let processes {
@@ -55,7 +60,10 @@ final class AgentProcessTable: @unchecked Sendable {
             found = AgentProcesses.Found(candidates: earlier, stale: true)
         }
         let candidates = found.candidates
-        lock.withLock { seen[rule.agent] = candidates }
+        lock.withLock {
+            seen[rule.agent] = candidates
+            if listed?.generation == listing { listed?.found[rule.agent] = found }
+        }
         if let processes { tools?.record(agent: rule.agent, candidates: candidates, sightings: Self.sightings(processes, rule: rule, found: found, resolve: resolve)) }
         return found
     }

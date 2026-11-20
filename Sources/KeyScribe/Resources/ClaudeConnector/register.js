@@ -4,7 +4,6 @@ const queueBytesLimit = 16 * 1024
 const answerLimit = 8 * 1024
 const eventDeadline = 2000
 const pollDeadline = 28000
-const identityTries = 50
 const discoveryInterval = 10000
 const admitLimit = 4096
 const backoff = [30000, 60000, 120000, 300000]
@@ -15,7 +14,6 @@ const stallSlack = 1000
 const stallRetries = 3
 const late = { late: true }
 const unreachable = { unreachable: true }
-const freshSources = ['startup', 'clear', 'fork']
 const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'steer', 'merge']
 const readAloudTool = 'tell_me_when_done'
 const inputLimit = 16
@@ -41,8 +39,6 @@ let prompts = 0
 let looping = false
 const laterWork = []
 let wakeLater = null
-let titleSession = null
-let lastTitle = null
 let ownedStatus = false
 let dormant = false
 let launch = null
@@ -59,12 +55,12 @@ const drawGrace = 500
 const personTools = new Set(['AskUserQuestion', 'ExitPlanMode'])
 let guard = null
 let lastAskAt = -Infinity
-let boxFill = null
 const receipts = []
 const steerLimit = 16
 const shownLimit = 64
 let steers = []
 let joined = []
+let fillCount = 0
 let batch = null
 const shown = new Map()
 let loadedFrom = null
@@ -351,7 +347,7 @@ function sayHello($, target, attemptLaunch) {
   } : {
     op: 'hello', protocol: config.protocol, installation: config.installation, codeVersion: builtVersion ?? undefined, agent: 'claude', agentVersion: '',
     instance, connection: attempt.connection, session: target, pid: 0,
-    features, title: (titleSession === target && lastTitle) || undefined, prompts,
+    features, prompts,
     idle: turnKnown && currentTurn === null, gap: freshSession !== target, turn: currentTurn || undefined,
     environment: place && Object.keys(place).length ? place : undefined,
   })
@@ -501,15 +497,13 @@ function leave($, ended) {
   clearOwnedUI($)
 }
 
-function adopt($, id, source) {
+function adopt($, id, { fresh, idle }) {
   if (!id || id === session) return
   if (session) leave($, session)
   session = id
   endedSession = null
-  if (freshSources.includes(source)) {
-    freshSession = id
-    turnKnown = true
-  }
+  if (fresh) freshSession = id
+  if (idle) turnKnown = true
   if (dormant && !retired) {
     dormant = false
     config = null
@@ -681,7 +675,7 @@ function remember(read) {
 function confirmJoined($, turn) {
   const read = joined
   joined = []
-  for (const one of read) observe($, { op: 'absorbed', session, turn, prompt: promptDigest(one.text) })
+  for (const one of read) observe($, { op: 'absorbed', session, turn, prompt: promptDigest(one.text), request: one.id })
   remember(read)
   quietly($.ui.invalidate('ui.render'))
 }
@@ -756,14 +750,21 @@ async function leaveInBox($, held, target) {
     filled = null
   }
   const reason = !filled || !filled.isFilled ? 'stopped' : filled.text === text ? 'filled' : 'added'
-  if (reason === 'filled') for (const one of fillable) track(one.id, { box: text })
+  if (reason === 'filled') {
+    const filledAt = ++fillCount
+    for (const one of fillable) track(one.id, { box: text, boxPrompt: one.text, filledAt })
+  }
   return lateRefuse($, fillable, reason)
 }
 
 function noteBoxSent(text) {
-  if (typeof text !== 'string') return
-  const sent = [...submissions].filter(([, sub]) => sub.box !== undefined && plainPrompt(sub.box) === plainPrompt(text))
+  if (typeof text !== 'string') return null
+  const fills = [...submissions].filter(([, sub]) => sub.box !== undefined && sub.filledAt !== undefined)
+  const newest = Math.max(...fills.map(([, sub]) => sub.filledAt))
+  const sent = fills.filter(([, sub]) => sub.filledAt === newest && !sub.boxSent && plainPrompt(sub.box) === plainPrompt(text))
   for (const [id] of sent) track(id, { boxSent: true })
+  const [id, sub] = sent[0] || []
+  return id ? { request: id, prompt: sub.boxPrompt } : null
 }
 
 function shownUnder(ids) {
@@ -801,8 +802,7 @@ async function fillBox($, id, text, expiresAt, gen, expected) {
     return holdSteer($, id, text, expiresAt, gen, expected)
   }
   if (filled.text !== text) return refuse($, gen, id, 'added')
-  track(id, { box: text })
-  boxFill = { text, prompt: text }
+  track(id, { box: text, boxPrompt: text, filledAt: ++fillCount })
   return refuse($, gen, id, 'filled')
 }
 
@@ -825,9 +825,8 @@ async function joinDraft($, id, draft, text, expiresAt, gen, expected) {
   }
   if (!box || !box.isFilled) return refuse($, gen, id, box && box.refusal === 'dialog' ? 'dialog' : 'draft')
   if (box.text !== joined) return refuse($, gen, id, 'added')
-  track(id, { box: joined })
+  track(id, { box: joined, boxPrompt: text, filledAt: ++fillCount })
   if (!currentTurn) return refuse($, gen, id, 'joined')
-  boxFill = { text: joined, prompt: text }
   return refuse($, gen, id, 'joinedMidTurn')
 }
 
@@ -879,24 +878,11 @@ async function leftInEmptyBox($, id, text) {
     const box = await $.prompt.read()
     if (box.text.trim() || !submissions.has(id)) return false
     const filled = await $.prompt.fill({ text })
-    if (filled && filled.isFilled && filled.text === text) track(id, { box: text })
+    if (filled && filled.isFilled && filled.text === text) track(id, { box: text, boxPrompt: text, filledAt: ++fillCount })
     return Boolean(filled && filled.isFilled)
   } catch (err) {
     return false
   }
-}
-
-function noteTitle($, e) {
-  if (!('session_title' in e)) return
-  const target = e.session_id || session
-  const next = e.session_title || null
-  if (target !== titleSession) {
-    titleSession = target
-    lastTitle = null
-  }
-  if (next === lastTitle) return
-  lastTitle = next
-  if (target === session) observe($, { op: 'title', session: target, text: next || '' })
 }
 
 async function focusArgv($, name) {
@@ -965,18 +951,25 @@ async function handle($, cmd, gen) {
 }
 
 async function identify($) {
-  if (!endedSession) {
-    const live = await $.session.id()
-    if (!session && !endedSession) session = live
-    return
-  }
-  const ended = endedSession
-  for (let i = 0; i < identityTries && !session && endedSession === ended; i++) {
-    await $.clock.sleep(100)
-    const live = await $.session.id()
-    if (live !== ended && !session && endedSession === ended) adopt($, live)
-  }
+  if (!endedSession) return syncSession($, { atSwitch: false })
   if (!session) await new Promise((resolve) => { wakeIdentity = resolve })
+}
+
+async function syncSession($, { atSwitch }) {
+  const live = await $.session.id()
+  if (!live || live === session || live === endedSession) return
+  let rows = null
+  try {
+    rows = await $.session.messages({ last: 1 })
+  } catch (err) {}
+  const fresh = Array.isArray(rows) && rows.length === 0
+  if ((await $.session.id()) !== live || live === session || live === endedSession) return
+  adopt($, live, { fresh, idle: atSwitch || fresh })
+}
+
+function queuedText(message) {
+  if (!message || message.type !== 'attachment' || message.name !== 'queued_command' || !Array.isArray(message.content)) return null
+  return message.content.filter((block) => block && block.type === 'text' && typeof block.text === 'string').map((block) => block.text).join('\n')
 }
 
 async function pollLoop($) {
@@ -1144,12 +1137,26 @@ function senderOf(origin) {
   return senders[origin.kind]
 }
 
-function noteInput(e) {
+function noteInput(e, box) {
   const text = plainPrompt(e.text)
   if (!text) return
   const list = e.turnId ? during : opening
-  list.push({ text, from: senderOf(e.origin) })
+  list.push({ text, from: senderOf(e.origin), box })
   while (list.length > inputLimit) list.shift()
+}
+
+function takeQueued(text) {
+  const block = '\n' + plainPrompt(text) + '\n'
+  const taken = []
+  let from = 0
+  for (const input of during) {
+    const at = block.indexOf('\n' + input.text + '\n', from)
+    if (at < 0) continue
+    taken.push(input)
+    from = at + input.text.length + 1
+  }
+  during = during.filter((input) => !taken.includes(input))
+  return taken
 }
 
 function matched(list, text) {
@@ -1217,7 +1224,11 @@ export function register(on) {
   })
 
   on('command.run', async ($, e, next) => {
-    if (e.command !== $.plugin.name) return next(e)
+    if (e.command !== $.plugin.name) {
+      const result = await next(e)
+      quietly(syncSession($, { atSwitch: true }))
+      return result
+    }
     const args = String(e.args || '').trim().toLowerCase()
     const running = currentTurn !== null
     const said = args && args !== 'cancel'
@@ -1230,19 +1241,6 @@ export function register(on) {
   on('session.end', ($, e, next) => {
     leave($, e.sessionId)
     return next(e)
-  })
-
-  on('classic.SessionStart', async ($, e, next) => {
-    const result = await next(e)
-    adopt($, e.session_id, e.source)
-    noteTitle($, e)
-    return result
-  })
-
-  on('classic.UserPromptSubmit', async ($, e, next) => {
-    const result = await next(e)
-    noteTitle($, e)
-    return result
   })
 
   on('tool.check', async ($, e, next) => {
@@ -1260,21 +1258,27 @@ export function register(on) {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  on('prompt.attachment', { type: 'queued_command' }, async ($, e, next) => {
+  on('session.append', async ($, e, next) => {
+    const owner = { session, turn: currentTurn }
     const result = await next(e)
-    if (currentTurn !== null && typeof e.text === 'string') lastInput = matched(during, e.text) || {}
-    if (boxFill && typeof e.text === 'string' && e.text.includes(boxFill.text)) {
-      const { prompt } = boxFill
-      boxFill = null
-      observe($, { op: 'absorbed', session, turn: currentTurn || '', prompt: promptDigest(prompt) })
+    if (session !== owner.session || currentTurn !== owner.turn) return result
+    const text = e.agentId === undefined && result && result.message ? queuedText(result.message) : null
+    if (text === null) return result
+    if (currentTurn === null) return result
+    const taken = takeQueued(text)
+    const last = taken[taken.length - 1]
+    lastInput = last ? { from: last.from, prompt: promptDigest(last.text) } : {}
+    for (const input of taken) {
+      if (input.box) observe($, { op: 'absorbed', session, turn: currentTurn, prompt: promptDigest(input.box.prompt), request: input.box.request })
     }
     return result
   })
 
   on('prompt.submit', ($, e, next) => {
-    noteInput(e)
+    if (!session) quietly(syncSession($, { atSwitch: false }))
+    const box = typedByUser(e) ? noteBoxSent(e.text) : null
+    noteInput(e, box || undefined)
     if (typedByUser(e)) {
-      noteBoxSent(e.text)
       dropGuard()
       prompts += 1
       observe($, { op: 'typed', session, prompts })
@@ -1298,7 +1302,6 @@ export function register(on) {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     if (e.agentId === undefined && (currentTurn === null || currentTurn === e.turnId)) {
-      boxFill = null
       currentTurn = null
       turnKnown = true
       const after = lastInput || {}

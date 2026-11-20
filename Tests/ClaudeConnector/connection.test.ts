@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { type Request, digest, harness, staleHelloFailure } from './support'
+import { type Request, digest, harness, staleHelloFailure, cleared } from './support'
 
 test('agent hooks return while the bridge never answers, through one sender', async ($, on) => {
   const h = harness(on)
@@ -217,8 +217,7 @@ test('a rejected hello goes quiet until a new session', async ($, on) => {
   expect(h.ops()).toEqual(['hello'])
   expect(h.readyChecks()).toBe(checks)
 
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  await cleared($, h, 's2')
   await h.settle()
   expect(h.events().slice(-1)[0]).toMatchObject({ op: 'hello', session: 's2' })
 })
@@ -237,9 +236,7 @@ test('a token read for a replaced session never replaces the new session token',
   expect(h.releases.length).toBe(1)
 
   h.files['/tmp/ks-token'] = 'fresh\n'
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
-  h.live.session = 's2'
+  await cleared($, h, 's2')
   await h.settle()
   h.open('/event')[0].answer(200)
   await h.settle()
@@ -301,8 +298,7 @@ test('a replaced session never emits the old id, even while the host still repor
 
   await h.typed($, 'first')
   await h.typed($, 'second')
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  await cleared($, h, 's2')
   await h.answerEvents()
   await h.typed($, 'third')
   await h.answerEvents()
@@ -318,9 +314,7 @@ test('a replaced session never emits the old id, even while the host still repor
 test('a command for a replaced session is refused without acting', async ($, on) => {
   const h = harness(on)
   await h.connect($)
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
-  h.live.session = 's2'
+  await cleared($, h, 's2')
   await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'old dictation', expectedPrompts: 0 }])
   await h.answerEvents()
 

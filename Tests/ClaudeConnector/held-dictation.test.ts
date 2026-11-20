@@ -16,7 +16,7 @@ test('a dictation sent while a turn runs is taken and joins the turn after the n
   expect(h.events().filter((b: any) => b.op === 'absorbed')).toEqual([])
   await step($)
   await h.answerEvents()
-  expect(h.events().filter((b: any) => b.op === 'absorbed')).toMatchObject([{ session: 's1', turn: 't1', prompt: digest('run the tests') }])
+  expect(h.events().filter((b: any) => b.op === 'absorbed')).toMatchObject([{ session: 's1', turn: 't1', prompt: digest('run the tests'), request: 'r1' }])
 })
 
 test('a dictation added to the conversation but not read before its turn ends stays there for the next turn and is never sent twice', async ($, on) => {

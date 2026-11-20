@@ -113,9 +113,12 @@ every rule above applies to it, with these sharpenings:
   poll keeps its connector live only while its connection is open: a connector whose process ends closes it, and
   the bridge drops the poll then rather than at its deadline (`AgentBridgeServer.watchForHangUp`), so a stopped bb
   server stops counting as holding its threads within the active window. The
-  hub rescans quickly only while a conversation is connected or Settings is open, and otherwise on a change
-  in a watched session folder (`AgentDiscovery.watchedFolders`) plus a slow fallback
-  (`AgentRuntime.rescanInterval`); the first conversation to connect ends the slow fallback at once. A press
+  hub rescans quickly only while Settings is open, and otherwise on a change in a watched session folder
+  (`AgentDiscovery.watchedFolders`), on a connector's hello, turn start and turn end, once a connector that hung up no
+  longer reads live (`AgentBridgeServer.onHangUp`), plus a slow fallback (`AgentRuntime.rescanInterval`). A
+  connected conversation is no reason to scan quickly: its connector reports its turns, and a rescan every second
+  while one was connected cost 12 to 15% CPU on a Mac running about 980 processes (2026-11-20). Each agent's processes
+  are classified once per process listing (`AgentProcessTable.found`), however many scans ask within it. A press
   refreshes, reads places and freezes the roster only when an agent mode is eligible for it; the refresh
   stays, because a connector that resumes polling without a hello reports no event. Places are read when
   something needs them (a hello, a change in the listed conversations, that press), and on a timer only while
@@ -205,7 +208,11 @@ every rule above applies to it, with these sharpenings:
   folder variable in the user's login shell, an enrolled setup, or a folder the user chose. A relative setup
   variable is resolved from that process's working folder (`FolderPath`). Every
   operation takes an explicit `ConnectorTarget`, and a command run for it gets that setup's variable set
-  (or removed for the default) explicitly. Discovery never installs or enrolls; only the consent sheet does
+  (or removed for the default) explicitly. Every agent and tool command runs from `ToolCLI.workingFolder`, a folder inside the
+  home folder but never the home folder itself: run from home, removing a plugin from another Claude Code setup also
+  removed it from the default one's `~/.claude/settings.json`, and run from a folder inside home it did not (Claude Code
+  2.1.329, a throwaway home, 2026-11-20). Inside home rather than `/` keeps what a version manager's shim finds by
+  walking up from the working folder, such as a `.node-version` in the home folder. Discovery never installs or enrolls; only the consent sheet does
   (`ConnectorSetupRegistry.grant`). `SourceInvariantsTests` pins where a setup variable may be named.
 - **Installation authorizes a setup; exclusions take conversations back out.** Every current and future
   conversation of an enrolled setup connects, except those the user disconnected (`AgentExclusions`, saved
@@ -393,7 +400,14 @@ every rule above applies to it, with these sharpenings:
   reply to the wrong take; the digest stays for everything else (a host that cannot tell, a new conversation started
   from a host's page, a draft joined through its plugin). A turn named after it ended still gets its reply: while a
   message sent there waits to be named, the hub keeps each ended turn briefly, with its reply text in memory only when
-  nothing claimed it. A turn named while another is awaited is followed once it starts or ends. In a hosted
+  nothing claimed it. When a turn ends and more than one dictation could be its answer (one already followed and another
+  not yet named, or several not yet named), the hub reads the host's own record of that turn once
+  (`AgentHost.taken`, Codex's ordered `clientIds`), within `AgentHub.turnRecordBudget`, and reads the reply for the last of
+  those dictations the record lists (`AgentHub.settleFromRecord`); a report arriving during that read waits for it, and a conversation disconnected meanwhile gets nothing read. A
+  record that cannot be read in time falls back to the dictation already followed, else the first report, so a reply is
+  never held longer than the budget. With one candidate the reply is read at once, and the first late report for an ended
+  turn claims it. A turn named while another is awaited is followed once it starts or ends, for the message the host
+  placed later when two are named into it first. In a hosted
   conversation a turn end claims only the turn it names, and an end without a turn id counts as the turn the hub saw
   start; a connector's turn end carries no turn id and claims the turn awaited, as before. A delivery that stays
   uncertain because the host could not confirm it later is never matched by text and stays uncertain, without a reply
@@ -447,10 +461,18 @@ every rule above applies to it, with these sharpenings:
   character that keeps a submitted slash from running (measured on 2.1.325, 2026-11-15). The connector puts the same
   character before a submitted `!`, and checks both after leading spaces; that a submitted `!` would otherwise run in
   the shell is not measured (`claude -p` on 2.1.328, 2026-11-19, passed a leading `!` to the model as words). A steered take follows
-  only a turn that read it: the running turn once the connector reports it absorbed (the engine's `queued_command`
-  attachment carrying the text, reported as `absorbed`), or the turn the message starts when the running one ended
+  only a turn that read it: the running turn once the connector reports it absorbed (the `queued_command` attachment
+  row `session.append` stores, carrying the text, reported as `absorbed`), or the turn the message starts when the running one ended
   first, matched by its prompt digest (`followSteer`). It never claims a turn that did not read it, so its reply is
-  heard once. A message for that conversation
+  heard once. A turn that takes in several dictations, whether one started it and others joined it or all joined it,
+  answers the last one it took in (`AgentHub.follow`), for every agent and whatever order their reports arrive in:
+  the user asked that one last, so its answer is the one they wait for. The dictation that opened the turn never takes
+  the reply from one taken in later, however late its receipt arrives; takes in a running turn are ordered by the
+  agent's own reports of taking them in: a connector's `absorbed`, which names the request it took (`request`, the
+  submit's id), so two takes with the same words are never confused; or a host's own record of the turn, whose position
+  for each message (Codex's `clientIds`, as `AgentHostChange.delivered`'s `position`) orders them however late its
+  report arrives. A take's words are matched only for an `absorbed` from a connector older than `request`, oldest
+  waiting take first. A message for that conversation
   already held or still being handed off keeps the hold; an attached image, a connector without `box`, a
   conversation not confirmed in front, or text the box will not take goes to the agent as a steer when its
   connector lists `steer`, and otherwise keeps the hold.
@@ -484,6 +506,28 @@ every rule above applies to it, with these sharpenings:
   (`next.signal` aborted) and a subagent's call never carry it. It is reported `absorbed` only when the next
   main-loop model step starts (`turn.step`); a row added but not read before the turn ends stays in the
   conversation for the next turn and is never sent again.
+- **Claude Code's connector takes its facts from Claude Code's own events, not its classic hooks.** An organization's
+  plugin in the `prepend` tier may continue an event past every personal plugin (`next.to`), and Claude Code then tells
+  the model, in every session, that the personal hook was skipped; one did so for `classic.SessionStart`,
+  `classic.UserPromptSubmit` and `prompt.attachment` (2.1.329, 2026-11-20). So the session is `$.session.id()` read when
+  the poll loop starts and after every `command.run`, since a `/clear`, `/resume` or `/branch` ends the old session and
+  switches the id inside its own command (measured on 2.1.329: the id is still the old one after `session.end`'s
+  `next`, and the new one after the command's); the next prompt reads it again for a switch that came another way. A
+  session is fresh when its conversation holds no rows yet (`$.session.messages`), as a launch or `/clear` leaves it,
+  and a resumed or branched one is not; its turn is known idle when it is fresh or when a command just switched to it,
+  and unknown after a plugin reload. Mid-turn input comes from the `queued_command` rows `session.append` stores, matched in the order the
+  inputs were submitted (`takeQueued`): Claude Code hands queued input to the model in submit order, and a prompt-box
+  dictation joins that order only when its Return is submitted, and only the newest fill can own a submission, so a
+  message with the same words queued earlier, or a fill left unsent and replaced, is never reported as the dictation. It
+  reports no title, since Claude Code gives one only to classic hooks: a name the user sets reaches the hub through
+  Claude Code's session registry, which it watches, and a generated title through the transcript. `ClaudeDiscovery`
+  alone keeps which conversations to look at: each turn end watches that conversation for `ClaudeDiscovery.titleWatch`,
+  and each scan takes a snapshot of the watches due (at most every `ClaudeDiscovery.titleRecheck`) and reads only those
+  transcripts that changed, so a title written just after the end still arrives, no scan can drop a watch another
+  turn end added, and the title cache's lock is never taken on the main actor. `classic.Elicitation` is the one classic hook left: Claude Code reports an MCP server's request
+  for input nowhere else, it runs only when one asks, and it only holds a prompt-box Return during the moment the dialog
+  may not be drawn yet, which the box's own readiness check covers once it is. `managed-plugin.test.ts` loads a
+  `prepend` plugin that passes those events by.
 - **A held take is delivered once it is confirmed, or reported.** A take still held when its turn ends is
   submitted as the next prompt, as Claude Code does with queued typing, unless the user has started a draft there.
   After Esc, Claude Code refuses a plugin's prompt until the user sends one, so the takes are added to the prompt

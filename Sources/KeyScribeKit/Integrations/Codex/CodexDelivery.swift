@@ -62,7 +62,14 @@ public enum CodexDelivery {
     }
 
     public static func turn(in turns: [Turn], clientUserMessageId: String) -> String? {
-        turns.first { $0.clientIds.contains(clientUserMessageId) }?.id
+        placement(in: turns, clientUserMessageId: clientUserMessageId)?.turn
+    }
+
+    public static func placement(in turns: [Turn], clientUserMessageId: String) -> (turn: String, position: Int)? {
+        for turn in turns {
+            if let position = turn.clientIds.firstIndex(of: clientUserMessageId) { return (turn.id, position) }
+        }
+        return nil
     }
 
     public static func lastAgentWords(_ result: Data) -> String? {

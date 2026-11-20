@@ -44,6 +44,8 @@ struct AgentHubTests {
             entries.append(ClaudeRegistryEntry(
                 pid: pid, sessionId: session, cwd: cwd, name: nil, status: status, waitingFor: waitingFor, startedAt: startedAt))
         }
+
+        func remove(_ session: String) { entries.removeAll { $0.sessionId == session } }
     }
 
     final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1000) }
@@ -82,41 +84,9 @@ struct AgentHubTests {
         await hub.rescan()
     }
 
-    @Test func theHubKnowsWhetherAnyListedConversationIsConnected() async {
-        let (hub, transport, registry, _) = makeHub()
-        registry.set("s1")
-        await hub.rescan()
-        #expect(!hub.hasConnectedConversation)
-        transport.live.insert("claude:s1")
-        await hub.rescan()
-        #expect(hub.hasConnectedConversation)
-    }
-
-    @Test func theHubSaysWhenTheFirstConversationConnects() async {
-        let (hub, transport, registry, _) = makeHub()
-        var connects = 0
-        hub.onFirstConnection = { connects += 1 }
-        registry.set("s1")
-        registry.set("s2")
-        await hub.rescan()
-        #expect(connects == 0)
-        transport.live.insert("claude:s1")
-        hub.refresh()
-        #expect(connects == 1)
-        transport.live.insert("claude:s2")
-        hub.refresh()
-        #expect(connects == 1)
-        transport.live = []
-        hub.refresh()
-        transport.live.insert("claude:s2")
-        hub.refresh()
-        #expect(connects == 2)
-    }
-
-    @Test func theRescanIsQuickOnlyWhileAConversationIsConnectedOrSettingsIsOpen() {
-        #expect(AgentRuntime.rescanInterval(connected: true, settingsOpen: false) == .seconds(1))
-        #expect(AgentRuntime.rescanInterval(connected: false, settingsOpen: true) == .seconds(1))
-        #expect(AgentRuntime.rescanInterval(connected: false, settingsOpen: false) == .seconds(10))
+    @Test func theRescanIsQuickOnlyWhileSettingsIsOpen() {
+        #expect(AgentRuntime.rescanInterval(settingsOpen: true) == .seconds(1))
+        #expect(AgentRuntime.rescanInterval(settingsOpen: false) == .seconds(10))
     }
 
     @Test func anIdleConversationIsSentAndConfirmedByTheConnector() async {
@@ -556,34 +526,120 @@ struct AgentHubTests {
         #expect(origins == ["r9"])
     }
 
-    @Test func twoSteersIntoOneTurnSentBeforeEitherIsTakenInHaveItsReplyHeardOnce() async {
+    enum SteerReport: String, CaseIterable, Sendable { case absorbedA, absorbedB, followA, followB }
+
+    nonisolated static let steerOrders: [[SteerReport]] = {
+        func orders(_ rest: [SteerReport]) -> [[SteerReport]] {
+            rest.isEmpty ? [[]] : rest.indices.flatMap { i in orders(rest.enumerated().filter { $0.offset != i }.map(\.element)).map { [rest[i]] + $0 } }
+        }
+        return orders(SteerReport.allCases)
+    }()
+
+    @Test(arguments: steerOrders)
+    func twoSteersIntoOneTurnHaveItsReplyHeardOnceForTheOneItTookInLastWhateverOrderTheirReportsArrive(_ order: [SteerReport]) async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry, status: "busy")
         greet(hub, working())
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         var origins: [String?] = []
         hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
-        hub.followSteer(of: "claude:s1", for: "r8", text: "use the other file")
-        hub.followSteer(of: "claude:s1", for: "r9", text: "and keep the tests")
-        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
-        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("and keep the tests")))
+        for report in order {
+            switch report {
+            case .absorbedA: hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
+            case .absorbedB: hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("and keep the tests")))
+            case .followA: hub.followSteer(of: "claude:s1", for: "rA", text: "use the other file")
+            case .followB: hub.followSteer(of: "claude:s1", for: "rB", text: "and keep the tests")
+            }
+        }
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it and kept them."))
+        let takenLast = order.firstIndex(of: .absorbedA)! > order.firstIndex(of: .absorbedB)! ? "rA" : "rB"
+        #expect(origins == [takenLast])
+    }
+
+    @Test(arguments: [0, 1, 2], [true, false])
+    func theReceiptOfTheDictationThatOpenedATurnNeverTakesItsReplyFromOneTheTurnTookInLater(receiptAt: Int, steerFollowedFirst: Bool) async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("explain the whole build in detail", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        var reports: [() -> Void] = [
+            { hub.followSteer(of: "claude:s1", for: "r9", text: "one word: ready?") },
+            { hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("one word: ready?"))) },
+        ]
+        if !steerFollowedFirst { reports.reverse() }
+        reports.insert({ hub.handle(.submitted(request: "r1", turn: "t1")) }, at: receiptAt)
+        for report in reports { report() }
+        _ = await receipt
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Yes."))
         #expect(origins == ["r9"])
     }
 
-    @Test func twoSteersIntoOneTurnHaveItsReplyHeardOnceForTheFirst() async {
+    @Test func twoSteersWithTheSameWordsBothTakenInBeforeEitherIsFollowedHaveTheReplyHeardForTheSecond() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry, status: "busy")
         greet(hub, working())
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         var origins: [String?] = []
         hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
-        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
-        hub.followSteer(of: "claude:s1", for: "r8", text: "use the other file")
-        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("and keep the tests")))
-        hub.followSteer(of: "claude:s1", for: "r9", text: "and keep the tests")
-        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it and kept them."))
-        #expect(origins == ["r8"])
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("yes")))
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("yes")))
+        hub.followSteer(of: "claude:s1", for: "rFirst", text: "yes")
+        hub.followSteer(of: "claude:s1", for: "rSecond", text: "yes")
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
+        #expect(origins == ["rSecond"])
+    }
+
+    enum SameWordsTaken: String, CaseIterable, Sendable { case first, second, firstThenSecond, secondThenFirst }
+
+    @Test(arguments: SameWordsTaken.allCases, [true, false])
+    func twoSteersWithTheSameWordsAreToldApartByTheRequestTheAgentReportsTakingIn(_ taken: SameWordsTaken, takenBeforeReceipts: Bool) async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        let order: [String] = switch taken {
+        case .first: ["r1"]
+        case .second: ["r2"]
+        case .firstThenSecond: ["r1", "r2"]
+        case .secondThenFirst: ["r2", "r1"]
+        }
+        let absorb = { for request in order { hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("yes"), request: request)) } }
+        for request in ["r1", "r2"] {
+            let sentBefore = transport.sent.count
+            async let receipt = hub.deliver("yes", to: "claude:s1")
+            await untilSent(transport, sentBefore + 1)
+            if takenBeforeReceipts, request == "r2" { absorb() }
+            hub.handle(.submitted(request: request, turn: ""))
+            _ = await receipt
+        }
+        if !takenBeforeReceipts { absorb() }
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
+        #expect(origins == [order.last])
+    }
+
+    @Test func aDictationTakenIntoTheTurnAnEarlierDictationStartedHasThatTurnsReply() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("explain the whole build in detail", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        _ = await receipt
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        var replies: [(String?, SpokenResult.Cause?)] = []
+        hub.onResult = { _, _, _, _, origin, cause in replies.append((origin, cause)) }
+        hub.followSteer(of: "claude:s1", for: "r9", text: "one word: ready?")
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("one word: ready?")))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Yes."))
+        #expect(replies.map(\.0) == ["r9"])
     }
 
     @Test func aPromptBoxCheckNobodyAnswersIsNotReady() async {
@@ -2855,18 +2911,100 @@ struct AgentHubTests {
         let registry = Registry()
         let hub = AgentHub(
             transport: FakeTransport(), scan: { registry.entries },
-            transcriptTitles: ClaudeTranscriptTitles(configDirs: [dir], now: { clock.now }), scanDeadline: .seconds(30))
+            transcriptTitles: ClaudeTranscriptTitles(configDirs: [dir]), scanDeadline: .seconds(30))
         registry.set("s1")
         await hub.rescan(rereadingTitles: false)
         #expect(hub.directory.conversations.first?.title == "First")
 
-        clock.now += ClaudeTranscriptTitles.rereadInterval
+        clock.now += 1
         try Data(#"{"type":"ai-title","aiTitle":"Second","sessionId":"claude:s1"}"#.utf8).write(to: file)
         try FileManager.default.setAttributes([.modificationDate: clock.now], ofItemAtPath: file.path)
         await hub.rescan(rereadingTitles: false)
         #expect(hub.directory.conversations.first?.title == "First")
         await hub.rescan()
         #expect(hub.directory.conversations.first?.title == "Second")
+    }
+
+    @Test func aConversationWhoseStateComesFromItsConnectorShowsWorkingAsSoonAsItsTurnStarts() async {
+        let pi = ExtensionDiscovery(kind: .pi, processStart: { _ in .started(milliseconds: 1) }, isRunning: { _ in true }, processes: { AgentProcesses.Found() })
+        let transport = FakeTransport()
+        let hub = AgentHub(transport: transport, discovery: [pi], scanDeadline: .seconds(30))
+        transport.live.insert("pi:s1")
+        hub.handle(.hello(.init(
+            protocolVersion: 2, agent: "pi", agentVersion: "", instance: "i1", session: "pi:s1", pid: 10, features: ["readiness"],
+            idle: true, gap: false, cwd: "/src/api")))
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state == .idle)
+        hub.handle(.turnStarted(session: "pi:s1", turn: "t1"))
+        let until = Date().addingTimeInterval(5)
+        while hub.directory.conversations.first?.state != .working, Date() < until { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(hub.directory.conversations.first?.state == .working)
+    }
+
+    enum TitleWrite: String, CaseIterable, Sendable { case beforeTheEnd, afterTheEndScan, afterAnOlderScanDroppedTheConversation }
+
+    @Test(arguments: TitleWrite.allCases)
+    func aTitleItsTranscriptGainsAroundATurnEndShowsOnARoutineScanWithNoSecondHello(_ write: TitleWrite) async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-late-title-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let folder = dir.appendingPathComponent("projects/-src-keyscribe", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let clock = ClaudeTranscriptTitlesTests.Clock()
+        clock.now = Date()
+        let registry = Registry()
+        let transport = FakeTransport()
+        let hub = AgentHub(
+            transport: transport, scan: { registry.entries },
+            transcriptTitles: ClaudeTranscriptTitles(configDirs: [dir]), scanDeadline: .seconds(30), now: { clock.now })
+        registry.set("s1")
+        transport.live.insert("claude:s1")
+        await hub.rescan()
+        hub.handle(labelHello())
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.directory.conversations.first?.title == nil)
+
+        let title = { try Data(#"{"type":"ai-title","aiTitle":"Fix the flaky test","sessionId":"claude:s1"}"#.utf8).write(to: folder.appendingPathComponent("s1.jsonl")) }
+        if write == .beforeTheEnd { try title() }
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
+        if write == .afterAnOlderScanDroppedTheConversation {
+            registry.remove("s1")
+            await hub.rescan(rereadingTitles: false)
+            registry.set("s1")
+        }
+        await hub.rescan(rereadingTitles: false)
+        if write != .beforeTheEnd { try title() }
+        clock.now += ClaudeDiscovery.titleRecheck
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.directory.conversations.first?.title == "Fix the flaky test")
+    }
+
+    @Test func aWatchedTranscriptIsCheckedNoMoreOftenThanItsRecheckEvenWhenScansComeEverySecond() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-title-cadence-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let folder = dir.appendingPathComponent("projects/-src-keyscribe", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let clock = ClaudeTranscriptTitlesTests.Clock()
+        clock.now = Date()
+        let registry = Registry()
+        let hub = AgentHub(
+            transport: FakeTransport(), scan: { registry.entries },
+            transcriptTitles: ClaudeTranscriptTitles(configDirs: [dir]), scanDeadline: .seconds(30), now: { clock.now })
+        registry.set("s1")
+        await hub.rescan()
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
+        await hub.rescan(rereadingTitles: false)
+        try Data(#"{"type":"ai-title","aiTitle":"Later","sessionId":"claude:s1"}"#.utf8).write(to: folder.appendingPathComponent("s1.jsonl"))
+        clock.now += ClaudeDiscovery.titleRecheck - 1
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.directory.conversations.first?.title == nil)
+        clock.now += 1
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.directory.conversations.first?.title == "Later")
+        clock.now += ClaudeDiscovery.titleWatch
+        try Data(#"{"type":"ai-title","aiTitle":"Much later","sessionId":"claude:s1"}"#.utf8).write(to: folder.appendingPathComponent("s1.jsonl"))
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.directory.conversations.first?.title == "Later")
     }
 
     @Test func anExplicitTranscriptNameIsAddressableBeforeTheConnectorStarts() async throws {

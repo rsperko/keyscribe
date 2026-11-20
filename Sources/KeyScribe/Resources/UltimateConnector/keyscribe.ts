@@ -533,7 +533,8 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     delivery.turn = seen.turn
     if (delivery.steer) {
       const prompt = delivery.prompt
-      report(id, () => ({ op: "absorbed", session: sessionOf(id), turn: seen.turn, prompt }))
+      const request = delivery.id
+      report(id, () => ({ op: "absorbed", session: sessionOf(id), turn: seen.turn, prompt, request }))
       return
     }
     if (delivery.state === "handed") {

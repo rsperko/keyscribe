@@ -39,6 +39,8 @@ final class AgentBridgeServer: @unchecked Sendable {
     private let onNotify: @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void
     private let onReport: @Sendable (_ agent: String, _ installation: String, _ body: Data) -> Report
     private let queue = DispatchQueue(label: "com.keyscribe.agent-bridge")
+    private let activeWindow: TimeInterval
+    private var hangUpObserver: (@Sendable () -> Void)?
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var timer: DispatchSourceTimer?
@@ -67,6 +69,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         self.onNotify = onNotify
         self.onReport = onReport
         commands = AgentCommandQueue(activeWindow: activeWindow)
+        self.activeWindow = activeWindow
         self.directory = directory
         self.token = token
         self.admits = admits
@@ -266,6 +269,10 @@ final class AgentBridgeServer: @unchecked Sendable {
 
     func forget(session: String) {
         queue.async { self.commands.forget(session: session) }
+    }
+
+    func onHangUp(_ observe: @escaping @Sendable () -> Void) {
+        queue.sync { hangUpObserver = observe }
     }
 
     func isLive(session: String) -> Bool {
@@ -554,6 +561,9 @@ final class AgentBridgeServer: @unchecked Sendable {
             let n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
             if n < 0, errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR { return }
             self.finish(fd)
+            if let observe = self.hangUpObserver {
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + self.activeWindow + 0.1) { observe() }
+            }
         }
         readers[fd] = watch
         watch.resume()

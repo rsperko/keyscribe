@@ -144,6 +144,13 @@ struct AgentHostTests {
             return confirmation
         }
 
+        var record: [String: [String]] = [:]
+        var recordStalls = false
+        func taken(in turn: String, at location: AgentHostLocation) async -> [String]? {
+            if recordStalls { try? await Task.sleep(for: .seconds(30)) }
+            return record[turn]
+        }
+
         func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
             delivered.append((text, request, location))
             deliveredImages.append(images)
@@ -363,6 +370,39 @@ struct AgentHostTests {
         host.front = .unknown
         #expect(await hub.hostShows(Self.id("t2")) == false)
         #expect(await hub.hostShows("claude:s1") == nil)
+    }
+
+    @Test func aHostedConversationRunningInATerminalCountsAsInFrontWhenThatTerminalShowsItThoughItsHostSeesNothing() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1", pid: 70), Self.thread("t2", cwd: "/src/site")]
+        let front = FakeFront()
+        let hub = makeHub(host, front: front)
+        await hub.rescan()
+        host.front = .unknown
+        front.answer = FrontSession(id: Self.id("t1"), app: FrontApp(bundle: "com.mitchellh.ghostty", pid: 9, name: "Ghostty"))
+        #expect(await hub.showsInFront(Self.id("t1"), glancing: front))
+        #expect(await !hub.showsInFront(Self.id("t2"), glancing: front))
+        front.answer = nil
+        #expect(await !hub.showsInFront(Self.id("t1"), glancing: front))
+        host.front = .shown(Self.location("t2"), in: AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example"))
+        #expect(await hub.showsInFront(Self.id("t2"), glancing: front))
+    }
+
+    @Test func aHostThatSaysItsConversationIsInFrontIsBelievedWithoutWaitingForASlowTerminalRead() async {
+        final class StuckFront: AgentFronting, @unchecked Sendable {
+            func shown(among agents: [AgentFrontCandidate], asking: @escaping @MainActor @Sendable (String) -> Void) async -> FrontSession? {
+                try? await Task.sleep(for: .seconds(30))
+                return nil
+            }
+        }
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1", pid: 70)]
+        let hub = makeHub(host)
+        await hub.rescan()
+        host.front = .shown(Self.location("t1"), in: AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example"))
+        let started = Date()
+        #expect(await hub.showsInFront(Self.id("t1"), glancing: StuckFront()))
+        #expect(Date().timeIntervalSince(started) < 5)
     }
 
     @Test func theHostIsToldWhichConversationItsOwnConnectorLastSaidItsWindowShowsWhileThatConnectorIsLive() async {
@@ -892,6 +932,11 @@ struct AgentHostTests {
 
     final class Results { var all: [(String?, String)] = [] }
 
+    private func settled(_ results: Results) async {
+        let until = Date().addingTimeInterval(3)
+        while results.all.isEmpty, Date() < until { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
     @Test func aLateEndOfAnEarlierTurnIsNeverTheReplyToATurnTheHostNamed() async {
         let (host, hub, results) = await namingHost()
         host.whileDelivering = { host.watcher?(.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1")) }
@@ -922,7 +967,62 @@ struct AgentHostTests {
         #expect(!results.all.contains { $0.0 == "q1" && $0.1 == "first done" })
     }
 
-    @Test func aRequestNamedIntoATurnAlreadyAwaitedForAnotherLeavesTheReplyWithTheFirstRequest() async {
+    @Test(arguments: [true, false], [true, false])
+    func twoRequestsTheHostNamesIntoOneTurnAreOrderedByItsRecordNotByWhenTheReportsArrive(firstReportedFirst: Bool, firstTakenFirst: Bool) async {
+        let (host, hub, results) = await namingHost()
+        host.whileDelivering = {}
+        _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        _ = await hub.deliver("also this", to: Self.id("t1"), request: "q1")
+        let reports = [
+            AgentHostChange.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1", position: firstTakenFirst ? 0 : 1),
+            AgentHostChange.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1", position: firstTakenFirst ? 1 : 0),
+        ]
+        for report in firstReportedFirst ? reports : reports.reversed() { host.watcher?(report) }
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Both done.", after: nil, turn: "turn-1"))
+        #expect(results.all.map(\.0) == [firstTakenFirst ? "q1" : "q0"])
+    }
+
+    @Test(arguments: [true, false])
+    func aTurnThatEndedBeforeItsMessagesWereNamedIsReadForTheOneItsHostTookLast(lowerReportedFirst: Bool) async {
+        let (host, hub, results) = await namingHost()
+        host.record = ["turn-1": ["q0", "q1"]]
+        host.whileDelivering = {}
+        _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
+        _ = await hub.deliver("also this", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Both done.", after: nil, turn: "turn-1"))
+        #expect(results.all.isEmpty)
+        let reports = [
+            AgentHostChange.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1", position: 0),
+            AgentHostChange.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1", position: 1),
+        ]
+        for report in lowerReportedFirst ? reports : reports.reversed() { host.watcher?(report) }
+        await settled(results)
+        #expect(results.all.map(\.0) == ["q1"])
+    }
+
+    @Test(arguments: [true, false])
+    func aTurnNamedBeforeItStartsIsReadForTheMessageItsHostTookLast(lowerReportedFirst: Bool) async {
+        let (host, hub, results) = await namingHost()
+        host.whileDelivering = { host.watcher?(.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1", position: 0)) }
+        _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        host.whileDelivering = {}
+        _ = await hub.deliver("next", to: Self.id("t1"), request: "q1")
+        _ = await hub.deliver("and then", to: Self.id("t1"), request: "q2")
+        let reports = [
+            AgentHostChange.delivered(request: "q1", at: Self.location("t1"), turn: "turn-2", position: 0),
+            AgentHostChange.delivered(request: "q2", at: Self.location("t1"), turn: "turn-2", position: 1),
+        ]
+        for report in lowerReportedFirst ? reports : reports.reversed() { host.watcher?(report) }
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "First done.", after: nil, turn: "turn-1"))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: nil))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Both done.", after: nil, turn: "turn-2"))
+        #expect(results.all.map(\.0) == ["q0", "q2"])
+    }
+
+    @Test func aRequestNamedIntoATurnAlreadyAwaitedForAnotherTakesTheReplyFromTheEarlierRequest() async {
         let (host, hub, results) = await namingHost()
         host.whileDelivering = { host.watcher?(.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1")) }
         _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
@@ -930,11 +1030,44 @@ struct AgentHostTests {
         host.whileDelivering = { host.watcher?(.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1")) }
         #expect(await hub.deliver("also this", to: Self.id("t1"), request: "q1") == .sent("docs"))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Both done.", after: nil, turn: "turn-1"))
-        #expect(results.all.map(\.0) == ["q0"])
+        #expect(results.all.map(\.0) == ["q1"])
     }
 
-    @Test func aRequestNamedIntoAnEndedTurnAnotherRequestClaimedGetsNoReply() async {
+    @Test func aConversationDisconnectedWhileItsTurnRecordIsReadGetsNoReply() async {
         let (host, hub, results) = await namingHost()
+        host.recordStalls = true
+        host.whileDelivering = { host.watcher?(.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1")) }
+        _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
+        host.whileDelivering = nil
+        host.delivery = .uncertain
+        _ = await hub.deliver("second", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "First done.", after: nil, turn: "turn-1"))
+        hub.disconnect(Self.id("t1"))
+        try? await Task.sleep(for: AgentHub.turnRecordBudget + .milliseconds(500))
+        #expect(results.all.isEmpty)
+    }
+
+    @Test func aRecordThatDoesNotAnswerHoldsTheReplyNoLongerThanItsBudget() async {
+        let (host, hub, results) = await namingHost()
+        host.recordStalls = true
+        host.whileDelivering = { host.watcher?(.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1")) }
+        _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
+        host.whileDelivering = nil
+        host.delivery = .uncertain
+        _ = await hub.deliver("second", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        let ended = Date()
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "First done.", after: nil, turn: "turn-1"))
+        await settled(results)
+        #expect(results.all.map(\.0) == ["q0"])
+        #expect(Date().timeIntervalSince(ended) < 2.9)
+    }
+
+    @Test(arguments: [true, false])
+    func aTurnEndingBetweenTheReportsOfTwoMessagesIsReadForTheOneItsHostTookLastWhenItsRecordCanBeRead(recordReadable: Bool) async {
+        let (host, hub, results) = await namingHost()
+        if recordReadable { host.record = ["turn-1": ["q0", "q1"]] }
         host.whileDelivering = { host.watcher?(.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1")) }
         _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
         host.whileDelivering = nil
@@ -943,7 +1076,8 @@ struct AgentHostTests {
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "First done.", after: nil, turn: "turn-1"))
         host.watcher?(.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1"))
-        #expect(results.all.map(\.0) == ["q0"])
+        await settled(results)
+        #expect(results.all.map(\.0) == [recordReadable ? "q1" : "q0"])
     }
 
     @Test func anUncertainStartIsAnnouncedSentWhenItsTurnStartsEvenOnAHostThatNamesItsTurns() async {

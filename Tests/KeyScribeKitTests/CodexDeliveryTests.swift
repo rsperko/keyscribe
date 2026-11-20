@@ -70,6 +70,9 @@ struct CodexDeliveryTests {
         #expect(CodexDelivery.turn(in: turns, clientUserMessageId: "ks-1") == "turn-1")
         #expect(CodexDelivery.turn(in: turns, clientUserMessageId: "ks-2") == "turn-2")
         #expect(CodexDelivery.turn(in: turns, clientUserMessageId: "ks-3") == nil)
+        #expect(CodexDelivery.placement(in: turns, clientUserMessageId: "ks-2").map { [$0.turn, String($0.position)] } == ["turn-2", "1"])
+        #expect(CodexDelivery.placement(in: turns, clientUserMessageId: "ks-1").map { [$0.turn, String($0.position)] } == ["turn-1", "0"])
+        #expect(CodexDelivery.placement(in: turns, clientUserMessageId: "ks-3") == nil)
     }
 
     @Test func theAgentsLastWordsAreItsLatestMessageInTheNewestTurn() {

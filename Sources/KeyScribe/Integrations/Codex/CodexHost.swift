@@ -143,7 +143,10 @@ final class CodexHost: AgentHost {
         return .found(sessions, titles: titles, problem: problems.first)
     }
 
-    nonisolated static let daemonDown = "Codex\u{2019}s app server isn\u{2019}t running. Start Codex in a terminal to reach its conversations."
+    nonisolated static let daemonDown =
+        "Codex\u{2019}s app server isn\u{2019}t running, so its conversations can\u{2019}t be reached. Start Codex in a terminal. "
+        + "If Codex is already running, it was started with --no-daemon or its app server couldn\u{2019}t start: run "
+        + "\u{201C}codex app-server --listen unix://\u{201D} and start Codex with \u{201C}codex --remote unix://\u{201D}."
 
     private func processes(showing ids: [String], in folder: String) async -> [String: Int] {
         guard let panes, !ids.isEmpty else { return [:] }
@@ -368,12 +371,26 @@ final class CodexHost: AgentHost {
         guard let listed = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.callTimeout),
               let turns = CodexDelivery.turns(listed)?.turns
         else { return nil }
-        guard let turn = CodexDelivery.turn(in: turns, clientUserMessageId: Self.messageId(request)) else { return false }
-        changed?(.delivered(request: request, at: location, turn: turn))
+        guard let placed = CodexDelivery.placement(in: turns, clientUserMessageId: Self.messageId(request)) else { return false }
+        changed?(.delivered(request: request, at: location, turn: placed.turn, position: placed.position))
         return true
     }
 
     nonisolated static func messageId(_ request: String) -> String { "ks-\(request)" }
+
+    func taken(in turn: String, at location: AgentHostLocation) async -> [String]? {
+        guard isEnabled, let id = thread(at: location), let client = await client(location.instance) else { return nil }
+        struct List: Encodable, Sendable {
+            var threadId: String
+            var limit = 5
+            var itemsView = "full"
+        }
+        guard let listed = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.callTimeout),
+              let record = CodexDelivery.turns(listed)?.turns.first(where: { $0.id == turn })
+        else { return nil }
+        let prefix = Self.messageId("")
+        return record.clientIds.compactMap { $0 }.filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+    }
 
     private func explain(_ prompt: AgentPrompt, thread id: String, in folder: String) {
         guard let home = homes[folder], let client = home.client else { return }
@@ -524,8 +541,8 @@ final class CodexHost: AgentHost {
             guard let listed = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.callTimeout),
                   let turns = CodexDelivery.turns(listed)?.turns
             else { return .uncertain }
-            if let turn = CodexDelivery.turn(in: turns, clientUserMessageId: messageId) {
-                changed?(.delivered(request: request, at: location, turn: turn))
+            if let placed = CodexDelivery.placement(in: turns, clientUserMessageId: messageId) {
+                changed?(.delivered(request: request, at: location, turn: placed.turn, position: placed.position))
                 return .accepted
             }
             guard now() < deadline else { return .uncertain }

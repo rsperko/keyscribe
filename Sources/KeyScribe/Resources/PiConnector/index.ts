@@ -820,7 +820,7 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
     if (taken >= 0) {
       const [item] = steered.splice(taken, 1)
       lastPrompt = item.prompt
-      if (session) observe({ op: "absorbed", session, turn: currentTurn || "", prompt: item.prompt })
+      if (session) observe({ op: "absorbed", session, turn: currentTurn || "", prompt: item.prompt, request: item.id })
       return
     }
     const item = take(text, serialIn)

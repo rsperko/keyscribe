@@ -23,7 +23,7 @@ export function harness(on: any) {
   const submits: string[] = []
   const statuses: string[] = []
   const store = new Map<string, unknown>()
-  const live = { session: 's1' }
+  const live = { session: 's1', rows: [] as any[] }
   const env: Record<string, string | undefined> = {}
   const downstream: Record<string, any> = {}
   const reads: Array<() => void> = []
@@ -85,6 +85,23 @@ export function harness(on: any) {
     }
     requests.push(request)
   }))
+  const rowReads: Array<() => void> = []
+  const rowHold = { on: false }
+  on('session.messages', () => {
+    const answer = { value: live.rows }
+    if (!rowHold.on) return answer
+    rowHold.on = false
+    return new Promise((resolve) => { rowReads.push(() => resolve(answer)) })
+  })
+  const switches: Record<string, { session: string, rows: any[] }> = {}
+  on('command.run', ($: any, e: any) => {
+    const to = switches[e.command]
+    if (!to) return {}
+    delete switches[e.command]
+    live.session = to.session
+    live.rows = to.rows
+    return {}
+  })
   on('session.start', () => ({ cwd: '/work' }))
   on('session.end', ($: any, e: any) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', () => ({}))
@@ -124,9 +141,10 @@ export function harness(on: any) {
   })
 
   const appended: string[] = []
-  const appendHold = { throws: false, gated: false, gates: [] as Array<() => void> }
+  const appendHold = { throws: false, gated: false, gates: [] as Array<() => void>, storedAs: undefined as string | undefined }
   on('session.append', async ($: any, e: any, next: any) => {
     if (appendHold.throws) return { deny: 'append failed' }
+    if (appendHold.storedAs !== undefined) return next({ ...e, message: { ...e.message, content: [{ type: 'text', text: appendHold.storedAs }] } })
     if (appendHold.gated) await new Promise<void>((resolve) => { appendHold.gates.push(resolve) })
     appended.push(e.message.content.map((c: any) => c.text).join(''))
     return next(e)
@@ -167,13 +185,13 @@ export function harness(on: any) {
     }
   }
 
-  const typed = ($: any, text = 'typed by me') => $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false })
+  const typed = ($: any, text = 'typed by me', turnId?: string) => $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false, ...(turnId ? { turnId } : {}) })
 
   const readyChecks = () => fileReads.filter((p) => p === '/tmp/ks-ready.json').length
   const ready = (launch?: string, protocol = 2) => { files['/tmp/ks-ready.json'] = launch === undefined ? undefined : JSON.stringify({ launch, protocol }) }
 
   const releaseSubmits = () => { for (const release of heldSubmits.splice(0)) release() }
-  return { appended, appendHold, runs, run, clockHold, fills, fillRefusal, logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
+  return { rowHold, rowReads, switches, appended, appendHold, runs, run, clockHold, fills, fillRefusal, logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
 }
 
 export function digest(text: string) {
@@ -189,10 +207,7 @@ export async function staleHelloFailure($: any, on: any, fail: 'reject' | 'refus
   const old = h.open('/event')[0]
   expect(old.body.session).toBe('s1')
 
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
-  h.live.session = 's2'
-  await h.settle()
+  await cleared($, h, 's2')
   if (fail === 'reject') old.answer(401)
   if (fail === 'refuse') old.refuse()
   if (fail === 'late') {
@@ -236,6 +251,27 @@ export const readyBox = async ($: any, h: any) => {
   await h.answerEvents()
   expect(promptBox(h, 'c1')).toBe('ready')
 }
+
+export async function cleared($: any, h: any, next: string) {
+  await switched($, h, 'clear', next, [])
+}
+
+export async function resumed($: any, h: any, next: string) {
+  await switched($, h, 'resume', next, [{ type: 'user', uuid: 'u1' }])
+}
+
+async function switched($: any, h: any, command: 'clear' | 'resume', next: string, rows: any[]) {
+  const ended = h.live.session
+  h.switches[command] = { session: next, rows }
+  await $.session.end({ reason: command, sessionId: ended, resume: { id: ended } })
+  await $.command.run({ command, args: '' } as any)
+  await h.settle()
+}
+
+export const queuedCommand = (text: string) => ({
+  message: { type: 'attachment', name: 'queued_command', isMeta: true, content: [{ type: 'text', text: absorbedText(text) }] },
+  door: 'attachment', origin: { kind: 'engine' }, uuid: 'q-' + text.length,
+})
 
 export const absorbedText = (text: string) => `The user sent a new message while you were working:\n${text}\n\nThis is how Claude Code surfaces messages the user sends mid-turn.`
 

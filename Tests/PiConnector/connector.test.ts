@@ -885,7 +885,7 @@ test("a steer is reported taken into the turn running when it enters the convers
   takenIn(h)
   await h.settle()
   await h.answerEvents()
-  assert.deepEqual(h.events().filter((b) => b.op === "absorbed").map((b) => [b.turn, b.prompt]), [[h.turn(1), digest("use the other file")]])
+  assert.deepEqual(h.events().filter((b) => b.op === "absorbed").map((b) => [b.turn, b.prompt, b.request]), [[h.turn(1), digest("use the other file"), "r1"]])
   assert.equal(h.replies().filter((b) => b.op === "submitted").length, 1)
 })
 

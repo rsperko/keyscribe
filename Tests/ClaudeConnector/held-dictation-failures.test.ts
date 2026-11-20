@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { dropConnection, ended, harness, held, lateOutcome, steered, step, stopped, submitCommand, toolCall } from './support'
+import { dropConnection, ended, harness, held, lateOutcome, steered, step, stopped, submitCommand, toolCall, cleared } from './support'
 
 test('a conversation disconnected while held dictations are being added gets none of the rest, and none comes back', async ($, on) => {
   const h = harness(on)
@@ -92,7 +92,7 @@ test('a session cleared while held dictations wait for the prompt box after Esc 
   h.downstream['prompt.submit'] = { drop: stopped }
   await $.turn.complete(ended('aborted'))
   await h.settle()
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  await cleared($, h, 's2')
   await h.settle()
   h.submitHold.on = false
   h.releaseSubmits()
@@ -190,7 +190,7 @@ test('a held dictation that starts with a slash starts the next turn as text, ne
 test('a held dictation never reaches a session that replaced its own', async ($, on) => {
   const h = harness(on)
   await held($, h)
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  await cleared($, h, 's2')
   await h.settle()
   await toolCall($, 'tu1')
   await $.turn.complete(ended())

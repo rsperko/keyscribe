@@ -142,6 +142,18 @@ struct CodexHostTests {
         #expect(why.contains("Codex"))
     }
 
+    @Test func aDaemonThatIsNotRunningSaysHowToReachACodexAlreadyRunningWithoutIt() async throws {
+        let (host, daemon, _) = try rig()
+        daemon.stop()
+        guard case .unreadable(let why) = await host.scan() else {
+            Issue.record("listed")
+            return
+        }
+        #expect(why.contains("--no-daemon"))
+        #expect(why.contains("codex app-server --listen unix://"))
+        #expect(why.contains("codex --remote unix://"))
+    }
+
     @Test func withNoCodexHomeEnrolledOrNoCodexInstalledTheHostIsOff() {
         #expect(!CodexHost(enrolled: { [] }, installed: { true }).isEnabled)
         #expect(!CodexHost(enrolled: { ["/tmp/x"] }, installed: { false }).isEnabled)
@@ -329,7 +341,19 @@ struct CodexHostTests {
         defer { daemon.stop() }
         _ = await host.scan()
         #expect(await host.deliver("run the tests", images: [], request: "r1", to: location(daemon)) == .accepted)
-        #expect(changes.all.contains(.delivered(request: "r1", at: location(daemon), turn: "turn-ours")))
+        #expect(changes.all.contains(.delivered(request: "r1", at: location(daemon), turn: "turn-ours", position: 0)))
+    }
+
+    @Test func aTurnsRecordListsOnlyKeyScribesOwnMessagesInTheOrderCodexTookThem() async throws {
+        let (host, daemon, script) = try rig()
+        defer { daemon.stop() }
+        _ = await host.scan()
+        script.lock.withLock {
+            script.sentClient = CodexHost.messageId("r9")
+            script.clientAt = 1
+        }
+        #expect(await host.taken(in: "turn-ours", at: location(daemon)) == ["r9"])
+        #expect(await host.taken(in: "turn-other", at: location(daemon)) == nil)
     }
 
     @Test func aDeliveryConfirmedLaterStillNamesItsTurn() async throws {
@@ -337,9 +361,12 @@ struct CodexHostTests {
         let (host, daemon, script) = try rig(changes: changes)
         defer { daemon.stop() }
         _ = await host.scan()
-        script.lock.withLock { script.sentClient = CodexHost.messageId("r9") }
+        script.lock.withLock {
+            script.sentClient = CodexHost.messageId("r9")
+            script.clientAt = 2
+        }
         #expect(await host.confirm(request: "r9", at: location(daemon)) == true)
-        #expect(changes.all.contains(.delivered(request: "r9", at: location(daemon), turn: "turn-ours")))
+        #expect(changes.all.contains(.delivered(request: "r9", at: location(daemon), turn: "turn-ours", position: 2)))
     }
 
     @Test func pastedImagesTravelWithTheTextAsLocalImages() async throws {

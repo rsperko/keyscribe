@@ -69,7 +69,6 @@ final class AgentHub {
     var onForget: ((_ request: String) -> Void)?
     var onLeftInPromptBox: ((_ request: String, _ conversation: String, _ handle: String) -> Void)?
     var onChange: (() -> Void)?
-    var onFirstConnection: (() -> Void)?
     var onResult: ((_ conversation: String, _ handle: String, _ answer: String, _ requested: Bool, _ origin: String?, _ cause: SpokenResult.Cause?) -> Void)?
     var onEnded: ((_ conversation: String, _ handle: String, _ body: String, _ requested: Bool, _ origin: String?) -> Void)?
     var onAttention: ((_ conversation: String, _ handle: String, _ attention: AgentAttention?, _ requested: Bool) -> Void)?
@@ -86,7 +85,11 @@ final class AgentHub {
     var bundledVersion: (_ agent: String) -> String? = { _ in nil }
     private var awaitingResult: [String: String] = [:]
     private var awaitedRequests: [String: String] = [:]
-    private var nextTyped: [String: TypedTurn] = [:]
+    private var nextTyped: [String: PromptBoxTake] = [:]
+    private var steersWaiting: [String: [WaitingSteer]] = [:]
+    private var awaitedStamp: [String: Int] = [:]
+    private var takenIn: [String] = []
+    private var stamps = 0
     private var filed: [String: Filing] = [:]
     private var inHosts: [String: String] = [:]
     private var rehelloAsked: Set<String> = []
@@ -96,16 +99,19 @@ final class AgentHub {
     private var hostFollows: [String: [HostFollow]] = [:]
     private var endedTurns: [String: [EndedTurn]] = [:]
     private var continuing: [String: (request: String, at: Date)] = [:]
-    private var namedTurns: [String: [(turn: String, request: String)]] = [:]
+    private var namedTurns: [String: [(turn: String, request: String, stamp: Int)]] = [:]
     private var delivering: [String: String] = [:]
     private var linked: [String: String] = [:]
     private var matched: Set<String> = []
     private var heldResults: [String: () -> Void] = [:]
     private var uncertainHosted: [String: (handle: String, conversation: String, withDraft: Bool)] = [:]
-    private struct TypedTurn {
+    private struct PromptBoxTake {
         var request: String
         var typedAt: Date?
-        var prompt: String?
+    }
+    private struct WaitingSteer {
+        var request: String
+        var prompt: String
     }
     var typedTurnWindow: TimeInterval = 5
     private var requested: Set<String> = []
@@ -172,7 +178,7 @@ final class AgentHub {
     private var environments: [String: [String: String]] = [:]
     private var prompts: [String: Int] = [:]
     private var typedCounts: [String: Int] = [:]
-    private var absorbed: [String: (turn: String, prompt: String)] = [:]
+    private var absorbed: [String: [(turn: String, prompt: String, stamp: Int)]] = [:]
     private struct Steered {
         let wire: String
         let request: String
@@ -256,9 +262,9 @@ final class AgentHub {
                 Task { [weak self] in await self?.rescan(rereadingTitles: false) }
             case .event(let event):
                 self.handle(event.renamingSession { AgentSessionID.make(agent: agent, native: $0) })
-            case .delivered(let request, let location, let turn):
+            case .delivered(let request, let location, let turn, let position):
                 guard location.host == agent else { return }
-                self.followDelivered(request, turn: turn, in: AgentSessionID.make(agent: agent, native: location.conversationKey))
+                self.followDelivered(request, turn: turn, position: position, in: AgentSessionID.make(agent: agent, native: location.conversationKey))
             case .state(let location, let state):
                 guard location.host == agent, let listed = self.lastScan[agent],
                       listed.contains(where: { $0.id == location.conversationKey })
@@ -357,8 +363,6 @@ final class AgentHub {
     }
 
     var rows: [String] { directory.conversations.map(\.id) }
-
-    var hasConnectedConversation: Bool { directory.conversations.contains(where: \.connectorLive) }
 
     var watchedFolders: [URL] { discoveries.flatMap(\.watchedFolders) }
 
@@ -600,6 +604,12 @@ final class AgentHub {
         return front?.id == id
     }
 
+    func showsInFront(_ id: String, glancing front: AgentFronting) async -> Bool {
+        if await hostShows(id) == true { return true }
+        guard (directory.conversations + disconnected).first(where: { $0.id == id })?.pid != nil else { return false }
+        return await front.shown(among: frontCandidates, asking: { _ in })?.id == id
+    }
+
     private func inFront(of source: HostDiscovery) async -> FrontSession? {
         let mine = (directory.conversations + disconnected).filter { $0.host?.host == source.kind.id }
         guard !mine.isEmpty else { return nil }
@@ -828,6 +838,7 @@ final class AgentHub {
         let task = Task { @MainActor [weak self] in
             var rereading = rereadingTitles
             repeat {
+                rereading = rereading || self?.rereadWanted == true
                 self?.rescanWanted = false
                 self?.rereadWanted = false
                 await self?.scanOnce(rereadingTitles: rereading)
@@ -899,7 +910,6 @@ final class AgentHub {
         scanTask = nil
         placeTracker?.stop()
         onChange = nil
-        onFirstConnection = nil
         onNotice = nil
         onForget = nil
         onResult = nil
@@ -1124,9 +1134,7 @@ final class AgentHub {
         for session in live.subtracting(liveSessions).subtracting(tracked) {
             onAttention?(session, handle(of: session) ?? "", nil, false)
         }
-        let firstConnection = liveSessions.isEmpty && !live.isEmpty
         liveSessions = live
-        if firstConnection { onFirstConnection?() }
         waitingPrompts = waitingPrompts.filter { live.contains($0.key) }
     }
 
@@ -1355,6 +1363,7 @@ final class AgentHub {
         awaitingResult = awaitingResult.filter { kept($0.key) }
         awaitedRequests = awaitedRequests.filter { kept($0.key) }
         nextTyped = nextTyped.filter { kept($0.key) }
+        steersWaiting = steersWaiting.filter { kept($0.key) }
         absorbed = absorbed.filter { kept($0.key) }
         requested = requested.filter(kept)
         nextRequested = nextRequested.filter(kept)
@@ -1482,18 +1491,21 @@ final class AgentHub {
             clearHandOff(request)
             settle(request, .notSent(requests[request]?.handle, reason: .connectorNotRunning))
             releaseHeld()
-        case .absorbed(let session, let turn, let prompt):
-            if let pending = nextTyped[session], pending.prompt == prompt {
-                nextTyped[session] = nil
-                follow(turn, of: session, for: pending.request)
+        case .absorbed(let session, let turn, let prompt, let wire):
+            let stamp = nextStamp()
+            if let wire, let request = request(sentAs: wire, to: session) {
+                steersWaiting[session]?.removeAll { $0.request == request }
+                takenIn = Array((takenIn + [request]).suffix(Self.steeredLimit))
+                follow(turn, of: session, for: request, stamp: stamp)
+            } else if let pending = takeWaitingSteer(prompt, in: session) {
+                follow(turn, of: session, for: pending.request, stamp: stamp)
             } else {
-                absorbed[session] = (turn, prompt)
+                absorbed[session] = Array((absorbed[session, default: []] + [(turn, prompt, stamp)]).suffix(Self.steeredLimit))
             }
         case .typed(let session, let count):
             typedCounts[session, default: 0] += 1
-            if let pending = nextTyped[session] {
-                if pending.typedAt == nil { nextTyped[session]?.typedAt = now() } else { nextTyped[session] = nil }
-            }
+            if nextTyped[session] != nil, nextTyped[session]?.typedAt == nil { nextTyped[session]?.typedAt = now() } else { nextTyped[session] = nil }
+            steersWaiting[session] = nil
             if let count { prompts[session] = count }
             for (id, entry) in requests where entry.message.conversation == session {
                 requests[id]?.followsNextTurn = false
@@ -1503,29 +1515,30 @@ final class AgentHub {
             if handle(of: session) != nil { noteUsed(session) }
         case .turnStarted(let session, let turn, let prompt):
             if let awaited = awaitingResult[session], awaited != turn { stopAwaiting(session) }
-            if let named = takeNamed(turn, in: session) { follow(turn, of: session, for: named) }
+            if let named = takeNamed(turn, in: session) { follow(turn, of: session, for: named.request, stamp: named.stamp) }
             if nextRequested.remove(session) != nil { waitForReply(turn, of: session, requested: true) }
             if reportsAccepted(session) {
                 attendHosted(turn, of: session, prompt: prompt)
             } else if let prompt, !followHosted(turn, of: session, prompt: prompt), let waiting = hostFollows[session]?.filter({ !$0.named }), !waiting.isEmpty {
                 Log.agents.info("a turn in \(self.handle(of: session) ?? "a conversation", privacy: .private) matched none of the \(waiting.count) dictations sent to it, so its reply won't be read aloud")
             }
-            let awaitsAbsorbed = prompt == nil && nextTyped[session]?.prompt != nil
-            if !awaitsAbsorbed, let pending = nextTyped.removeValue(forKey: session), let typedAt = pending.typedAt,
-               pending.prompt.map({ $0 == prompt }) ?? (now().timeIntervalSince(typedAt) <= typedTurnWindow) {
-                waitForReply(turn, of: session, requested: false)
-                awaitedRequests[session] = pending.request
-                forgetSteered { $0.request == pending.request }
+            if let prompt, let pending = takeWaitingSteer(prompt, in: session) {
+                if awaitingResult[session] != turn { stopAwaiting(session) }
+                follow(turn, of: session, for: pending.request, stamp: Self.opening)
+            } else if let pending = nextTyped.removeValue(forKey: session), let typedAt = pending.typedAt,
+                      now().timeIntervalSince(typedAt) <= typedTurnWindow {
+                if awaitingResult[session] != turn { stopAwaiting(session) }
+                follow(turn, of: session, for: pending.request, stamp: Self.opening)
             }
             if let pending = handingOff[session], requests[pending] != nil { requests[pending]?.turnDuringHandOff = .started(turn) }
             if let (request, _) = requests.first(where: { $0.value.message.conversation == session && $0.value.followsNextTurn }) {
                 requests[request]?.followsNextTurn = false
-                follow(turn, of: session, for: request)
+                follow(turn, of: session, for: request, stamp: Self.opening)
             }
             handingOff[session] = nil
             running[session] = now()
             turns[session] = turn
-            if hasHostPlugin(session) { Task { [weak self] in await self?.rescan(rereadingTitles: false) } }
+            Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         case .turnComplete(let session, let reason, let answer, let after, let turn):
             let hosted = hosts.contains { $0.kind.id == AgentSessionID.agent(of: session) }
             let ended = turn ?? (hosted ? turns[session] : nil)
@@ -1538,13 +1551,24 @@ final class AgentHub {
             let startedAt = running[session] ?? now()
             running[session] = nil
             turns[session] = nil
-            let named = ended.flatMap { takeNamed($0, in: session) }
+            let named = ended.flatMap { takeNamed($0, in: session) }?.request
             let awaitedHere = awaitingResult[session].map { awaited in !hosted || ended.map { $0 == awaited } ?? true } ?? false
-            let claimed = named != nil || awaitedHere
-            if let ended, hostFollows[session]?.contains(where: \.named) == true {
-                remember(EndedTurn(turn: ended, at: now(), reason: reason, answer: claimed ? "" : answer, after: after, claimed: claimed), in: session)
+            let outstanding = hostFollows[session, default: []].filter(\.named).map(\.request)
+            let known = named ?? (awaitedHere ? awaitedRequests[session] : nil)
+            let contested = hosted && !reportsAccepted(session) && !outstanding.isEmpty && (known != nil || outstanding.count > 1)
+            let claimed = known != nil && !contested
+            if let ended, !outstanding.isEmpty {
+                var record = EndedTurn(turn: ended, at: now(), reason: reason, answer: claimed ? "" : answer, after: after, claimed: claimed)
+                record.settling = contested
+                remember(record, in: session)
             }
-            if let named {
+            if contested, let ended {
+                let wasRequested = awaitedHere && requested.contains(session)
+                if awaitedHere { stopAwaiting(session) }
+                settleFromRecord(
+                    ended, of: session, candidates: outstanding + [known].compactMap { $0 }, firstKnown: known, reason: reason,
+                    answer: answer, after: after, wasRequested: wasRequested)
+            } else if let named {
                 report(reason: reason, answer: answer, after: after, of: session, origin: named, wasRequested: false)
             } else if hosted, reportsAccepted(session) {
                 settleHostedTurn(reason: reason, answer: answer, after: after, of: session, awaited: awaitedHere, startedAt: startedAt)
@@ -1635,14 +1659,19 @@ final class AgentHub {
         var answer: String
         var after: AgentTurnInput?
         var claimed: Bool
+        var settling = false
+        var reportedWhileSettling: [String] = []
     }
+
+    static let turnRecordBudget: Duration = .seconds(2)
 
     static let endedTurnMemory: TimeInterval = 120
     static let endedTurnLimit = 8
 
-    private func takeNamed(_ turn: String, in session: String) -> String? {
+    private func takeNamed(_ turn: String, in session: String) -> (request: String, stamp: Int)? {
         guard let index = namedTurns[session]?.firstIndex(where: { $0.turn == turn }) else { return nil }
-        return namedTurns[session]?.remove(at: index).request
+        guard let named = namedTurns[session]?.remove(at: index) else { return nil }
+        return (named.request, named.stamp)
     }
 
     private func remember(_ ended: EndedTurn, in session: String) {
@@ -1705,7 +1734,7 @@ final class AgentHub {
             return false
         }
         if delivering[request] != nil { matched.insert(request) }
-        follow(turn, of: session, for: request)
+        follow(turn, of: session, for: request, stamp: Self.opening)
         announceSent(request, in: session)
         return true
     }
@@ -1725,7 +1754,7 @@ final class AgentHub {
     }
 
     private func followRunning(_ turn: String, of session: String, for request: String) {
-        if reportsAccepted(session) { attend(turn, of: session) } else { follow(turn, of: session, for: request) }
+        if reportsAccepted(session) { attend(turn, of: session) } else { follow(turn, of: session, for: request, stamp: nextStamp()) }
     }
 
     private func attend(_ turn: String, of session: String) {
@@ -1801,20 +1830,59 @@ final class AgentHub {
         }
     }
 
-    private func followDelivered(_ request: String, turn: String, in session: String) {
-        guard let index = hostFollows[session]?.firstIndex(where: { $0.request == request }) else { return }
+    private func followDelivered(_ request: String, turn: String, position: Int?, in session: String) {
+        guard resolveHosted(request, in: session) else { return }
+        if let ended = endedTurns[session]?.firstIndex(where: { $0.turn == turn }), let record = endedTurns[session]?[ended] {
+            if record.settling { return endedTurns[session]?[ended].reportedWhileSettling.append(request) ?? () }
+            guard !record.claimed else { return }
+            endedTurns[session]?[ended].claimed = true
+            endedTurns[session]?[ended].answer = ""
+            return report(reason: record.reason, answer: record.answer, after: record.after, of: session, origin: request, wasRequested: false)
+        }
+        let stamp = position ?? nextStamp()
+        guard let awaited = awaitingResult[session], awaited != turn else { return follow(turn, of: session, for: request, stamp: stamp) }
+        if let earlier = namedTurns[session]?.first(where: { $0.turn == turn }), earlier.stamp >= stamp { return }
+        namedTurns[session] = Array((namedTurns[session, default: []].filter { $0.turn != turn } + [(turn, request, stamp)]).suffix(Self.hostFollowLimit))
+    }
+
+    @discardableResult
+    private func resolveHosted(_ request: String, in session: String) -> Bool {
+        guard let index = hostFollows[session]?.firstIndex(where: { $0.request == request }) else { return false }
         hostFollows[session]?.remove(at: index)
         if delivering[request] != nil { matched.insert(request) }
         announceSent(request, in: session)
-        guard let ended = endedTurns[session]?.firstIndex(where: { $0.turn == turn }), let record = endedTurns[session]?[ended] else {
-            guard let awaited = awaitingResult[session], awaited != turn else { return follow(turn, of: session, for: request) }
-            namedTurns[session] = Array((namedTurns[session, default: []].filter { $0.turn != turn } + [(turn, request)]).suffix(Self.hostFollowLimit))
-            return
+        return true
+    }
+
+    private func settleFromRecord(
+        _ turn: String, of session: String, candidates: [String], firstKnown: String?, reason: String, answer: String,
+        after: AgentTurnInput?, wasRequested: Bool
+    ) {
+        let agent = AgentSessionID.agent(of: session)
+        guard let source = hosts.first(where: { $0.kind.id == agent }),
+              let location = (directory.conversations + disconnected).first(where: { $0.id == session })?.host
+        else { return decide(turn, of: session, record: nil, candidates: candidates, firstKnown: firstKnown, reason: reason, answer: answer, after: after, wasRequested: wasRequested) }
+        Task { [weak self] in
+            let record = await Self.within(Self.turnRecordBudget, otherwise: nil) { await source.host.taken(in: turn, at: location) }
+            self?.decide(turn, of: session, record: record, candidates: candidates, firstKnown: firstKnown, reason: reason, answer: answer, after: after, wasRequested: wasRequested)
         }
-        guard !record.claimed else { return }
+    }
+
+    private func decide(
+        _ turn: String, of session: String, record: [String]?, candidates: [String], firstKnown: String?, reason: String, answer: String,
+        after: AgentTurnInput?, wasRequested: Bool
+    ) {
+        guard !stopped, !exclusions.excludes(session),
+              let ended = endedTurns[session]?.firstIndex(where: { $0.turn == turn && $0.settling })
+        else { return }
+        let late = endedTurns[session]?[ended].reportedWhileSettling ?? []
+        let ours = record?.filter(candidates.contains) ?? []
+        for request in ours { resolveHosted(request, in: session) }
+        endedTurns[session]?[ended].settling = false
+        guard let origin = ours.last ?? firstKnown ?? late.first else { return }
         endedTurns[session]?[ended].claimed = true
         endedTurns[session]?[ended].answer = ""
-        report(reason: record.reason, answer: record.answer, after: record.after, of: session, origin: request, wasRequested: false)
+        report(reason: reason, answer: answer, after: after, of: session, origin: origin, wasRequested: wasRequested)
     }
 
     private func announce(result origin: String?, _ speak: @escaping () -> Void) {
@@ -1997,7 +2065,7 @@ final class AgentHub {
     }
 
     func awaitTypedTurn(of session: String, request: String) {
-        nextTyped[session] = TypedTurn(request: request)
+        nextTyped[session] = PromptBoxTake(request: request)
     }
 
     func forgetTypedTurn(of session: String, request: String) {
@@ -2007,6 +2075,7 @@ final class AgentHub {
     private func stopAwaiting(_ session: String) {
         awaitingResult[session] = nil
         awaitedRequests[session] = nil
+        awaitedStamp[session] = nil
         if requested.remove(session) != nil { onChange?() }
     }
 
@@ -2096,15 +2165,14 @@ final class AgentHub {
             Log.agents.notice("delivery confirmed late: \(fact.value, privacy: .public)")
         }
         let conversation = requests[request]?.message.conversation
-        if let conversation, turn.isEmpty, features(of: conversation).contains("steer"), let entry = requests[request] {
+        if let conversation, turn.isEmpty, features(of: conversation).contains("steer"), !takenIn.contains(request), let entry = requests[request] {
             steered.append(Steered(wire: entry.wire, request: request, handle: entry.handle, conversation: conversation))
             if steered.count > Self.steeredLimit, let oldest = steered.first { forgetSteered { $0.wire == oldest.wire } }
             followSteer(of: conversation, for: request, text: entry.message.text)
         }
-        if let conversation, !turn.isEmpty, awaitingResult[conversation] != turn {
-            stopAwaiting(conversation)
-            awaitingResult[conversation] = turn
-            awaitedRequests[conversation] = request
+        if let conversation, !turn.isEmpty {
+            if awaitingResult[conversation] != turn { stopAwaiting(conversation) }
+            follow(turn, of: conversation, for: request, stamp: Self.opening)
         }
         let handle = requests[request]?.handle ?? ""
         settle(request, report.withDraft ? .sentWithDraft(handle) : .sent(handle))
@@ -2114,11 +2182,26 @@ final class AgentHub {
         }
     }
 
-    private func follow(_ turn: String, of conversation: String, for request: String) {
+    private static let opening = 0
+
+    private func nextStamp() -> Int {
+        stamps += 1
+        return stamps
+    }
+
+    private func follow(_ turn: String, of conversation: String, for request: String, stamp: Int) {
         defer { forgetSteered { $0.request == request } }
-        guard awaitingResult[conversation] == nil else { return }
-        waitForReply(turn, of: conversation, requested: false)
+        if let awaited = awaitingResult[conversation] {
+            guard awaited == turn, awaitedRequests[conversation] != request, stamp > awaitedStamp[conversation] ?? 0 else { return }
+            if let earlier = awaitedRequests[conversation] {
+                _ = forgetAsked(earlier)
+                trace(earlier) { $0.followedTurn = nil }
+            }
+        } else {
+            waitForReply(turn, of: conversation, requested: false)
+        }
         awaitedRequests[conversation] = request
+        awaitedStamp[conversation] = stamp
         trace(request) { $0.followedTurn = now() }
     }
 
@@ -2204,6 +2287,7 @@ final class AgentHub {
 
     private func refuseSteered(_ late: Steered, reason: String) {
         if nextTyped[late.conversation]?.request == late.request { nextTyped[late.conversation] = nil }
+        steersWaiting[late.conversation]?.removeAll { $0.request == late.request }
         if reason == "filled", let onLeftInPromptBox {
             filledWires[late.request] = late.wire
             guard leftInBox[late.conversation] == nil else {
@@ -2326,12 +2410,25 @@ final class AgentHub {
     }
 
     func followSteer(of conversation: String, for request: String, text: String) {
+        guard !takenIn.contains(request) else { return }
         let prompt = AgentPromptDigest.of(text)
-        if let early = absorbed.removeValue(forKey: conversation), early.prompt == prompt {
-            follow(early.turn, of: conversation, for: request)
+        if let index = absorbed[conversation]?.firstIndex(where: { $0.prompt == prompt }),
+           let early = absorbed[conversation]?.remove(at: index) {
+            follow(early.turn, of: conversation, for: request, stamp: early.stamp)
             return
         }
-        nextTyped[conversation] = TypedTurn(request: request, typedAt: now(), prompt: prompt)
+        steersWaiting[conversation] = Array((steersWaiting[conversation, default: []] + [WaitingSteer(request: request, prompt: prompt)]).suffix(Self.steeredLimit))
+    }
+
+    private func takeWaitingSteer(_ prompt: String, in conversation: String) -> WaitingSteer? {
+        guard let index = steersWaiting[conversation]?.firstIndex(where: { $0.prompt == prompt }) else { return nil }
+        return steersWaiting[conversation]?.remove(at: index)
+    }
+
+    private func request(sentAs wire: String, to conversation: String) -> String? {
+        if let held = steered.first(where: { $0.wire == wire && $0.conversation == conversation }) { return held.request }
+        if let (id, _) = requests.first(where: { $0.value.wire == wire && $0.value.message.conversation == conversation }) { return id }
+        return filledWires.first { $0.value == wire }?.key
     }
 
     private func handOff(_ message: AgentOutbox.Message, handle: String, box: Bool = false, merge: Bool = false) {
@@ -2365,7 +2462,7 @@ final class AgentHub {
         let conversation = entry.message.conversation
         let follows = follows && !entry.typedSince
         switch entry.turnDuringHandOff {
-        case .started(let turn)? where follows: follow(turn, of: conversation, for: request)
+        case .started(let turn)? where follows: follow(turn, of: conversation, for: request, stamp: Self.opening)
         case nil where follows: requests[request]?.followsNextTurn = true
         default: break
         }
@@ -2546,14 +2643,13 @@ final class AgentRuntime {
     private let server: AgentBridgeServer
     private var pace: Task<Void, Never>?
     private var watcher: FolderWatcher?
-    private var quick = false
     private var stopped = false
     var settingsOpen = false {
         didSet { if settingsOpen && !oldValue { wake() } }
     }
 
-    static func rescanInterval(connected: Bool, settingsOpen: Bool) -> Duration {
-        connected || settingsOpen ? .seconds(1) : .seconds(10)
+    static func rescanInterval(settingsOpen: Bool) -> Duration {
+        settingsOpen ? .seconds(1) : .seconds(10)
     }
 
     static func places(surfaces: ResolvedSurfaces, sources: [any AgentPlaceReading]) -> CombinedPlaceReader {
@@ -2620,11 +2716,8 @@ final class AgentRuntime {
             processEnvironment: { pid, keys in SystemTerminalFacts.arguments(of: pid, keeping: keys)?.environment ?? [:] },
             processParent: { SystemTerminalFacts.parent(of: $0) })
         box.hub = hub
+        server.onHangUp { Task { @MainActor in box.hub?.refresh() } }
         try server.start()
-        hub.onFirstConnection = { [weak self] in
-            guard self?.quick == false else { return }
-            self?.wake()
-        }
         Task { @MainActor [weak self] in
             await self?.hub.rescan()
             self?.wake()
@@ -2646,9 +2739,7 @@ final class AgentRuntime {
         hub.tickPlaces(settingsOpen: settingsOpen)
         await hub.rescan(rereadingTitles: false, wantingHosts: settingsOpen)
         watch(hub.watchedFolders)
-        let interval = Self.rescanInterval(connected: hub.hasConnectedConversation, settingsOpen: settingsOpen)
-        quick = interval == Self.rescanInterval(connected: true, settingsOpen: false)
-        return interval
+        return Self.rescanInterval(settingsOpen: settingsOpen)
     }
 
     private func watch(_ folders: [URL]) {

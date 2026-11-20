@@ -1194,7 +1194,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.live = false
         rig.hub.refresh()
-        #expect(!rig.hub.hasConnectedConversation)
+        #expect(rig.hub.directory.conversations.first { $0.id == "claude:s1" }?.connectorLive == false)
         rig.transport.live = true
         await take(rig)
         #expect(rosters(rig).compactMap { $0 }.first?.rows.first { $0.id == "claude:s1" }?.available == true)

@@ -8,6 +8,8 @@ enum ToolCLI {
         var text: String { String(decoding: output, as: UTF8.self) }
     }
 
+    static let workingFolder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library", isDirectory: true).path
+
     static func run(_ argv: [String], timeout: TimeInterval = 120, grace: TimeInterval = 2, environment: [String: String]? = nil) -> (Int32, String) {
         let ran = execute(argv, timeout: timeout, grace: grace, environment: environment)
         switch ran.end {
@@ -27,7 +29,7 @@ enum ToolCLI {
         process.executableURL = URL(fileURLWithPath: program)
         process.arguments = Array(argv.dropFirst())
         if let environment { process.environment = environment }
-        process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+        process.currentDirectoryURL = URL(fileURLWithPath: workingFolder, isDirectory: true)
         process.standardInput = FileHandle.nullDevice
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -88,7 +90,7 @@ enum ToolCLI {
         } else {
             posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
         }
-        posix_spawn_file_actions_addchdir_np(&actions, FileManager.default.homeDirectoryForCurrentUser.path)
+        posix_spawn_file_actions_addchdir_np(&actions, workingFolder)
         let arguments = argv.map { strdup($0) } + [nil]
         let variables = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { (arguments + variables).forEach { free($0) } }

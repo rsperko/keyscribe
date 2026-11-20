@@ -45,6 +45,31 @@ struct AgentProcessTableTests {
         #expect(world.listings == 2)
     }
 
+    @Test func anAgentIsClassifiedOncePerListingHoweverOftenItIsAsked() {
+        final class Checks: @unchecked Sendable { var count = 0 }
+        let world = World()
+        let checks = Checks()
+        world.processes = [process(10, name: "pi", arguments: ["pi"])]
+        world.running = [10]
+        let table = AgentProcessTable(rules: [.pi], maxAge: 5, home: "/Users/a", now: { world.now }, isRunning: {
+            checks.count += 1
+            return world.running.contains($0)
+        }) { _ in
+            world.listings += 1
+            return world.processes
+        }
+        let first = table.found(.pi)
+        #expect(first.candidates.map(\.pid) == [10])
+        let afterOne = checks.count
+        world.now += 4
+        #expect(table.found(.pi) == first)
+        #expect(table.found(.pi) == first)
+        #expect(checks.count == afterOne)
+        world.now += 1
+        _ = table.found(.pi)
+        #expect(checks.count > afterOne)
+    }
+
     @Test func aTableThatLearnsItsAgentsFromItsCallersListsAgainOnlyForAnAgentItHasNotSeen() {
         let world = World()
         let table = table(world, rules: [])

@@ -711,8 +711,10 @@ the rest of your `config.toml`, and other tools' hooks, stay as they were.
 
 KeyScribe lists the conversations Codex's app server holds, the one Codex conversations started the usual way in a
 terminal share. It never starts or stops that server: when it isn't running, Settings says so rather than showing no
-conversations. A Codex started with its own settings flags that keep it off the app server, and conversations in the
-ChatGPT app, are not listed. A conversation is named by its Codex title, unless you give it a KeyScribe name;
+conversations. A Codex started with `--no-daemon`, or one whose app server can't start, runs without it and is not
+listed; to reach it, run `codex app-server --listen unix://` and start Codex with `codex --remote unix://`. A Codex
+started with other settings flags that keep it off the app server, and conversations in the ChatGPT app, are not
+listed. A conversation is named by its Codex title, unless you give it a KeyScribe name;
 renaming it in KeyScribe also sets its name in Codex.
 
 What you dictate to an idle conversation starts its next turn, and what you dictate while it is working joins the

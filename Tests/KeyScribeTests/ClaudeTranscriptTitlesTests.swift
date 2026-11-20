@@ -30,30 +30,28 @@ struct ClaudeTranscriptTitlesTests {
         #expect(titles.generatedTitle == "Generated summary")
     }
 
-    @Test func aSessionsTranscriptGivesItsTitleAndIsRereadOnlyWhenItChangesAndNotTooOften() throws {
+    @Test func aSessionsTranscriptGivesItsTitleAndIsReadAgainAsSoonAsItChanges() throws {
         defer { try? FileManager.default.removeItem(at: dir) }
         let clock = Clock()
-        let titles = ClaudeTranscriptTitles(configDirs: [dir], now: { clock.now })
+        let titles = ClaudeTranscriptTitles(configDirs: [dir])
         try write([title("First")], modified: clock.now)
         #expect(titles.title(for: entry) == "First")
 
-        clock.now += 2
+        clock.now += 1
         try write([title("First"), title("Second")], modified: clock.now)
-        #expect(titles.title(for: entry) == "First")
-        clock.now += ClaudeTranscriptTitles.rereadInterval
         #expect(titles.title(for: entry) == "Second")
     }
 
     @Test func aRoutineCheckUsesWhatWasReadAndLooksOnlyForSessionsNeverSeen() throws {
         defer { try? FileManager.default.removeItem(at: dir) }
         let clock = Clock()
-        let titles = ClaudeTranscriptTitles(configDirs: [dir], now: { clock.now })
+        let titles = ClaudeTranscriptTitles(configDirs: [dir])
         let other = ClaudeRegistryEntry(pid: 2, sessionId: "s2", cwd: "/src/keyscribe", name: nil, status: "idle", waitingFor: nil)
         #expect(titles.titles(for: other, rereading: false) == .init())
         try write([title("First")], modified: clock.now)
         #expect(titles.titles(for: entry, rereading: false).generatedTitle == "First")
 
-        clock.now += ClaudeTranscriptTitles.rereadInterval
+        clock.now += 1
         try write([title("First"), title("Second")], modified: clock.now)
         #expect(titles.titles(for: entry, rereading: false).generatedTitle == "First")
         #expect(titles.titles(for: entry).generatedTitle == "Second")
@@ -65,14 +63,12 @@ struct ClaudeTranscriptTitlesTests {
         #expect(ClaudeTranscriptTitles(configDirs: [dir]).title(for: entry) == "Found")
     }
 
-    @Test func aMissingTranscriptIsLookedForAgainOnlyAfterAWhile() throws {
+    @Test func aMissingTranscriptIsLookedForAgainOnlyWhenAFreshReadIsAsked() throws {
         defer { try? FileManager.default.removeItem(at: dir) }
-        let clock = Clock()
-        let titles = ClaudeTranscriptTitles(configDirs: [dir], now: { clock.now })
+        let titles = ClaudeTranscriptTitles(configDirs: [dir])
         #expect(titles.title(for: entry) == nil)
-        try write([title("Late")], modified: clock.now)
-        #expect(titles.title(for: entry) == nil)
-        clock.now += ClaudeTranscriptTitles.rereadInterval
+        try write([title("Late")], modified: Date())
+        #expect(titles.titles(for: entry, rereading: false) == .init())
         #expect(titles.title(for: entry) == "Late")
     }
 

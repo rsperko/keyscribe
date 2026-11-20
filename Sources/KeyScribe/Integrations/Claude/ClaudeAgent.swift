@@ -10,15 +10,36 @@ final class ClaudeDiscovery: AgentDiscovery {
     private let isRunning: @Sendable (Int) -> Bool
     private var lastByFolder: [String: [ClaudeRegistryEntry]] = [:]
     private(set) var watchedFolders: [URL] = []
+    private let now: () -> Date
+    private var titleWatches: [String: (until: Date, checked: Date?)] = [:]
+
+    nonisolated static let titleWatch: TimeInterval = 120
+    nonisolated static let titleRecheck: TimeInterval = 5
+
+    func observe(_ event: AgentEvent) {
+        if case .turnComplete(let session, _, _, _, _) = event {
+            titleWatches[session] = (now().addingTimeInterval(Self.titleWatch), nil)
+        }
+    }
+
+    private func titlesDue() -> Set<String> {
+        let at = now()
+        titleWatches = titleWatches.filter { $0.value.until > at }
+        let due = titleWatches.filter { $0.value.checked.map { at.timeIntervalSince($0) >= Self.titleRecheck } ?? true }.keys
+        for session in due { titleWatches[session]?.checked = at }
+        return Set(due)
+    }
 
     nonisolated static let partialProblem = "Some Claude Code session lists couldn\u{2019}t be read. Conversations seen earlier stay listed."
 
     init(
         scanEach: @escaping @Sendable () -> ClaudeRegistryScanner.Scan, titles: ClaudeTranscriptTitles? = nil,
         stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning,
-        isRunning: @escaping @Sendable (Int) -> Bool = ProcessStart.isRunning(pid:)
+        isRunning: @escaping @Sendable (Int) -> Bool = ProcessStart.isRunning(pid:),
+        now: @escaping () -> Date = Date.init
     ) {
         scanRegistry = scanEach
+        self.now = now
         self.titles = titles
         running = stillRunning
         self.isRunning = isRunning
@@ -26,11 +47,11 @@ final class ClaudeDiscovery: AgentDiscovery {
 
     convenience init(
         scan: @escaping @Sendable () -> [ClaudeRegistryEntry]?, titles: ClaudeTranscriptTitles? = nil,
-        stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning
+        stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning, now: @escaping () -> Date = Date.init
     ) {
         self.init(
             scanEach: { scan().map { ClaudeRegistryScanner.Scan(entries: $0, unreadable: []) } ?? ClaudeRegistryScanner.Scan(entries: [], unreadable: [Self.unknownFolder]) },
-            titles: titles, stillRunning: stillRunning)
+            titles: titles, stillRunning: stillRunning, now: now)
     }
 
     convenience init(
@@ -60,7 +81,7 @@ final class ClaudeDiscovery: AgentDiscovery {
     }
 
     func scan(rereadingTitles: Bool) async -> AgentScan {
-        let (scanRegistry, titles, previous, isRunning) = (scanRegistry, titles, lastByFolder, isRunning)
+        let (scanRegistry, titles, previous, isRunning, due) = (scanRegistry, titles, lastByFolder, isRunning, titlesDue())
         let (scan, kept, watched) = await Task.detached { () -> (AgentScan, [String: [ClaudeRegistryEntry]], [String]) in
             let found = scanRegistry()
             var entries = found.entries
@@ -74,7 +95,7 @@ final class ClaudeDiscovery: AgentDiscovery {
             titles?.forget(keeping: Set(entries.map(\.sessionId)))
             let sessions = entries.map { entry in
                 var session = entry.session
-                if let recorded = titles?.titles(for: entry, rereading: rereadingTitles) {
+                if let recorded = titles?.titles(for: entry, rereading: rereadingTitles || due.contains(entry.sessionId)) {
                     session.title = AgentTitle(
                         explicitName: recorded.explicitName, generatedTitle: recorded.generatedTitle ?? session.title.generatedTitle)
                 }
@@ -109,7 +130,7 @@ extension AgentHub {
         stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning
     ) {
         self.init(
-            transport: transport, discovery: [ClaudeDiscovery(scan: scan, titles: transcriptTitles, stillRunning: stillRunning)],
+            transport: transport, discovery: [ClaudeDiscovery(scan: scan, titles: transcriptTitles, stillRunning: stillRunning, now: now)],
             names: names, focus: focus, front: front, glance: glance, receiptTimeout: receiptTimeout, handOffLimit: handOffLimit,
             checkWait: checkWait, disconnectGrace: disconnectGrace, scanDeadline: scanDeadline, places: places, now: now, makeId: makeId)
     }

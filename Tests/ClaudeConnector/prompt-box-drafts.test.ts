@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { absorbedText, boxCommand, checkCommand, digest, harness, held, mergeCommand, outcome, promptBox, readyBox, steered, submitCommand, toolCall } from './support'
+import { absorbedText, boxCommand, checkCommand, digest, harness, held, mergeCommand, outcome, promptBox, readyBox, steered, submitCommand, toolCall, queuedCommand, cleared } from './support'
 
 test('an MCP question keeps the box from reading ready while it may not be drawn yet', async ($, on) => {
   const h = harness(on)
@@ -20,16 +20,16 @@ test('an MCP question keeps the box from reading ready while it may not be drawn
 test('a prompt-box dictation the running turn takes in is reported as absorbed into that turn', async ($, on) => {
   const h = harness(on)
   await readyBox($, h)
-  await h.typed($, 'run the tests')
-  await $.prompt.attachment({ type: 'queued_command', text: absorbedText('run the tests'), origin: { kind: 'engine' } } as any)
+  await h.typed($, 'run the tests', 't1')
+  await $.session.append(queuedCommand('run the tests') as any)
   await h.answerEvents()
-  expect(h.events().filter((b: any) => b.op === 'absorbed')).toMatchObject([{ op: 'absorbed', session: 's1', turn: 't1', prompt: expect.any(String) }])
+  expect(h.events().filter((b: any) => b.op === 'absorbed')).toMatchObject([{ op: 'absorbed', session: 's1', turn: 't1', prompt: expect.any(String), request: 'r1' }])
 })
 
 test('another message the running turn takes in is never reported as the dictation', async ($, on) => {
   const h = harness(on)
   await readyBox($, h)
-  await $.prompt.attachment({ type: 'queued_command', text: absorbedText('something else'), origin: { kind: 'engine' } } as any)
+  await $.session.append(queuedCommand('something else') as any)
   await h.answerEvents()
   expect(h.events().filter((b: any) => b.op === 'absorbed')).toEqual([])
 })
@@ -60,9 +60,7 @@ test('a dictation for the prompt box whose clock read is pending when its sessio
   await h.settle()
   expect(h.clockHold.held.length).toBeGreaterThan(0)
   h.clockHold.on = false
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
-  h.live.session = 's2'
+  await cleared($, h, 's2')
   await h.settle()
   for (const release of h.clockHold.held.splice(0)) release()
   await h.settle()
@@ -124,8 +122,8 @@ test('a dictation joined to a draft while a turn runs is reported absorbed under
   await h.deliver([{ ...mergeCommand(), box: true }])
   await h.answerEvents()
   expect(outcome(h)).toEqual(['ack', 'joinedMidTurn'])
-  await h.typed($, 'half a thought run the tests')
-  await $.prompt.attachment({ type: 'queued_command', text: absorbedText('half a thought run the tests'), origin: { kind: 'engine' } } as any)
+  await h.typed($, 'half a thought run the tests', 't1')
+  await $.session.append(queuedCommand('half a thought run the tests') as any)
   await h.answerEvents()
   expect(h.events().filter((b: any) => b.op === 'absorbed')).toMatchObject([{ turn: 't1', prompt: digest('run the tests') }])
 })

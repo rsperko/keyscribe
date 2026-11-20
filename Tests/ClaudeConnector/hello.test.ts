@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { harness, surfaces } from './support'
+import { harness, surfaces, cleared, resumed } from './support'
 
 test('a hello names the installation the connector was loaded from', async ($, on) => {
   const h = harness(on)
@@ -9,7 +9,6 @@ test('a hello names the installation the connector was loaded from', async ($, o
 
 test('a retire ends the connector for good without answering, even for a new session', async ($, on) => {
   const h = harness(on)
-  await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await h.connect($)
   await h.deliver([{ op: 'retire', id: 'x1' }])
   await h.answerEvents()
@@ -19,8 +18,7 @@ test('a retire ends the connector for good without answering, even for a new ses
 
   await h.clock.advance(120000)
   await h.settle()
-  h.live.session = 's2'
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  await cleared($, h, 's2')
   await h.settle()
   await h.clock.advance(120000)
   await h.settle()
@@ -30,7 +28,6 @@ test('a retire ends the connector for good without answering, even for a new ses
 
 test('a connector whose installation was replaced never reconnects, even for a new session', async ($, on) => {
   const h = harness(on)
-  await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await h.connect($)
   h.files['/plugin/keyscribe.json'] = JSON.stringify({ protocol: 2, socketPath: '/tmp/ks.sock', tokenPath: '/tmp/ks-token', readyPath: '/tmp/ks-ready.json', installation: 'I2', ...surfaces })
   h.open('/poll')[0].answer(409)
@@ -39,8 +36,7 @@ test('a connector whose installation was replaced never reconnects, even for a n
   await h.settle()
   const seen = h.requests.length
 
-  h.live.session = 's2'
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  await cleared($, h, 's2')
   await h.settle()
   await h.clock.advance(60000)
   await h.settle()
@@ -49,7 +45,6 @@ test('a connector whose installation was replaced never reconnects, even for a n
 
 test('a connector whose unchanged installation is refused never reconnects, even for a new session', async ($, on) => {
   const h = harness(on)
-  await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await h.connect($)
   h.open('/poll')[0].answer(409)
   await h.settle()
@@ -57,8 +52,7 @@ test('a connector whose unchanged installation is refused never reconnects, even
   await h.settle()
   const seen = h.requests.length
 
-  h.live.session = 's2'
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  await cleared($, h, 's2')
   await h.settle()
   await h.clock.advance(60000)
   await h.settle()
@@ -67,7 +61,6 @@ test('a connector whose unchanged installation is refused never reconnects, even
 
 test('an empty status from the app clears the line instead of leaving it blank', async ($, on) => {
   const h = harness(on)
-  await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await h.connect($)
   await h.deliver([{ op: 'status', id: 'r1', expectedSession: 's1', text: 'Dictating' }, { op: 'status', id: 'r2', expectedSession: 's1', text: '' }])
   await h.answerEvents()
@@ -76,7 +69,6 @@ test('an empty status from the app clears the line instead of leaving it blank',
 
 test('a session the module saw start says hello as fresh and idle', async ($, on) => {
   const h = harness(on)
-  await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
   expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'steer', 'merge'] })
@@ -112,6 +104,7 @@ test('hello outside zellij reports no terminal environment', async ($, on) => {
 
 test('a reloaded module does not know its turn and says hello as resuming after a gap', async ($, on) => {
   const h = harness(on)
+  h.live.rows = [{ type: 'user', uuid: 'u0' }]
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
   expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: true, idle: false })
@@ -119,11 +112,8 @@ test('a reloaded module does not know its turn and says hello as resuming after 
 
 test('a resumed session says hello as resuming after a gap', async ($, on) => {
   const h = harness(on)
-  await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await h.connect($)
-  await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'resume', session_id: 's0' })
-  await h.settle()
+  await resumed($, h, 's0')
   expect(h.events().slice(-1)[0]).toMatchObject({ op: 'hello', session: 's0', gap: true })
 })
 

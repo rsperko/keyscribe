@@ -51,7 +51,7 @@ public enum AgentHostChange: Equatable, Sendable {
     case listing
     case event(AgentEvent)
     case state(AgentHostLocation, AgentLiveState)
-    case delivered(request: String, at: AgentHostLocation, turn: String)
+    case delivered(request: String, at: AgentHostLocation, turn: String, position: Int? = nil)
 }
 
 public enum AgentHostFront: Equatable, Sendable {
@@ -94,6 +94,7 @@ public protocol AgentHost: AnyObject {
     func unwatch()
     var queuesInHub: Bool { get }
     func confirm(request: String, at location: AgentHostLocation) async -> Bool?
+    func taken(in turn: String, at location: AgentHostLocation) async -> [String]?
 }
 
 extension AgentHost {
@@ -118,6 +119,7 @@ extension AgentHost {
     public func unwatch() {}
     public var queuesInHub: Bool { false }
     public func confirm(request: String, at location: AgentHostLocation) async -> Bool? { nil }
+    public func taken(in turn: String, at location: AgentHostLocation) async -> [String]? { nil }
 }
 
 public struct AgentHostIntegration: Sendable {

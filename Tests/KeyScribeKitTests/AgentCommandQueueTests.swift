@@ -632,6 +632,8 @@ struct AgentBridgeCodecTests {
         #expect(event.session == "s1")
         #expect(event.renamingSession { "claude:" + $0 } == .absorbed(session: "claude:s1", turn: "t1", prompt: "abc"))
         #expect(throws: (any Error).self) { try AgentBridgeCodec.decodeEvent(Data(#"{"op":"absorbed","session":"s1","turn":"t1"}"#.utf8)) }
+        let named = try AgentBridgeCodec.decodeEvent(Data(#"{"op":"absorbed","session":"s1","turn":"t1","prompt":"abc","request":"r7"}"#.utf8))
+        #expect(named == .absorbed(session: "s1", turn: "t1", prompt: "abc", request: "r7"))
     }
 
     @Test func aSubmitWithoutADeadlineIsMalformed() {

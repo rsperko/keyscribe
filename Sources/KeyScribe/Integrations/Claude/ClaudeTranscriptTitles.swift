@@ -3,24 +3,20 @@ import KeyScribeKit
 
 final class ClaudeTranscriptTitles: @unchecked Sendable {
     static let tailBytes = 256 * 1024
-    static let rereadInterval: TimeInterval = 10
 
     private struct Cached {
         var url: URL
         var modified: Date
-        var readAt: Date
         var titles: ClaudeTranscriptTitle
     }
 
     private let configDirs: [URL]
-    private let now: @Sendable () -> Date
     private let lock = NSLock()
     private var cache: [String: Cached] = [:]
-    private var misses: [String: Date] = [:]
+    private var misses: Set<String> = []
 
-    init(configDirs: [URL], now: @escaping @Sendable () -> Date = Date.init) {
+    init(configDirs: [URL]) {
         self.configDirs = configDirs
-        self.now = now
     }
 
     func title(for entry: ClaudeRegistryEntry) -> String? {
@@ -34,32 +30,28 @@ final class ClaudeTranscriptTitles: @unchecked Sendable {
     private func read(_ entry: ClaudeRegistryEntry, rereading: Bool) -> ClaudeTranscriptTitle {
         if !rereading {
             if let cached = cache[entry.sessionId] { return cached.titles }
-            if misses[entry.sessionId] != nil { return .init() }
+            if misses.contains(entry.sessionId) { return .init() }
         }
         guard let url = cache[entry.sessionId]?.url ?? lookUp(entry), let modified = Self.modified(url) else { return .init() }
-        if let cached = cache[entry.sessionId], cached.url == url,
-           cached.modified == modified || now().timeIntervalSince(cached.readAt) < Self.rereadInterval {
-            return cached.titles
-        }
+        if let cached = cache[entry.sessionId], cached.url == url, cached.modified == modified { return cached.titles }
         let titles = Self.readTail(url).map { ClaudeTranscriptTitle.parse(in: $0.data, startsMidLine: $0.cut) } ?? .init()
-        cache[entry.sessionId] = Cached(url: url, modified: modified, readAt: now(), titles: titles)
+        cache[entry.sessionId] = Cached(url: url, modified: modified, titles: titles)
         return titles
     }
 
     func forget(keeping sessions: Set<String>) {
         lock.withLock {
             cache = cache.filter { sessions.contains($0.key) }
-            misses = misses.filter { sessions.contains($0.key) }
+            misses = misses.filter { sessions.contains($0) }
         }
     }
 
     private func lookUp(_ entry: ClaudeRegistryEntry) -> URL? {
-        if let missed = misses[entry.sessionId], now().timeIntervalSince(missed) < Self.rereadInterval { return nil }
         guard let url = locate(entry) else {
-            misses[entry.sessionId] = now()
+            misses.insert(entry.sessionId)
             return nil
         }
-        misses[entry.sessionId] = nil
+        misses.remove(entry.sessionId)
         return url
     }
 

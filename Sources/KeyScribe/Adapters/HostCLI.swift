@@ -104,7 +104,7 @@ public enum HostCLI {
             }
             posix_spawn_file_actions_adddup2(&actions, stdout, 1)
             posix_spawn_file_actions_adddup2(&actions, stderr, 2)
-            posix_spawn_file_actions_addchdir_np(&actions, FileManager.default.homeDirectoryForCurrentUser.path)
+            posix_spawn_file_actions_addchdir_np(&actions, ToolCLI.workingFolder)
             posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
             posix_spawnattr_setpgroup(&attributes, 0)
             let arguments = argv.map { strdup($0) } + [nil]

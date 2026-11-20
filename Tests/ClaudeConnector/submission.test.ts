@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { boxCommand, harness, held, outcome, submitCommand } from './support'
+import { boxCommand, harness, held, outcome, submitCommand, cleared } from './support'
 
 test('a dictation for the prompt box with no turn running is submitted as usual', async ($, on) => {
   const h = harness(on)
@@ -133,7 +133,6 @@ test('a dictation refused for a draft is delivered when sent again as its next a
 
 test('a submission whose deadline passes while the draft is being read is refused as expired and never submits', async ($, on) => {
   const h = harness(on)
-  await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await h.connect($)
   h.box.held = true
   await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: (await h.clock.now()) + 500, text: 'run the tests', expectedPrompts: 0 }])
@@ -147,13 +146,11 @@ test('a submission whose deadline passes while the draft is being read is refuse
 
 test('a session replaced while the draft is being read never submits', async ($, on) => {
   const h = harness(on)
-  await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await h.connect($)
   h.box.held = true
   await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   expect(h.reads.length).toBe(1)
-  h.live.session = 's2'
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  await cleared($, h, 's2')
   await h.settle()
   h.reads[0]()
   await h.answerEvents()
@@ -246,9 +243,7 @@ test('a submission whose clock read is still pending when its session is cleared
   await h.settle()
   expect(h.clockHold.held.length).toBeGreaterThan(0)
   h.clockHold.on = false
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
-  h.live.session = 's2'
+  await cleared($, h, 's2')
   await h.settle()
   for (const release of h.clockHold.held.splice(0)) release()
   await h.settle()
@@ -263,9 +258,7 @@ test('a submission still in flight when its session is cleared never confirms on
   h.submitHold.on = true
   await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
   await h.answerEvents()
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
-  h.live.session = 's2'
+  await cleared($, h, 's2')
   await h.settle()
   await h.answerEvents()
   h.releaseSubmits()
