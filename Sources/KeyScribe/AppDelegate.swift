@@ -42,6 +42,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkey: HotkeyMonitor!
     private var controller: DictationController!
     private var scriptedTakes: ScriptedTakeInbox?
+    private var scriptedReplies: ScriptedReplies?
     private var firstRun: FirstRunController?
     private var settingsController: SettingsController!
     private var notices = NoticesController()
@@ -80,6 +81,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let forceResumeOnboarding = CommandLine.arguments.contains("--resume-onboarding")
     private let forceFirstRun = CommandLine.arguments.contains("--first-run")
     private let openSettingsOnLaunch = CommandLine.arguments.contains("--open-settings")
+    private let listensForInput = !CommandLine.arguments.contains("--no-input")
     private let hudPreview = HUDPreview.state(from: CommandLine.arguments)
 
     public func applicationWillTerminate(_: Notification) {
@@ -268,11 +270,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.preloadActiveEngineIfNeeded()
         if let scriptedCapture {
             let engines = ScriptedEngines()
+            let replies = ScriptedReplies()
+            scriptedReplies = replies
             controller.engineForTake = engines.engine(for:)
             scriptedTakes = ScriptedTakeInbox(
                 folder: ScriptedTakeInbox.folder(supportDir: KeyScribePaths.supportDir),
                 runner: ScriptedTakeRunner(
-                    target: controller, capture: scriptedCapture, engines: engines, agentModesOnly: !KeyScribePaths.variant.isDev))
+                    target: controller, capture: scriptedCapture, engines: engines, agentModesOnly: !KeyScribePaths.variant.isDev,
+                    replies: replies))
             scriptedTakes?.start()
         }
         hud.appearance = settings.hud.appearance
@@ -299,7 +304,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             SpeechSilencer.shared.dictationHUD(visible: visible)
         }
         hud.onEscapeCancel = { [weak self] in
-            self?.hotkey.cancelGestures()
+            self?.hotkey?.cancelGestures()
             self?.controller.cancel()
             self?.refreshStatus()
         }
@@ -368,7 +373,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // Resync gesture state on every return to idle. A controller-side end (the recording limit, a mic error,
             // a separate stop key) drops the machine to idle while a PressGesture still thinks it is recording, so
             // the next tap-to-toggle press would emit .commit into an idle machine (a no-op).
-            self.hotkey.resetIdleGestures()
+            self.hotkey?.resetIdleGestures()
             guard self.pendingHotkeyRebuild else { return }
             self.pendingHotkeyRebuild = false
             self.buildHotkeyMonitor()
@@ -594,6 +599,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func buildHotkeyMonitor() {
+        guard listensForInput else { return }
         // One claimable set feeds BOTH shadowing and the bindings. Diverge here and a mode filtered out of
         // the bindings still claims the press in `shadowed`, which drops the mode that should have taken
         // it — leaving the key with no binding at all rather than the surviving one.
@@ -764,6 +770,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startListening() {
+        guard listensForInput else { return }
         // start() registers the Carbon chord hotkeys (no permission needed) regardless of the tap, and
         // creates the modifier-only event tap only when Accessibility is already granted — untrusted it
         // defers tap creation and returns false (leaving chords working). So chord triggers never depend on
@@ -901,10 +908,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         guard let self, self.answerOnPanel else { return true }
                         return self.answers?.isActive != true && self.answers?.showsText != true
                     })
-                runtime.hub.onResult = { [weak spoken] in
+                runtime.hub.onResult = { [weak spoken, weak self] in
+                    self?.scriptedReplies?.noteAnswer(origin: $4, answer: $2)
                     spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3, origin: $4, cause: $5)
                 }
-                runtime.hub.onEnded = { [weak spoken] in spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4) }
+                runtime.hub.onEnded = { [weak spoken, weak self] in
+                    self?.scriptedReplies?.noteEnded(origin: $4, body: $2)
+                    spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4)
+                }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
                 runtime.hub.onWithdraw = { [weak spoken] in spoken?.withdraw(conversation: $0) }
                 runtime.hub.speaks = { [weak self] in self?.settings.agents.spokenResult.enabled ?? false }

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import KeyScribeKit
 
@@ -105,6 +106,7 @@ struct ScriptedTakeRequest: Codable, Equatable, Sendable {
     var mode: String?
     var caller: Int32
     var issued: Date
+    var waitReply: Double?
 }
 
 struct ScriptedTakeMode: Equatable {
@@ -117,8 +119,54 @@ struct ScriptedTakeResult: Codable, Equatable, Sendable {
     var ok: Bool
     var outcome: String?
     var receipt: String?
+    var receiptKind: String?
+    var conversation: String?
+    var agent: String?
+    var request: String?
+    var reply: ScriptedReply?
+    var replyProblem: String?
     var hud: String?
     var problem: String?
+}
+
+struct ScriptedTakeRecipient: Equatable, Sendable {
+    var conversation: String
+    var agent: String?
+    var request: String?
+}
+
+struct ScriptedReply: Codable, Equatable, Sendable {
+    var kind: String
+    var length: Int
+    var sha256: String
+    var ending: String?
+}
+
+@MainActor
+final class ScriptedReplies {
+    private let limit: Int
+    private var kept: [(request: String, reply: ScriptedReply)] = []
+
+    init(limit: Int = 32) { self.limit = limit }
+
+    func noteAnswer(origin: String?, answer: String) {
+        keep(origin, ScriptedReply(kind: "answer", length: answer.count, sha256: Self.digest(answer)))
+    }
+
+    func noteEnded(origin: String?, body: String) {
+        keep(origin, ScriptedReply(kind: "ended", length: body.count, sha256: Self.digest(body), ending: body))
+    }
+
+    func reply(for request: String) -> ScriptedReply? { kept.last { $0.request == request }?.reply }
+
+    nonisolated static func digest(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func keep(_ origin: String?, _ reply: ScriptedReply) {
+        guard let origin else { return }
+        kept = Array((kept.filter { $0.request != origin } + [(origin, reply)]).suffix(limit))
+    }
 }
 
 struct ScriptedTakeMarks {
@@ -126,6 +174,7 @@ struct ScriptedTakeMarks {
     var record: DictationRecord?
     var receipts: Int
     var receipt: AgentReceipt?
+    var recipient: ScriptedTakeRecipient?
     var hud: String?
 }
 
@@ -151,13 +200,16 @@ final class ScriptedTakeRunner {
     private let recordingWithin: Duration
 
     private let callerWaits: (Int32, Date) -> Bool
+    private let replies: ScriptedReplies?
 
     init(
         target: ScriptedTakeTarget, capture: ScriptedCapture, engines: ScriptedEngines, agentModesOnly: Bool = true,
         pause: Duration = .milliseconds(20),
-        recordingWithin: Duration = .seconds(10), callerWaits: @escaping (Int32, Date) -> Bool = ScriptedTakeRunner.callerWaits
+        recordingWithin: Duration = .seconds(10), callerWaits: @escaping (Int32, Date) -> Bool = ScriptedTakeRunner.callerWaits,
+        replies: ScriptedReplies? = nil
     ) {
         self.callerWaits = callerWaits
+        self.replies = replies
         self.target = target
         self.capture = capture
         self.engines = engines
@@ -197,20 +249,53 @@ final class ScriptedTakeRunner {
         }
         target.releaseForScriptedTake()
         await target.finishScriptedTake()
-        return report(request, mode: mode, before: before, problem: nil)
+        var result = report(request, mode: mode, before: before, problem: nil)
+        if let wait = request.waitReply, result.ok, let sent = result.request {
+            result.reply = await reply(to: sent, within: wait)
+            if result.reply == nil { result.replyProblem = "No reply within \(Self.seconds(wait)) s." }
+        }
+        return result
+    }
+
+    private func reply(to request: String, within seconds: Double) async -> ScriptedReply? {
+        let clock = ContinuousClock()
+        let deadline = clock.now + .milliseconds(Int(seconds * 1000))
+        while true {
+            if let found = replies?.reply(for: request) { return found }
+            guard clock.now < deadline else { return nil }
+            try? await Task.sleep(for: max(pause, .milliseconds(5)))
+        }
+    }
+
+    private static func seconds(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(value)
     }
 
     private func report(_ request: ScriptedTakeRequest, mode: ScriptedTakeMode, before: ScriptedTakeMarks, problem: String?) -> ScriptedTakeResult {
         let after = target.scriptedTakeMarks
         let record = after.records > before.records ? after.record : nil
         let receipt = after.receipts > before.receipts ? after.receipt : nil
+        let recipient = receipt == nil ? nil : after.recipient
         let succeeded = record?.outcome.map(Self.succeeded) ?? false
         let sent = receipt.map(Self.sent) ?? !mode.sendsToAgents
         let ok = problem == nil && succeeded && sent
         let why = problem ?? (record == nil ? "The take finished without a result." : ok ? nil : "The take did not deliver.")
         return ScriptedTakeResult(
-            id: request.id, ok: ok, outcome: record?.outcome?.rawValue, receipt: receipt.map { String(describing: $0) }, hud: after.hud,
+            id: request.id, ok: ok, outcome: record?.outcome?.rawValue, receipt: receipt.map { String(describing: $0) },
+            receiptKind: receipt.map(Self.kind), conversation: recipient?.conversation, agent: recipient?.agent, request: recipient?.request,
+            hud: after.hud,
             problem: why)
+    }
+
+    nonisolated static func kind(of receipt: AgentReceipt) -> String {
+        switch receipt {
+        case .sent: "sent"
+        case .sentWithDraft: "sentWithDraft"
+        case .queued: "queued"
+        case .kept: "kept"
+        case .notSent: "notSent"
+        case .uncertain: "uncertain"
+        }
     }
 
     nonisolated static func callerWaits(_ pid: Int32, issued: Date) -> Bool {
@@ -317,7 +402,19 @@ final class ScriptedTakeInbox {
 }
 
 enum ScriptedTakeCLI {
-    static func run(text: String?, wav: String?, mode: String?, timeout: TimeInterval, supportDir: URL, allowed: Bool) -> Int32 {
+    static func line(for result: ScriptedTakeResult, json: Bool) -> String {
+        if json {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            return (try? encoder.encode(result)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        }
+        let said = [result.outcome, result.receipt, result.hud].compactMap { $0 }.joined(separator: " \u{2014} ")
+        return result.ok ? "agent-take: \(said)" : "agent-take: not delivered \u{2014} \(result.problem ?? "")\(said.isEmpty ? "" : " \u{2014} " + said)"
+    }
+
+    static func run(
+        text: String?, wav: String?, mode: String?, timeout: TimeInterval, supportDir: URL, allowed: Bool, json: Bool = false, waitReply: Double? = nil
+    ) -> Int32 {
         guard allowed else {
             print("agent-take: this build doesn\u{2019}t take scripted takes. Use a development build: KeyScribeDev, or a build whose target sets KEYSCRIBE_DEVELOPMENT_TOOLS to YES.")
             return 2
@@ -337,8 +434,9 @@ enum ScriptedTakeCLI {
         }
         defer { if let spoken { try? FileManager.default.removeItem(at: spoken) } }
         guard let clip else { return 2 }
-        let timeout = min(timeout, ScriptedTakeInbox.longestWait)
-        let request = ScriptedTakeRequest(id: id, wav: clip, transcript: wav == nil ? text : nil, mode: mode, caller: getpid(), issued: Date())
+        let timeout = min(timeout + (waitReply ?? 0), ScriptedTakeInbox.longestWait)
+        let request = ScriptedTakeRequest(
+            id: id, wav: clip, transcript: wav == nil ? text : nil, mode: mode, caller: getpid(), issued: Date(), waitReply: waitReply)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let pending = folder.appendingPathComponent("\(id).pending")
@@ -353,8 +451,7 @@ enum ScriptedTakeCLI {
         while Date() < deadline {
             if let data = FileManager.default.contents(atPath: resultURL.path), let result = try? JSONDecoder().decode(ScriptedTakeResult.self, from: data) {
                 try? FileManager.default.removeItem(at: resultURL)
-                let said = [result.outcome, result.receipt, result.hud].compactMap { $0 }.joined(separator: " \u{2014} ")
-                print(result.ok ? "agent-take: \(said)" : "agent-take: not delivered \u{2014} \(result.problem ?? "")\(said.isEmpty ? "" : " \u{2014} " + said)")
+                print(line(for: result, json: json))
                 return result.ok ? 0 : 1
             }
             usleep(100_000)

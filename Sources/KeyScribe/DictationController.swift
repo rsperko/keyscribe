@@ -2718,6 +2718,6 @@ extension DictationController: ScriptedTakeTarget {
     var scriptedTakeMarks: ScriptedTakeMarks {
         ScriptedTakeMarks(
             records: recordsPublished, record: lastRecord, receipts: agentTake.receiptCount, receipt: agentTake.lastReceipt,
-            hud: hud.lastPresented.map { String(describing: $0) })
+            recipient: agentTake.lastRecipient, hud:hud.lastPresented.map { String(describing: $0) })
     }
 }

@@ -83,6 +83,13 @@ final class AgentTake {
 
     private(set) var receiptCount = 0
     private(set) var lastReceipt: AgentReceipt?
+    private(set) var lastRecipient: ScriptedTakeRecipient?
+
+    private func note(_ receipt: AgentReceipt, for conversation: String, agent: String?, request: String) {
+        receiptCount += 1
+        lastReceipt = receipt
+        lastRecipient = ScriptedTakeRecipient(conversation: conversation, agent: agent, request: request)
+    }
     var frontReadingGrace: Duration = .seconds(1)
     var placeNamesGrace: Duration = .seconds(1)
     var promptBoxConfirmation: Duration = .seconds(2)
@@ -631,8 +638,7 @@ final class AgentTake {
             guard lease.keepActing() else { return }
             let inFront = captured != nil && shown?.id == id && shown?.app == captured
             let (request, receipt) = await output.deliver(text, to: id, via: agents, inFront: inFront)
-            receiptCount += 1
-            lastReceipt = receipt
+            note(receipt, for: id, agent: agents.directory.conversations.first { $0.id == id }?.agent, request: request)
             finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
                         outcome: AgentOutput.dictationOutcome(receipt),
                         heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
@@ -655,8 +661,7 @@ final class AgentTake {
                request: request) {
             receipt = sent == .sent(handle) && (cause == .joinedDraft || cause == .joinedDraftMidTurn) ? .sentWithDraft(handle) : sent
         }
-        receiptCount += 1
-        lastReceipt = receipt
+        note(receipt, for: id, agent: agents.directory.conversations.first { $0.id == id }?.agent, request: request)
         finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
                     outcome: AgentOutput.dictationOutcome(receipt),
                     heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,

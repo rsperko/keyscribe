@@ -36,6 +36,10 @@ public enum DevCLI {
                 --mode <name>           Use this mode instead of the first Agent mode (any mode only in the
                                         dev build; elsewhere, a mode that sends to agents).
                 --timeout <seconds>     How long to wait for the take (default 120).
+                --json                  Print the result as one JSON object: outcome, receipt and its kind, the
+                                        conversation, agent and request it was for, what the HUD said, and any problem.
+                --wait-reply <seconds>  After a delivered take, wait this long for the reply to it and report the reply's
+                                        kind, length and SHA-256 (or how the turn ended), never its text.
               --benchmark <dir>       Run the STT benchmark over recordings in <dir> and exit.
                 --engines <a,b,...>     Limit the benchmark run to these engine ids.
                 --raw                   Emit raw per-clip benchmark output.
@@ -113,6 +117,20 @@ public enum DevCLI {
                                       whether a document is reported, title) with per-app read latency, then
                                       exit. Read-only; prints window titles to this terminal only.
                 --focus <pid>:cg:<id>   Instead, bring that one window forward the way a voice command does.
+              --connector <action> <agent>
+                                      Install, uninstall or report (status) an agent's connector in one configuration
+                                      folder the way Settings does, enrolling or removing that setup, then exit. <agent>
+                                      is the agent's id; an unknown one lists the known ids. Honors --config-dir;
+                                      install and uninstall refuse while the app using that folder runs, because it
+                                      reads its connectors only at launch. Exits non-zero unless the connector ends
+                                      ready (install) or gone (uninstall).
+                --folder <dir>          The agent's configuration folder (default: the agent's usual one).
+                --tool <path>           The agent's command, when it is not where it is usually found.
+              --discovery-report <agent>
+                                      Print how this app finds <agent> (the report Settings copies with Copy Details):
+                                      the command it would run and why, the login shell's answer, the configuration
+                                      folders it knows, and the running processes it saw. Changes nothing.
+                --folder <dir>          Report for this configuration folder (default: the agent's usual one).
               --title-probe           List every running agent process with the title of the terminal tab or
                                       pane it runs in, as Open and in front read it, then exit. Read-only;
                                       never asks for Automation access.
@@ -170,6 +188,9 @@ public enum DevCLI {
               --config-dir <path>     Use <path> for config/modes/history instead of Application Support
                                       (downloaded models stay shared). Pair with --first-run to test
                                       onboarding without touching your real configuration.
+              --no-input              Launch without listening for hotkeys, modifier keys or mouse buttons, so a second
+                                      instance (with --config-dir) runs beside your own without taking your presses.
+                                      Drive it with --agent-take.
               --first-run             Replay the full onboarding wizard, ignoring the completion flag.
               --setup-permissions     Present the permissions-only setup flow.
               --resume-onboarding     Resume the full onboarding wizard after the permission relaunch
@@ -286,7 +307,8 @@ public enum DevCLI {
             }
             exit(ScriptedTakeCLI.run(
                 text: takeText, wav: takeClip, mode: argument("--mode"), timeout: argument("--timeout").flatMap(Double.init) ?? 120,
-                supportDir: KeyScribePaths.supportDir, allowed: KeyScribePaths.allowsDevelopmentTools))
+                supportDir: KeyScribePaths.supportDir, allowed: KeyScribePaths.allowsDevelopmentTools,
+                json: CommandLine.arguments.contains("--json"), waitReply: argument("--wait-reply").flatMap(Double.init)))
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--voice-command"), i + 1 < CommandLine.arguments.count {
@@ -302,6 +324,53 @@ public enum DevCLI {
                 print("agent integrations do not resolve: \(error)")
                 exit(1)
             }
+        }
+
+        if let i = CommandLine.arguments.firstIndex(of: ConnectorCLI.flag) {
+            let args = CommandLine.arguments
+            let option = { (flag: String) -> String? in args.firstIndex(of: flag).flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } }
+            guard i + 2 < args.count, let action = ConnectorCLI.Action(rawValue: args[i + 1]) else {
+                let actions = ConnectorCLI.Action.allCases.map(\.rawValue).joined(separator: "|")
+                FileHandle.standardError.write(Data("Usage: \(Branding.appName) --connector \(actions) <agent> [--folder <dir>] [--tool <path>]\n".utf8))
+                exit(2)
+            }
+            let surfaces = resolvedSurfaces()
+            let folder = option("--folder").map { URL(fileURLWithPath: $0, isDirectory: true) }
+            let tool = option("--tool")
+            Task { @MainActor in
+                let agentsDir = AgentRuntime.bridgeDirectory(supportDir: KeyScribePaths.supportDir)
+                await DiscoveryReportCLI.readLoginShell(keys: agentIntegrations.folderVariables)
+                let outcome = await ConnectorCLI.run(
+                    action: action, agent: args[i + 2], folder: folder, tool: tool,
+                    connectors: agentIntegrations.connectors(
+                        agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, surfaces: ConnectorSurfaces(surfaces)),
+                    agentsDir: agentsDir)
+                for line in outcome.lines { print(line) }
+                exit(outcome.code)
+            }
+            dispatchMain()
+        }
+
+        if let i = CommandLine.arguments.firstIndex(of: DiscoveryReportCLI.flag) {
+            let args = CommandLine.arguments
+            guard i + 1 < args.count else {
+                FileHandle.standardError.write(Data("Usage: \(Branding.appName) --discovery-report <agent> [--folder <dir>]\n".utf8))
+                exit(2)
+            }
+            let folder = args.firstIndex(of: "--folder").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1], isDirectory: true) : nil }
+            let surfaces = resolvedSurfaces()
+            let rules = agentIntegrations.agents.compactMap(\.rule) + agentIntegrations.hosts.compactMap(\.processRule)
+            Task { @MainActor in
+                let agentsDir = AgentRuntime.bridgeDirectory(supportDir: KeyScribePaths.supportDir)
+                let outcome = await DiscoveryReportCLI.run(
+                    agent: args[i + 1], folder: folder,
+                    connectors: agentIntegrations.connectors(
+                        agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, surfaces: ConnectorSurfaces(surfaces)),
+                    agentsDir: agentsDir, prepare: DiscoveryReportCLI.prepare(rules: rules, surfaces: surfaces, keys: agentIntegrations.folderVariables))
+                for line in outcome.lines { print(line) }
+                exit(outcome.code)
+            }
+            dispatchMain()
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--route-probe") {

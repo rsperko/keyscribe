@@ -87,6 +87,7 @@ struct ScriptedTakeTests {
         var outcome: DictationRecord.Outcome? = .inserted
         var receipts = 0
         var receipt: AgentReceipt? = .sent("docs")
+        var recipient: ScriptedTakeRecipient? = ScriptedTakeRecipient(conversation: "claude:abc-123", agent: "claude", request: "req-1")
         var hudSays: String? = "Sent to docs"
         var modes = ["agent-mode": ScriptedTakeMode(id: "agent-mode", sendsToAgents: true), "": ScriptedTakeMode(id: "agent-mode", sendsToAgents: true)]
         func scriptedTakeMode(_ named: String?) -> ScriptedTakeMode? { modes[named ?? ""] }
@@ -111,8 +112,131 @@ struct ScriptedTakeTests {
         var scriptedTakeMarks: ScriptedTakeMarks {
             var record = DictationRecord(modeName: "Agent")
             record.outcome = outcome
-            return ScriptedTakeMarks(records: published, record: record, receipts: receipts, receipt: receipt, hud: hudSays)
+            return ScriptedTakeMarks(records: published, record: record, receipts: receipts, receipt: receipt, recipient: recipient, hud: hudSays)
         }
+    }
+
+    @Test func aDeliveredTakeReportsTheConversationAndAgentItReachedAndTheKindOfReceipt() async throws {
+        let target = Target()
+        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1))
+        let result = try await take(runner, ScriptedTakeRequest(id: "d1", wav: try wav().path, transcript: "tell docs hi", mode: nil, caller: getpid(), issued: Date()))
+        #expect(result.conversation == "claude:abc-123")
+        #expect(result.agent == "claude")
+        #expect(result.receiptKind == "sent")
+    }
+
+    @Test func aRefusedTakeStillNamesTheConversationItWasMeantFor() async throws {
+        let target = Target()
+        target.receipt = .notSent("docs", reason: .disconnected)
+        target.outcome = .failed
+        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1))
+        let result = try await take(runner, ScriptedTakeRequest(id: "d2", wav: try wav().path, transcript: "tell docs hi", mode: nil, caller: getpid(), issued: Date()))
+        #expect(result.receiptKind == "notSent")
+        #expect(result.conversation == "claude:abc-123")
+    }
+
+    @Test func aTakeWithNoNewReceiptReportsNoConversationFromAnEarlierTake() async throws {
+        let target = Target()
+        target.receipt = nil
+        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1))
+        let result = try await take(runner, ScriptedTakeRequest(id: "d3", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date()))
+        #expect(result.conversation == nil)
+        #expect(result.agent == nil)
+        #expect(result.receiptKind == nil)
+    }
+
+    @Test func everyReceiptHasAStableKindName() {
+        let kinds: [(AgentReceipt, String)] = [
+            (.sent("a"), "sent"), (.sentWithDraft("a"), "sentWithDraft"), (.queued("a"), "queued"),
+            (.kept("a", reason: .composing), "kept"), (.notSent(nil, reason: .stopped), "notSent"), (.uncertain("a"), "uncertain"),
+        ]
+        for (receipt, kind) in kinds { #expect(ScriptedTakeRunner.kind(of: receipt) == kind) }
+    }
+
+    @Test func aDeliveredTakeReportsTheRequestItWasSentAs() async throws {
+        let target = Target()
+        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1))
+        let result = try await take(runner, ScriptedTakeRequest(id: "w0", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date()))
+        #expect(result.request == "req-1")
+        #expect(result.reply == nil)
+    }
+
+    @Test func aTakeThatWaitsForItsReplyReportsTheReplyToItsOwnRequestOnly() async throws {
+        final class Replying: Target {
+            var replies: ScriptedReplies?
+            override func finishScriptedTake() async {
+                await super.finishScriptedTake()
+                replies?.noteAnswer(origin: "someone-else", answer: "not this one")
+                replies?.noteAnswer(origin: "req-1", answer: "All four tests pass.")
+            }
+        }
+        let target = Replying()
+        let replies = ScriptedReplies()
+        target.replies = replies
+        let runner = ScriptedTakeRunner(
+            target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1), replies: replies)
+        var request = ScriptedTakeRequest(id: "w1", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date())
+        request.waitReply = 5
+        let result = try await take(runner, request)
+        let reply = try #require(result.reply)
+        #expect(reply.kind == "answer")
+        #expect(reply.length == "All four tests pass.".count)
+        #expect(reply.sha256 == ScriptedReplies.digest("All four tests pass."))
+        #expect(result.ok)
+    }
+
+    @Test func aReplyThatNeverComesIsReportedAsMissingWithoutFailingTheDelivery() async throws {
+        let target = Target()
+        let runner = ScriptedTakeRunner(
+            target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1), replies: ScriptedReplies())
+        var request = ScriptedTakeRequest(id: "w2", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date())
+        request.waitReply = 0.1
+        let result = try await take(runner, request)
+        #expect(result.ok)
+        #expect(result.reply == nil)
+        #expect(result.replyProblem == "No reply within 0.1 s.")
+    }
+
+    @Test func aTakeThatWasNotDeliveredDoesNotWaitForAReply() async throws {
+        let target = Target()
+        target.receipt = .notSent("docs", reason: .disconnected)
+        target.outcome = .failed
+        let runner = ScriptedTakeRunner(
+            target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1), replies: ScriptedReplies())
+        var request = ScriptedTakeRequest(id: "w3", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date())
+        request.waitReply = 30
+        let started = ContinuousClock.now
+        let result = try await take(runner, request)
+        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(result.reply == nil)
+    }
+
+    @Test func anEndingIsReportedByItsFixedWordingAndAnAnswerOnlyByDigest() {
+        let replies = ScriptedReplies()
+        replies.noteEnded(origin: "a", body: "Stopped.")
+        replies.noteAnswer(origin: "b", answer: "secret reply text")
+        #expect(replies.reply(for: "a") == ScriptedReply(kind: "ended", length: 8, sha256: ScriptedReplies.digest("Stopped."), ending: "Stopped."))
+        #expect(replies.reply(for: "b")?.ending == nil)
+        #expect(ScriptedReplies.digest("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    }
+
+    @Test func repliesAreKeptOnlyForTheMostRecentRequests() {
+        let replies = ScriptedReplies(limit: 2)
+        replies.noteAnswer(origin: "1", answer: "a")
+        replies.noteAnswer(origin: "2", answer: "b")
+        replies.noteAnswer(origin: "3", answer: "c")
+        #expect(replies.reply(for: "1") == nil)
+        #expect(replies.reply(for: "3") != nil)
+    }
+
+    @Test func theJSONLineIsTheWholeResultAndTheTextLineIsUnchanged() throws {
+        let result = ScriptedTakeResult(
+            id: "j1", ok: true, outcome: "inserted", receipt: "sent(\"docs\")", receiptKind: "sent", conversation: "claude:abc-123", agent: "claude",
+            request: "req-1", reply: ScriptedReply(kind: "answer", length: 3, sha256: "x", ending: nil), hud: "Sent to docs", problem: nil)
+        let json = ScriptedTakeCLI.line(for: result, json: true)
+        #expect(try JSONDecoder().decode(ScriptedTakeResult.self, from: Data(json.utf8)) == result)
+        #expect(!json.contains("\n"))
+        #expect(ScriptedTakeCLI.line(for: result, json: false) == "agent-take: inserted \u{2014} sent(\"docs\") \u{2014} Sent to docs")
     }
 
     @Test func aScriptedTakePressesInTheChosenModeRecordsThenReleasesAndReportsWhatTheHudSaid() async throws {

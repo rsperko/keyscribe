@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-omp-connector test-bb-plugin test-ultimate-connector test-ultimate-live test-codex-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
+.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-omp-connector test-bb-plugin test-ultimate-connector test-ultimate-live test-agents test-codex-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -64,6 +64,9 @@ test-ultimate-connector: ## Run the Ultimate connector's behavior tests (needs N
 
 test-ultimate-live: ## Drive a real headless Ultimate through the connector (ULTIMATE_CLONE=<clone>, ULTIMATE_NODE=<node 26>; spends a few cents of the model ULTIMATE_MODEL names)
 	timeout 600 "$${ULTIMATE_NODE:-node}" Tests/UltimateConnector/e2e/live.ts
+
+test-agents: ## Run the agent conformance exercises against a real agent: make test-agents AGENT=codex|all [ONLY=D1,R1] [KEEP=1] (needs a dev build and the agents installed and logged in; spends a little of each agent's model)
+	timeout 5400 node Tests/AgentConformance/run.ts --agent '$(AGENT)' $(if $(ONLY),--only '$(ONLY)') $(if $(KEEP),--keep)
 
 voice-kit: ## Build the voice kit to hand out: make voice-kit [STUDY=accents] [APP=Name] → voice-kit/dist/
 	zsh voice-kit/package.sh $(if $(APP),--app '$(APP)') $(STUDY)
