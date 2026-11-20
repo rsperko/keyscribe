@@ -93,6 +93,7 @@ final class AgentHub {
     private var processIdentities: [String: ProcessIdentity] = [:]
     private var hostFollows: [String: [HostFollow]] = [:]
     private var endedTurns: [String: [EndedTurn]] = [:]
+    private var continuing: [String: (request: String, at: Date)] = [:]
     private var namedTurns: [String: [(turn: String, request: String)]] = [:]
     private var delivering: [String: String] = [:]
     private var linked: [String: String] = [:]
@@ -696,6 +697,7 @@ final class AgentHub {
         if let other = counterpart(of: id) { exclusions.insert(other) }
         for (request, conversation) in delivering where conversation == id { stopFollowingHosted(request, in: id) }
         hostFollows[id] = nil
+        continuing[id] = nil
         endedTurns[id] = nil
         namedTurns[id] = nil
         shownByHost = shownByHost.filter { $0.value != id && $0.value != counterpart(of: id) }
@@ -1208,8 +1210,9 @@ final class AgentHub {
                 if hostFollows[id, default: []].count > Self.hostFollowLimit { hostFollows[id]?.removeFirst() }
             }
             let joins = pluginHolds(id) && features(of: id).contains("merge")
+            let draft = showsDraft(id)
             Log.agents.info(
-                "sending to \(handle, privacy: .private) through \(source.kind.displayName, privacy: .public): in front \(inFront), text in its box \(self.showsDraft(id)), images \(images.count), \(self.pluginState(id), privacy: .public)")
+                "sending to \(handle, privacy: .private) through \(source.kind.displayName, privacy: .public): \(draft ? "text in its box, in front \(inFront)" : "its box empty", privacy: .public), images \(images.count), \(self.pluginState(id), privacy: .public)")
             if inFront, images.isEmpty, showsDraft(id), joins {
                 startTrace(request, in: id)
                 let joined = await joinDraft(text, in: id)
@@ -1590,6 +1593,7 @@ final class AgentHub {
     static let hostFollowLimit = 16
     static let steeredLimit = 64
     static let hostTurnWait: TimeInterval = 300
+    static let continuationWindow: TimeInterval = 600
 
     private struct HostFollow {
         var prompt: String
@@ -1715,10 +1719,14 @@ final class AgentHub {
     }
 
     private func settleHostedTurn(reason: String, answer: String, after: AgentTurnInput?, of session: String, awaited: Bool, startedAt: Date) {
-        let waiting = hostFollows[session]?.filter { !$0.named }.count ?? 0
+        let copy = AgentSessionID.agent(of: session).map { Self.slot($0, Self.instance(of: session)) }
+        let waiting = (hostFollows[session]?.filter { !$0.named }.count ?? 0)
+            + (copy.flatMap { startFollows[$0] }?.filter { !$0.named && !$0.known.contains(session) }.count ?? 0)
         let taken = after?.accepted ?? after?.prompt.map { [AgentAcceptedMessage(digest: $0, at: nil)] } ?? []
         var (claimed, lags) = claim(taken, in: session, startedAt: startedAt)
         if after?.accepted == nil { claimed += claimSteered(in: session, startedAt: startedAt) }
+        let continued = after?.accepted?.isEmpty == true ? continuing[session].flatMap { now().timeIntervalSince($0.at) <= Self.continuationWindow ? $0.request : nil } : nil
+        if let request = claimed.last { continuing[session] = (request, now()) } else if continued == nil { continuing[session] = nil }
         let wasRequested = awaited && requested.contains(session)
         if awaited { stopAwaiting(session) }
         let handle = handle(of: session) ?? "a conversation"
@@ -1729,7 +1737,10 @@ final class AgentHub {
             Log.agents.notice(
                 "a turn in \(handle, privacy: .private) ended without its host's record of what it took, so \(claimed.count) of the \(waiting) dictations waiting on it were matched by the prompt it started with")
         }
-        let origin = claimed.last
+        if let continued, claimed.isEmpty {
+            Log.agents.info("a turn in \(handle, privacy: .private) that the agent started without a message continues the dictation its last dictated turn took")
+        }
+        let origin = claimed.last ?? continued
         guard origin != nil || wasRequested else { return }
         report(reason: reason, answer: answer, after: after, of: session, origin: origin, wasRequested: wasRequested)
     }
@@ -1952,6 +1963,7 @@ final class AgentHub {
             follows.filter { follow in follow.expires.map { $0 > at } ?? true }
         }
         namedTurns = namedTurns.filter { listed.contains($0.key) }
+        continuing = continuing.filter { listed.contains($0.key) && at.timeIntervalSince($0.value.at) <= Self.continuationWindow }
         endedTurns = endedTurns.filter { listed.contains($0.key) }.mapValues { turns in
             turns.filter { at.timeIntervalSince($0.at) < Self.endedTurnMemory }
         }

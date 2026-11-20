@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { ComposerAnswers, acceptedInEndedTurn, commandAnswer, composeInto, keyscribe, promptDigest, readAloudReply, rowLabel, shownThread, waitingFor, type Bb, type Composed, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
+import { ComposerAnswers, acceptedInEndedTurn, commandAnswer, composeInto, keyscribe, promptDigest, readAloudReply, rowLabel, spokenMentions, shownThread, waitingFor, type Bb, type Composed, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
 
 type Request = { path: string; body: any; auth: string; answer: (status: number, text?: string) => void; settled: boolean; cancelled: boolean }
 
@@ -1674,4 +1674,12 @@ test("a turn that started and ended before its thread's hello landed is never re
   await h.answerHellos()
   await h.answerEvents()
   assert.equal(h.sent("turnStarted").filter((b) => b.session === session("thr_new")).length, 0)
+})
+
+test("a reply names a thread it mentions by the name the app gave it, never by its id", () => {
+  const names = new Map([["thr_known", "docs green"]])
+  const nameOf = (thread: string) => names.get(thread) ?? null
+  assert.equal(spokenMentions("See @thread:thr_known for the plan.", nameOf), "See docs green for the plan.")
+  assert.equal(spokenMentions("Started @thread:thr_01HX9ZQ, and asked @thread:thr_known#msg=42.", nameOf), "Started another thread, and asked docs green.")
+  assert.equal(spokenMentions("Mail me@thread:x and keep thread:thr_a", nameOf), "Mail me@thread:x and keep thread:thr_a")
 })

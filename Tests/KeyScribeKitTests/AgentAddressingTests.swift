@@ -98,3 +98,25 @@ struct AgentAddressingTests {
         #expect(!AgentHandles.isReserved("conversation notes"))
     }
 }
+
+struct AgentAddressingWithoutAVerbTests {
+    let names = ["reply with pong": "a", "foo jk boots manager": "b", "in front": "c"]
+
+    private func resolve(_ text: String) -> AgentRecipient.Resolution {
+        AgentRecipient.resolve(AgentAddress.parse(text, names: Array(names.keys)), focused: "c", rows: ["a", "b", "c"], names: names)
+    }
+
+    @Test(arguments: ["Reply with the word pong.", "Reply with something short.", "jk boots, run the tests", "boots manager run the tests"])
+    func aTakeThatStartsWithPartOfANameButNoVerbGoesWholeToTheConversationInFront(text: String) {
+        #expect(resolve(text) == .deliver(id: "c", body: text, source: .front))
+    }
+
+    @Test func aTakeThatStartsWithAWholeNameStillAddressesItWithoutAVerb() {
+        #expect(resolve("Reply with pong, say it again") == .deliver(id: "a", body: "say it again", source: .spoken))
+    }
+
+    @Test(arguments: [("tell reply with the word pong", "a", "the word pong"), ("tell jk boots run the tests", "b", "run the tests")])
+    func partOfANameStillAddressesItAfterTell(text: String, id: String, body: String) {
+        #expect(resolve(text) == .deliver(id: id, body: body, source: .spoken))
+    }
+}

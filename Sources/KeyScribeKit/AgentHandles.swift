@@ -234,7 +234,7 @@ public enum AgentAddress: Equatable, Sendable {
         }
         let found = SpokenNameMatch.leading(
             Array(bare[...]), names: normalized, limit: span, fold: assumeTold ? AgentHandles.singular : { $0 },
-            minimumWords: { assumeTold || $0 == .exact ? 1 : 2 }) ?? readName()
+            minimumWords: { assumeTold || $0 == .exact ? 1 : explicit ? 2 : .max }) ?? readName()
         if rowNouns.contains(bare[0]), span > 1, found.map({ $0.length == 1 }) ?? true {
             let named = parse(
                 body(after: 1), names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: assumeTold)
@@ -422,7 +422,7 @@ extension AgentAddress {
         let candidates = Array(Set(names + [name]))
         for count in words.indices.dropFirst() where !connectingWords.contains(String(words[count - 1])) {
             let spoken = words.prefix(count).joined(separator: " ")
-            if case .name(name, let body) = parse("\(spoken), run the unit tests.", names: candidates), !body.isEmpty {
+            if case .name(name, let body) = parse("tell \(spoken), run the unit tests.", names: candidates), !body.isEmpty {
                 return spoken
             }
         }

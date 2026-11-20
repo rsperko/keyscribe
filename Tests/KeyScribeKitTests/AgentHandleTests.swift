@@ -147,7 +147,7 @@ struct AgentAddressTests {
     @Test(arguments: [
         ("Tell jk boots to run the tests.", "foo jk boots manager 1234", "to run the tests."),
         ("tell boots jk, run the tests", "foo jk boots manager 1234", "run the tests"),
-        ("jk boots run the tests", "foo jk boots manager 1234", "run the tests"),
+        ("tell jk boots run the tests", "foo jk boots manager 1234", "run the tests"),
         ("Tell jk boots manager fix it", "foo jk boots manager 1234", "fix it"),
         ("tell boots, manager is down", "foo jk boots manager 1234", "manager is down"),
         ("Tell keyscribe, run the tests", "keyscribe", "run the tests"),
@@ -335,7 +335,7 @@ struct AgentAddressTests {
         #expect(AgentAddress.closest(to: "keyscribe", among: ["backend", "frontend"]) == [])
     }
 
-    @Test func openingNeedsTheSameEvidenceAsAnAddressWithoutTell() {
+    @Test func openingByPartOfANameNeedsTwoOfItsWords() {
         let names = ["jk boots manager", "jk boots helper", "frontend"]
         #expect(AgentAddress.parse("open boots", names: names) == .open(.unresolved(spoken: "boots", body: "")))
         #expect(AgentAddress.parse("open jk boots", names: names)
@@ -569,7 +569,7 @@ struct AgentAddressTests {
 
 struct AgentShorterNameTests {
     private func reaches(_ spoken: String, _ name: String, among names: [String]) -> Bool {
-        if case .name(name, let body) = AgentAddress.parse("\(spoken), run the unit tests.", names: names) { return !body.isEmpty }
+        if case .name(name, let body) = AgentAddress.parse("tell \(spoken), run the unit tests.", names: names) { return !body.isEmpty }
         return false
     }
 
@@ -591,7 +591,7 @@ struct AgentShorterNameTests {
     }
 
     @Test func aShorterNameNeverEndsOnAConnectingWord() {
-        let names = ["deploy the staging cluster", "chief of staff project tracking"]
+        let names = ["deploy the staging cluster", "deploy the production cluster", "chief of staff project tracking", "chief of police"]
         #expect(AgentAddress.shorterSpokenName(for: "deploy the staging cluster", among: names) == "deploy the staging")
         #expect(AgentAddress.shorterSpokenName(for: "chief of staff project tracking", among: names) == "chief of staff")
     }

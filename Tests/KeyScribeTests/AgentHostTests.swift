@@ -581,9 +581,63 @@ struct AgentHostTests {
         }
         ended(hub, "One. Two.", took: accepted)
         #expect(origins == [steered ? "q2" : "q1"])
-        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: nil))
-        ended(hub, "Done.", took: [], from: .task)
-        #expect(origins.count == 1)
+    }
+
+    enum Between: Sendable, CaseIterable {
+        case nothing, anotherTurnTheAgentStarted, turnsTheAgentKeptStartingPastTheWindow, aTypedMessage, anotherAgentsMessage, aTurnWithoutItsRecord, aLongPause
+    }
+
+    nonisolated static let continuationGrid: [(Bool, Between, AgentTurnInput.Sender?)] = [false, true].flatMap { steered in
+        Between.allCases.flatMap { between in [nil, AgentTurnInput.Sender.task].map { (steered, between, $0) } }
+    }
+
+    @Test(arguments: continuationGrid)
+    func aTurnTheAgentStartsWithoutAMessageIsReadForTheDictationItsLastDictatedTurnTookUntilAnotherMessageOrTheWindowFromThatTurn(
+        steered: Bool, between: Between, from: AgentTurnInput.Sender?
+    ) async {
+        let clock = AgentHubTests.Clock()
+        let (hub, _) = await accepting(FakeHost(), clock: clock)
+        var read: [(String?, String, SpokenResult.Cause?)] = []
+        hub.onResult = { _, _, answer, _, origin, cause in read.append((origin, answer, cause)) }
+        _ = await hub.deliver("say the word one", to: Self.id("t1"), request: "q1")
+        let sent = clock.now
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: AgentPromptDigest.of("say the word one")))
+        var accepted = ["say the word one"]
+        if steered {
+            _ = await hub.deliver("say the word two", to: Self.id("t1"), request: "q2")
+            accepted.append("say the word two")
+        }
+        ended(hub, "One.", took: accepted, at: sent)
+        let last = steered ? "q2" : "q1"
+        var expected: [(String?, String)] = [(last, "One.")]
+        let gap = AgentHub.continuationWindow * 0.4
+        if between != .nothing {
+            clock.now += gap
+            hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: nil))
+        }
+        switch between {
+        case .nothing: break
+        case .anotherTurnTheAgentStarted:
+            ended(hub, "Still working.", took: [], from: from)
+            expected.append((last, "Still working."))
+        case .turnsTheAgentKeptStartingPastTheWindow:
+            ended(hub, "Still working.", took: [], from: from)
+            clock.now += gap
+            hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2b", prompt: nil))
+            ended(hub, "Almost.", took: [], from: from)
+            expected += [(last, "Still working."), (last, "Almost.")]
+        case .aTypedMessage: ended(hub, "Typed answer.", took: ["something typed in bb"], at: clock.now)
+        case .anotherAgentsMessage: ended(hub, "Child answer.", took: ["a child thread finished"], at: clock.now, from: .agent)
+        case .aTurnWithoutItsRecord: ended(hub, "Unknown.", took: nil)
+        case .aLongPause: clock.now += AgentHub.continuationWindow
+        }
+        clock.now += gap
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-3", prompt: nil))
+        ended(hub, "Two.", took: [], from: from)
+        if between == .nothing || between == .anotherTurnTheAgentStarted { expected.append((last, "Two.")) }
+        #expect(read.map(\.0) == expected.map(\.0))
+        #expect(read.map(\.1) == expected.map(\.1))
+        #expect(read.dropFirst().allSatisfy { $0.2 == from.map(SpokenResult.Cause.sender) })
     }
 
     @Test func twoDictationsWithTheSameTextAreEachReadForTheTurnThatTookThem() async {

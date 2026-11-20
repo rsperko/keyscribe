@@ -549,6 +549,30 @@ struct AgentBridgeServerTests {
         _ = try await polled
     }
 
+    @Test func aParkedPollWhoseConnectorHungUpNoLongerKeepsItsConversationLive() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 5, activeWindow: 0.5)
+        defer { server.stop() }
+        try hello(dir)
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let socketPath = dir.appendingPathComponent("bridge.sock").path
+        withUnsafeMutableBytes(of: &addr.sun_path) { raw in socketPath.utf8CString.withUnsafeBytes { raw.copyMemory(from: $0) } }
+        let connected = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        #expect(connected == 0)
+        let body = #"{"session":"s1","instance":"i1","connection":"i1"}"#
+        let raw = "POST /poll HTTP/1.1\r\nHost: ks\r\nAuthorization: Bearer secret\r\nContent-Length: \(body.utf8.count)\r\n\r\n\(body)"
+        _ = raw.withCString { write(fd, $0, strlen($0)) }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(server.isLive(instance: "i1"))
+        close(fd)
+        try await Task.sleep(for: .milliseconds(1200))
+        #expect(!server.isLive(instance: "i1"))
+        #expect(!server.isLive(session: "claude:s1"))
+    }
+
     @Test func anUnacknowledgedCommandNeverReachesAnInstanceThatResumesAfterAGap() throws {
         let (server, events, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }

@@ -159,11 +159,13 @@ public enum SpokenResult {
     }
 
     public static func spokenForm(_ text: String) -> String {
-        var out = replacing(text, #"(?s)```.*?```"#, with: " code block ")
+        var out = replacing(text.replacingOccurrences(of: "\r\n", with: "\n"), #"(?s)```.*?```"#, with: " code block ")
         out = replacing(out, #"(?s)```.*$"#, with: " code block ")
         out = replacing(out, #"\[([^\]]+)\]\([^)]*\)"#, with: "$1")
         out = replacing(out, #"https?://[^\s]*[^\s.,;:!?)]"#, with: "a link")
         out = replacing(out, #"(?m)^\s*\|.*$"#, with: "")
+        out = replacing(out, #"(?m)^(\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+).*[^\s.!?:;,…])[ \t]*$"#, with: "$1.")
+        out = replacing(out, #"([^\s.!?:;,…])[ \t]*(?=\n[ \t]*\n)"#, with: "$1.")
         out = replacing(out, #"(?m)^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)"#, with: "")
         out = replacing(out, #"`([^`]*)`"#, with: "$1")
         out = out.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "__", with: "")

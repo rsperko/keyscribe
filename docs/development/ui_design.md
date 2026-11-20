@@ -491,8 +491,11 @@ reach `foo-jk-boots-manager-1234`. The longest leading run of words that fits a 
 comma or colon ends it. Each of the name's words counts once, so “tell build build the project” sends “build the
 project”. After “tell” or “ask”, a word said in the singular or the plural matches either form in the name
 (`AgentHandles.singular`), so “ask review manager …” reaches `reviews_manager_queue`; two names that differ
-only that way count as the same name. Without “tell”, part of a name needs at least two of its words, and
-words must match as written, because a single word at the start of a sentence is usually just prose. A take that starts with what sounds like an address
+only that way count as the same name. Without “tell”, only the whole name addresses, matched as written: part of
+a name is reached only after “tell”, “ask” or a bring-forward word (where it needs at least two of its words),
+because the start of a sentence is usually just prose, and a name taken from a title reads like one (“Reply with
+the word pong.” stays a message for the conversation in front even beside a conversation named “reply with
+pong”). A take that starts with what sounds like an address
 but does not match is held rather than sent to the conversation in front: “session to …” (a misheard
 row) and a long word one sound away from a name (“keyscrib …”). One exception keeps the take: when that
 misheard word sounds like the conversation in front itself, it is sent there, since both readings agree.
@@ -560,8 +563,8 @@ An optional “please” before or after a recognized command (“please open do
 (“docs, please”) is held like an address alone.
 A take that is only a bring-forward word and an address opens that conversation: the words Voice Commands
 uses to bring something forward (`VoiceCommandGrammar.focusVerbs`, such as “open”, “switch to”, “go to”), an
-optional “the”, then a name or number that meets the same evidence as an address without “tell” (“open
-docs”, “switch to conversation two”). It sends nothing, brings its terminal forward, and remembers nothing:
+optional “the”, then a conversation number, a whole name, or part of a name of at least two of its words (“open
+docs”, “switch to conversation two”, “open jk boots”). It sends nothing, brings its terminal forward, and remembers nothing:
 a later take without a name goes to it only while it is the conversation in front when that take starts. A bring-forward word followed by a few words (at most `AgentAddress.navigationWords`) is navigation
 even when those words name nothing: the take is held with the reason and never sent, so a misheard name
 cannot become a message. The held line names the closest conversation when one sounds like what was heard,
@@ -898,14 +901,15 @@ conversation sends; one disconnected since before the app last started, in a mul
 recognized as the one in front, and the take then says no conversation is focused.
 A running agent whose connector has not connected has no name the app could match, so a spoken name meant for
 it asks like any unknown name. While such a process is listed in Settings, a spoken name that matches no
-conversation, or only sounds like one, says so with **Open Agent Settings**, where the process's row says
-what to do. When the name is that process's folder, or its whole description, only it is named (“Pi in
+conversation, or only sounds like one, but is that process's folder or its whole description, says so with
+**Open Agent Settings**, where the process's row says what to do. Only it is named (“Pi in
 reviews isn’t connected yet. Nothing sent.”); when several processes share that name, all of them are named and none is
 picked (“Claude Code in reviews and 2 Pi conversations in reviews aren’t connected yet. Nothing sent.”). The button
 scrolls Settings to the first named row and highlights every named row briefly (no animation with Reduce
-Motion); a row that has not appeared within a few seconds, because its process ended, is not waited for. Otherwise the line adds what is running but not connected, as Settings describes
-it (the first two, then how many more), in place of the retry example (“… Pi in reviews is running but not
-connected. Agent settings shows how to connect it”). It never connects, reloads or enrolls anything, and never sends to it.
+Motion); a row that has not appeared within a few seconds, because its process ended, is not waited for. A name that
+matches none of those processes says nothing about them: the line is the ordinary one for an unknown name, with its
+retry example, since a process the name does not match is not what was meant. It never connects, reloads or enrolls
+anything, and never sends to it.
 What was said is kept for Paste last dictation, and connecting the conversation never sends it.
 
 **The clipboard in an agent message.** “Insert clipboard contents” and “insert clipboard as code” work
@@ -1028,7 +1032,8 @@ in the header. Unlike a reply summary, it appears as soon as the answer arrives,
 already expanded, and the status reads "Getting ready to speak · Esc stops" until audio starts, then
 "Speaking · Esc stops playback". Collapsing or expanding an answer's text does not change the remembered
 choice for reply summaries. The panel shows the answer as written; the voice reads it without Markdown, code
-marks, or links ("a link"). The natural voice reads the answer a sentence at a time, so the first sentence
+marks, or links ("a link"), and ends a sentence at a paragraph break or a list item that has no closing mark of its own,
+so a heading or a word on its own line is not run into the next one. The natural voice reads the answer a sentence at a time, so the first sentence
 plays while the rest are prepared; a sentence the natural voice cannot make or play in time is read by the
 macOS voice together with the rest. A copy button in the header copies the answer as written; its glyph
 briefly becomes a checkmark, as a copyable value's does.
@@ -2606,8 +2611,8 @@ chooser of its own. **Check Again** beside it looks again. With nothing found th
 when some conversations could not be checked it says so instead; neither claims no agent is running.
 
 **Rename…** opens a compact sheet, focused on the existing name, with a live spoken example. When fewer of
-the name's leading words already reach only this conversation, the example offers them as well (“Say “fix
-authentication retries, run the unit tests.” “fix authentication, …” also works.”): the shorter form is
+the name's leading words already reach only this conversation after “tell”, the example offers them as well (“Say “fix
+authentication retries, run the unit tests.” “tell fix authentication, …” also works.”): the shorter form is
 checked against the same matcher a take uses, is never offered when another conversation shares it, and never
 ends on a connecting word such as “the”. The available
 conversation title and abbreviated directory provide recognition context above the field, with their full

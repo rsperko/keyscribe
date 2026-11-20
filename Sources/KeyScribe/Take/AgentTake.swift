@@ -339,13 +339,10 @@ final class AgentTake {
                             outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: shown, facts: facts)
                 return
             }
-            let hint = AgentOutput.unconnectedHint(unconnected.map(\.name))
-            let shown = hint.isEmpty
-                ? line(reason, retry, reachable(snapshot, agents, for: retry), inFront) : AgentOutput.withHint(line(reason, nil, [:], nil), hint)
-            let action = hint.isEmpty ? Self.askAction(reason, mode: mode) : .openAgents(mode.id)
-            finishAgent(state: .error(message: AgentOutput.kept(shown, body: body), action: action, heard: HeardExcerpt(heard: body)),
+            let shown = line(reason, retry, reachable(snapshot, agents, for: retry), inFront)
+            finishAgent(state: .error(message: AgentOutput.kept(shown, body: body), action: Self.askAction(reason, mode: mode), heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil,
-                        recorded: AgentOutput.withHint(line(reason, nil, [:], nil), hint), facts: facts)
+                        recorded: line(reason, nil, [:], nil), facts: facts)
         case .deliver(let id, let body, _):
             host.noteAgentDestination(id, facts: facts)
             await host.rewriteAndDeliver(

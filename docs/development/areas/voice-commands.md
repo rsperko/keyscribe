@@ -109,7 +109,10 @@ every rule above applies to it, with these sharpenings:
   the turn or for speech, and a timeout promises nothing. They preserve downstream results,
   errors, cancellation, and other extensions' UI; connector failures must not interrupt agent work.
 - **Idle means asleep.** Background work runs only while something needs it. The bridge wakes for a parked
-  poll's deadline or a command not yet settled, never on a fixed tick (`AgentBridgeServer.reschedule`). The
+  poll's deadline or a command not yet settled, never on a fixed tick (`AgentBridgeServer.reschedule`). A parked
+  poll keeps its connector live only while its connection is open: a connector whose process ends closes it, and
+  the bridge drops the poll then rather than at its deadline (`AgentBridgeServer.watchForHangUp`), so a stopped bb
+  server stops counting as holding its threads within the active window. The
   hub rescans quickly only while a conversation is connected or Settings is open, and otherwise on a change
   in a watched session folder (`AgentDiscovery.watchedFolders`) plus a slow fallback
   (`AgentRuntime.rescanInterval`); the first conversation to connect ends the slow fallback at once. A press
@@ -614,6 +617,17 @@ every rule above applies to it, with these sharpenings:
   unclearly) after the turn started (`AgentHub.claimSteered`), which is a guess, and the log says the record was
   missing. Part of the guess: a dictation sent after the host ended the turn but before that end reached the app
   (at most the plugin's deadline for the record) is taken for the turn that ended, not the one it started.
+  A turn whose record is present and empty is one the agent started without a message: it carries on the work of a
+  turn before it, such as reporting a background command that finished, or answering a message bb recorded for the
+  running turn that the agent took in only after it ended (seen with Claude Code in bb 0.49, 2026-11-19). Such a turn
+  is read for the dictation the conversation's last dictated turn took last (`AgentHub.continuing`), so each
+  dictation's answer is heard however many turns the agent takes to give it. A turn that takes any other message
+  (typed, or from another agent or bb itself) or a turn without its record ends that, and none is read once
+  `AgentHub.continuationWindow` has passed since that dictated turn ended, however often the agent wakes itself, so a
+  typed request's follow-ups and a scheduled wake-up long after are never read as the dictation's. The record cannot
+  say which earlier request such a turn carries on, so work started by a typed message that finishes inside the
+  window after a dictated turn is read as that dictation's. The take's History entry keeps the latest reply read
+  for it.
 - **Agents and setups are isolated at the bridge.** Each enrolled setup has its own installation id
   (`ConnectorSetups`), and retiring one installation's connectors leaves every other setup's and agent's
   sessions connected. Inside the app a conversation id is
@@ -831,6 +845,8 @@ every rule above applies to it, with these sharpenings:
   is chosen by when it started: the newest one bb records as completed (or, for a failed turn, completed or started)
   that started no earlier than the plugin saw this turn begin, give or take a moment; if none did, no list is sent
   rather than the previous turn's. The record is asked for the moment the turn ends, not after earlier reports land.
+  A reply's mention of a thread (bb's `@thread:<id>`, with or without `#msg=`) is sent as the name the app gave that
+  thread, or "another thread" when it has none (`spokenMentions`), so an id is never read out letter by letter.
   While the plugin is live for a thread it holds that thread: an agent's own connector there is sent back and not
   filed. The plugin itself is never filed; only an agent is. Whether the plugin holds is read from its own
   connection wherever it is asked (`AgentHub.pluginHolds`), the hand-off of the agent's read-aloud request included,

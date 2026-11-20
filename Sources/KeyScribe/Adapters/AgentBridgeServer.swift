@@ -156,7 +156,7 @@ final class AgentBridgeServer: @unchecked Sendable {
                 reader.cancel()
                 close(fd)
             }
-            for p in parked { close(p.fd) }
+            for p in parked where readers[p.fd] == nil { close(p.fd) }
             for fd in greeting { close(fd) }
             greeting = []
             readers = [:]
@@ -400,6 +400,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         let p = Parked(fd: fd, members: members, connection: connection, deadline: now.addingTimeInterval(pollHold), shared: shared, unknown: unknown)
         if ready.isEmpty && unknown.isEmpty {
             parked.append(p)
+            watchForHangUp(fd)
         } else {
             answer(p, with: ready)
         }
@@ -543,6 +544,19 @@ final class AgentBridgeServer: @unchecked Sendable {
             }
         }
         finish(fd)
+    }
+
+    private func watchForHangUp(_ fd: Int32) {
+        let watch = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+        watch.setEventHandler { [weak self] in
+            guard let self, self.parked.contains(where: { $0.fd == fd }) else { return }
+            var byte: UInt8 = 0
+            let n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+            if n < 0, errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR { return }
+            self.finish(fd)
+        }
+        readers[fd] = watch
+        watch.resume()
     }
 
     private func finish(_ fd: Int32) {

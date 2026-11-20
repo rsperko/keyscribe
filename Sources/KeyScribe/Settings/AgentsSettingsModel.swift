@@ -547,7 +547,7 @@ final class AgentsSettingsModel: ObservableObject {
         let full = "Say \u{201C}\(normalized), run the unit tests.\u{201D}"
         let others = rows.filter { $0.id != id }.map(\.name)
         guard let short = AgentAddress.shorterSpokenName(for: normalized, among: others + [normalized]) else { return full }
-        return "\(full) \u{201C}\(short), \u{2026}\u{201D} also works."
+        return "\(full) \u{201C}tell \(short), \u{2026}\u{201D} also works."
     }
 
     static func placeTrouble(_ row: Row) -> String? {

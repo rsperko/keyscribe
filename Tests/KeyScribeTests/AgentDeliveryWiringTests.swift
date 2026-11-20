@@ -3152,19 +3152,18 @@ struct AgentDeliveryWiringTests {
         #expect(refused.flatMap(whyLocalWasKept) == reason)
     }
 
-    @Test func anUnknownNameWhileAnotherSessionIsNotConnectedSaysSoAndOffersSettings() async {
+    @Test func anUnknownNameSaysNothingAboutARunningAgentItDoesNotMatch() async {
         let pi = AgentCandidate(agent: "pi", pid: 40, startedAt: 1, cwd: "/src/reviews", setup: "/Users/me/.pi/agent")
-        let rig = await rig("Tell review manager queue, what is next?", focused: "claude:s1", unconnected: [pi])
+        let rig = await rig("Tell zebra, what is next?", focused: "claude:s1", unconnected: [pi])
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        guard case .error(let message, let action, _) = rig.hud.states.last else { Issue.record("no error"); return }
-        #expect(message.hasPrefix("No conversation named \u{201C}review manager queue\u{201D}. Nothing sent."))
-        #expect(message.contains(". Pi in reviews is running but not connected. Agent settings shows how to connect it. Your words are kept for Paste last dictation."))
-        #expect(!message.contains("Try"))
-        #expect(action == .openAgents(Mode.agentModeId))
+        guard case .error(let message, _, _) = rig.hud.states.last else { Issue.record("no error"); return }
+        #expect(message.hasPrefix("No conversation named \u{201C}zebra\u{201D}. Nothing sent."))
+        #expect(!message.contains("not connected"))
+        #expect(!message.contains("reviews"))
         let entry = await lastHistoryEntry(rig)
-        #expect(entry?.failureReason?.hasSuffix("Pi in reviews is running but not connected. Agent settings shows how to connect it") == true)
+        #expect(entry?.failureReason?.contains("not connected") == false)
     }
 
     @Test func aNameMatchingTheFolderOfASessionThatIsNotConnectedNamesOnlyIt() async {
@@ -3219,17 +3218,6 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.map(\.1) == ["claude:s2"])
-    }
-
-    @Test(arguments: [
-        ([String](), ""),
-        (["Pi in reviews"], "Pi in reviews is running but not connected. Agent settings shows how to connect it"),
-        (["Pi in api", "Pi in reviews"], "Pi in api and Pi in reviews are running but not connected. Agent settings shows how to connect them"),
-        (["Pi in a", "Pi in b", "Pi in c"], "Pi in a, Pi in b and Pi in c are running but not connected. Agent settings shows how to connect them"),
-        (["Pi in a", "Pi in b", "Pi in c", "Pi in d"], "Pi in a, Pi in b and 2 more are running but not connected. Agent settings shows how to connect them"),
-    ])
-    func theUnconnectedHintNamesEachSession(names: [String], hint: String) {
-        #expect(AgentOutput.unconnectedHint(names) == hint)
     }
 
     @Test func aRefusalAfterQueuingIsSpokenOnceAndKeepsTheMessageInHistory() async {

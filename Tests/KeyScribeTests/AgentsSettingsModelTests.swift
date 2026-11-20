@@ -793,12 +793,12 @@ struct AgentsSettingsModelTests {
             .init(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true),
             .init(id: "b", agent: "claude", pid: 2, cwd: "/src/web", handle: "fix authentication tests", state: .idle, connectorLive: true),
         ])
-        #expect(model.renameExample("a", name: "Back End") == "Say \u{201C}back end, run the unit tests.\u{201D}")
+        #expect(model.renameExample("a", name: "Back End") == "Say \u{201C}back end, run the unit tests.\u{201D} \u{201C}tell back, \u{2026}\u{201D} also works.")
         #expect(model.renameExample("a", name: "fix authentication retries")
             == "Say \u{201C}fix authentication retries, run the unit tests.\u{201D}")
         let short = try #require(AgentAddress.shorterSpokenName(for: "deploy the staging cluster", among: ["deploy the staging cluster", "backend", "fix authentication tests"]))
         #expect(model.renameExample("b", name: "deploy the staging cluster")
-            == "Say \u{201C}deploy the staging cluster, run the unit tests.\u{201D} \u{201C}\(short), \u{2026}\u{201D} also works.")
+            == "Say \u{201C}deploy the staging cluster, run the unit tests.\u{201D} \u{201C}tell \(short), \u{2026}\u{201D} also works.")
     }
 
     @Test func aSaveFailureExplainsTheOutcomeAndKeepsTechnicalDetailsSeparate() {

@@ -49,7 +49,19 @@ struct SpokenResultTests {
         ```
         | a | b |
         """
-        #expect(SpokenResult.spokenForm(reply) == "Result I fixed the parse() bug and added a test. See the diff or a link. one two code block")
+        #expect(SpokenResult.spokenForm(reply) == "Result. I fixed the parse() bug and added a test. See the diff or a link. one. two. code block")
+    }
+
+    @Test(arguments: [
+        ("Extra\n\n`sleep 20` is still running.", "Extra. sleep 20 is still running."),
+        ("Done!\n\nNext step", "Done! Next step"),
+        ("Checked:\n\n- the parser\n- the lexer", "Checked: the parser. the lexer."),
+        ("one line\nwrapped here", "one line wrapped here"),
+        ("Extra\r\n\r\nmore", "Extra. more"),
+        ("- still going…\n- done", "still going… done."),
+    ])
+    func aParagraphBreakOrAListItemIsReadAsTheEndOfASentence(reply: String, spoken: String) {
+        #expect(SpokenResult.spokenForm(reply) == spoken)
     }
 
     @Test func aReplyThatIsMostlyCodeIsSummarizedRatherThanReadAsAFewWords() {

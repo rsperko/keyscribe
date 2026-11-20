@@ -330,6 +330,10 @@ export const rpcContract = {
   },
 }
 
+export function spokenMentions(text: string, nameOf: (thread: string) => string | null): string {
+  return text.replace(/(^|[^\w@])@thread:([A-Za-z0-9_-]+)(?:#msg=\d+)?/g, (_, before: string, thread: string) => `${before}${nameOf(thread) ?? "another thread"}`)
+}
+
 export function rowLabel(label: string | null | undefined, title: string | null): string | null {
   const name = (label ?? "").replace(/^[\s“"]+|[\s”"]+$/g, "")
   if (!name) return null
@@ -1004,7 +1008,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     report(thread.id, async () => {
       const input = m.input?.turn === turn ? m.input : null
       if (input) m.input = null
-      const body = { op: "turnComplete", session: sessionOf(thread.id), reason, answer: answer.slice(0, answerLimit), from: input?.from, prompt: input?.prompt }
+      const body = { op: "turnComplete", session: sessionOf(thread.id), reason, answer: spokenMentions(answer, (thread) => names.get(thread) ?? null).slice(0, answerLimit), from: input?.from, prompt: input?.prompt }
       const accepted = await record
       return accepted === null ? body : { ...body, accepted: accepted.map(({ said, at }) => ({ digest: digestFor(thread.id, said), at })) }
     })

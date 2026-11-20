@@ -314,15 +314,6 @@ final class AgentOutput {
         hint.isEmpty ? line : line + (line.hasSuffix(".") ? " " : ". ") + hint
     }
 
-    static let unconnectedShown = 2
-
-    static func unconnectedHint(_ names: [String]) -> String {
-        guard !names.isEmpty else { return "" }
-        let one = names.count == 1
-        let shown = names.count > unconnectedShown + 1 ? Array(names.prefix(unconnectedShown)) + ["\(names.count - unconnectedShown) more"] : names
-        return "\(either(shown, joining: "and")) \(one ? "is" : "are") running but not connected. Agent settings shows how to connect \(one ? "it" : "them")"
-    }
-
     static func example(names: [String: String], focused: String?) -> String? {
         let ordered = names.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         return ordered.first { names[$0] == focused } ?? ordered.first
