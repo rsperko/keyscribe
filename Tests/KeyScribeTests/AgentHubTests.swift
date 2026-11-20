@@ -334,7 +334,7 @@ struct AgentHubTests {
     }
 
     @Test(arguments: [
-        (AgentTurnInput(from: nil, prompt: AgentPromptDigest.of("Yes to all four.")), SpokenResult.Cause.request("Yes to all four.")),
+        (AgentTurnInput(from: nil, prompt: AgentPromptDigest.of("Yes to all four.")), SpokenResult.Cause.request("Yes to all four.", named: false)),
         (AgentTurnInput(from: .agent, prompt: AgentPromptDigest.of("Found a race in the cache.")), .sender(.agent)),
         (AgentTurnInput(from: nil, prompt: AgentPromptDigest.of("typed while it ran")), nil),
         (nil, nil),
@@ -372,7 +372,36 @@ struct AgentHubTests {
                                  after: AgentTurnInput(from: .other, prompt: nil)))
         #expect(results.map(\.0) == ["All four are in."])
         #expect(results.map(\.1) == ["r1"])
-        #expect(results.map(\.2) == [.request("Yes to all four.")])
+        #expect(results.map(\.2) == [.request("Yes to all four.", named: false)])
+    }
+
+    @Test(arguments: [(0, false, false), (AgentHub.movedOnAfter, false, true), (5, true, true)])
+    func aReplyNamesItsDictationOnceTheUserHasMovedOn(waited: TimeInterval, spokeElsewhere: Bool, named: Bool) async {
+        let clock = Clock()
+        let (hub, transport, registry, _) = makeHub(clock: clock)
+        await connected(hub, transport, registry)
+        await connected(hub, transport, registry, "s2")
+        greet(hub, steering("idle"))
+        greet(hub, .init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i2", session: "claude:s2", pid: 0,
+                         features: ["readiness", "steer"], idle: true, gap: false))
+        var causes: [SpokenResult.Cause?] = []
+        hub.onResult = { _, _, _, _, origin, cause in if origin == "r1" { causes.append(cause) } }
+        var sentBefore = transport.sent.count
+        async let first = hub.deliver("Yes to all four.", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        #expect(await first == .sent("keyscribe"))
+        clock.now = clock.now.addingTimeInterval(waited)
+        if spokeElsewhere {
+            sentBefore = transport.sent.count
+            async let second = hub.deliver("Update the docs.", to: "claude:s2")
+            await untilSent(transport, sentBefore + 1)
+            hub.handle(.submitted(request: "r2", turn: "u1"))
+            _ = await second
+        }
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done.",
+                                 after: AgentTurnInput(from: nil, prompt: AgentPromptDigest.of("Yes to all four."))))
+        #expect(causes == [.request("Yes to all four.", named: named)])
     }
 
     @Test func aSteerAcceptedBeforeItsTurnIsKnownIsSentAndHasTheReplyOfTheTurnThatTakesItIn() async {

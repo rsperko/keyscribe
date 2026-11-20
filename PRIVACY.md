@@ -58,7 +58,8 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   for, or the question's text. For an Ultimate conversation it is the question it asks you and its options. When an agent finishes an instruction you
   dictated, or work you asked it to have KeyScribe read aloud, a longer final reply is sent to the service you chose
   under Replies, only to be summarized into a sentence or two to read aloud or show, together with the words you
-  dictated when the reply came right after them, so the summary can open by naming what you asked; a short reply is read without it,
+  dictated when the reply came right after them and you have since moved on (a couple of minutes have passed, you
+  dictated to another conversation, or other replies are waiting), so the summary can open by naming what you asked; a short reply is read without it,
   a longer one is only announced when no service is chosen, and nothing is sent for a dictated reply's
   conversation KeyScribe can confirm is in front of you when it finishes. When it can't confirm that, such as
   in a terminal it can't read, the reply is sent as usual. Agent replies often contain code and command output, and the

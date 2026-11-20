@@ -49,6 +49,26 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         public var check: SpokenReplyCheck.Result?
         public var kept: Bool?
         public var rendering: Rendering?
+        public var answers: String?
+
+        public static func answers(_ cause: SpokenResult.Cause?) -> String? {
+            switch cause {
+            case .request: "request"
+            case .sender(let sender): sender.rawValue
+            case nil: nil
+            }
+        }
+
+        public var answersLabel: String? {
+            if answers == "request" { return "This dictation" }
+            return switch answers.flatMap(AgentTurnInput.Sender.init(rawValue:)) {
+            case .agent: "Another agent"
+            case .task: "A background task"
+            case .schedule: "A scheduled prompt"
+            case .other: "A message from someone else"
+            case nil: nil
+            }
+        }
 
         public struct Rendering: Codable, Equatable, Sendable {
             public var voice: String

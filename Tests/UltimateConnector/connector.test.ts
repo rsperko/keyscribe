@@ -168,6 +168,45 @@ test("a turn reports its start, what it came after, and its final reply", async 
   assert.equal(complete.turn, undefined)
 })
 
+test("a message that arrives once the agent has answered starts a turn of its own, so the answer is reported at once", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.input(61, 910, "pi.user", "Yes to all four.")
+  h.connector.replied(61, "Starting on them.", "toolUse")
+  h.connector.replied(61, "All four are in.", "stop")
+  await h.flush()
+  assert.deepEqual(h.events("turnComplete").map((c) => [c.answer, c.prompt, c.from]), [])
+  h.connector.input(61, 911, "board.delivered", "Message from @ultimate")
+  await h.flush()
+  assert.deepEqual(h.events("turnComplete").map((c) => [c.answer, c.prompt, c.from]), [["All four are in.", promptDigest("Yes to all four."), undefined]])
+  h.connector.replied(61, "As I said, the disk writer is an update.", "stop")
+  h.state.conversations[1].busy = true
+  h.connector.changed()
+  h.state.conversations[1].busy = false
+  h.connector.changed()
+  await h.flush()
+  assert.deepEqual(h.events("turnComplete").map((c) => [c.answer, c.from]), [["All four are in.", undefined], ["As I said, the disk writer is an update.", "agent"]])
+  assert.equal(h.events("turnStarted").length, 2)
+})
+
+test("a message that arrives while the agent is still working, or after a failed reply, stays in the turn", async () => {
+  for (const [said, stop] of [["Looking.", "toolUse"], ["partial", "error"]]) {
+    const h = harness()
+    await h.connect()
+    h.connector.input(61, 920, "pi.user", "check the build")
+    h.connector.replied(61, said, stop)
+    h.connector.input(61, 921, "board.delivered", "Message from @ultimate")
+    h.connector.replied(61, "Both done.", "stop")
+    h.state.conversations[1].busy = true
+    h.connector.changed()
+    h.state.conversations[1].busy = false
+    h.connector.changed()
+    await h.flush()
+    assert.equal(h.events("turnStarted").length, 1, stop)
+    assert.deepEqual(h.events("turnComplete").map((c) => [c.answer, c.from]), [["Both done.", "agent"]], stop)
+  }
+})
+
 test("a turn another agent started says so, and a failed turn reports no reply", async () => {
   const h = harness()
   await h.connect()

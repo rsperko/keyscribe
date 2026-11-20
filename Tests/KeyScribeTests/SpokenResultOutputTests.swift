@@ -139,6 +139,19 @@ struct SpokenResultOutputTests {
         #expect(speech.spoken.map(\.text) == ["api: On all four, they are done.", "docs, answering another agent: The cache has a race."])
     }
 
+    @Test func aReplyRightAfterItsDictationIsSummarizedWithoutItUnlessOtherRepliesWait() async {
+        let (output, speech, llm) = make()
+        let long = Array(repeating: "Then more words.", count: 20).joined(separator: " ")
+        llm.replies = ["They are done.", "The docs are done.", "On the docs, done."]
+        output.finished(conversation: "pi:s1", handle: "api", answer: long, origin: "r1", cause: .request("Yes to all four.", named: false))
+        await settled()
+        output.finished(conversation: "pi:s2", handle: "docs", answer: long, origin: "r2", cause: .request("Update the docs.", named: false))
+        await settled()
+        speech.finish()
+        await settled()
+        #expect(llm.requests.map(\.user) == [long, "Request:\nUpdate the docs.\n\nReply:\n" + long])
+    }
+
     @Test func aConversationInFrontWhenItFinishesIsNeitherSpokenNorSentForASummary() async {
         let (output, speech, llm) = make(inFront: { $0 == "pi:s1" })
         output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
@@ -199,6 +212,19 @@ struct SpokenResultOutputTests {
         #expect(heard() == [.init(conversation: "pi:s1", name: "api", text: "api: Done.", connection: nil, origin: "r1")])
         speech.finish()
         #expect(heard().count == 1)
+    }
+
+    @Test func aReplyIsReportedWithWhatItAnswered() async {
+        let (output, speech, _) = make()
+        let heard = listening(output)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", origin: "r1", cause: .sender(.agent))
+        await settled()
+        speech.start()
+        speech.finish()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Also done.", origin: "r2")
+        await settled()
+        speech.start()
+        #expect(heard().map(\.cause) == [.sender(.agent), nil])
     }
 
     @Test func aReplyIsReportedWithTheAttemptThatSpokeItAndTheVoiceThatReadIt() async {

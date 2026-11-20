@@ -52,6 +52,26 @@ struct HistorySpokenReplyTests {
         #expect(SpokenAttempt.Reader(rawValue: "natural") == .natural)
     }
 
+    @Test func aSpokenReplyKeepsWhatItAnsweredAndSaysItPlainly() throws {
+        let cases: [(SpokenResult.Cause?, String?)] = [
+            (.request("Yes to all four."), "This dictation"), (.sender(.agent), "Another agent"),
+            (.sender(.task), "A background task"), (.sender(.schedule), "A scheduled prompt"),
+            (.sender(.other), "A message from someone else"), (nil, nil),
+        ]
+        for (cause, label) in cases {
+            var reply = HistoryEntry.SpokenReply(at: at, conversation: "docs", text: "docs: Done.")
+            reply.answers = HistoryEntry.SpokenReply.answers(cause)
+            let saved = entry(reply: reply)
+            let restored = try HistoryEntry(jsonLine: saved.jsonLine())
+            #expect(restored == saved)
+            #expect(restored.spokenReply?.answersLabel == label)
+        }
+        var unknown = HistoryEntry.SpokenReply(at: at, conversation: "docs", text: "docs: Done.")
+        unknown.answers = "a sender a later version adds"
+        #expect(unknown.answersLabel == nil)
+        #expect(!(try entry(reply: unknown).jsonLine().contains("Yes to all four")))
+    }
+
     @Test func aSupportReportSaysWhichVoiceReadTheReply() {
         let spoken = entry(reply: .init(at: at, conversation: "docs", text: "docs: Done.", voice: "natural"))
         #expect(SupportReport.render(entry: spoken, appName: "KeyScribe", setup: "").contains("\"voice\" : \"natural\""))

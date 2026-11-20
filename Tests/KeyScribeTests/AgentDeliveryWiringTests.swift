@@ -766,6 +766,20 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.spokenReply?.text == "keyscribe: The tests pass.")
         #expect(entry?.spokenReply?.connection == "Local")
         #expect(entry?.spokenReply?.conversation == "keyscribe")
+        #expect(entry?.spokenReply?.answers == nil)
+    }
+
+    @Test func aReplyReadAloudKeepsWhatItAnswered() async {
+        let rig = await rig("Run the tests.", focused: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        _ = await entries(rig, count: 1)
+        var spoken = heard("keyscribe, answering another agent: The race is fixed.", origin: submittedRequest(rig))
+        spoken.cause = .sender(.agent)
+        rig.controller.recordSpokenReply(spoken)
+        let entry = await replied(rig)
+        #expect(entry?.spokenReply?.answers == "agent")
+        #expect(entry?.spokenReply?.answersLabel == "Another agent")
     }
 
     @Test func aReplyReadAloudKeepsItsSpokenAudioWithItsEntryAndSaysWhichVoiceReadIt() async throws {

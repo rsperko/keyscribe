@@ -137,6 +137,15 @@ struct SpokenResultTests {
         #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: mine), asked: nil) == nil)
         #expect(SpokenResult.cause(after: nil, asked: asked) == nil)
         #expect(SpokenResult.cause(after: AgentTurnInput(from: .task, prompt: nil), asked: nil) == .sender(.task))
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: mine), asked: asked, named: false) == .request(asked, named: false))
+    }
+
+    @Test func aRequestTheListenerHasNotMovedOnFromIsNamedOnlyWhenOtherRepliesWait() {
+        let fresh = SpokenResult.Cause.request("Yes to all four.", named: false)
+        #expect(fresh.asked() == nil)
+        #expect(fresh.asked(naming: true) == "Yes to all four.")
+        #expect(SpokenResult.Cause.request("Yes to all four.").asked() == "Yes to all four.")
+        #expect(SpokenResult.Cause.sender(.agent).asked(naming: true) == nil)
     }
 
     @Test func theCueNamesTheRequestWhenItIsTheLastMessageTheTurnTook() {

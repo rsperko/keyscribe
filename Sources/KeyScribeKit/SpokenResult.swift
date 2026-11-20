@@ -109,19 +109,19 @@ public enum SpokenResult {
     }
 
     public enum Cause: Equatable, Sendable {
-        case request(String)
+        case request(String, named: Bool = true)
         case sender(AgentTurnInput.Sender)
 
-        public var asked: String? {
-            guard case .request(let asked) = self else { return nil }
+        public func asked(naming: Bool = false) -> String? {
+            guard case .request(let asked, let named) = self, named || naming else { return nil }
             return asked
         }
     }
 
-    public static func cause(after input: AgentTurnInput?, asked: String?) -> Cause? {
+    public static func cause(after input: AgentTurnInput?, asked: String?, named: Bool = true) -> Cause? {
         guard let input else { return nil }
         let last = input.accepted.map { $0.last?.digest } ?? input.prompt
-        if let asked, last == AgentPromptDigest.of(asked) { return .request(asked) }
+        if let asked, last == AgentPromptDigest.of(asked) { return .request(asked, named: named) }
         return input.from.map(Cause.sender)
     }
 

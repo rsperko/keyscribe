@@ -46,6 +46,7 @@ type Member = {
   label?: string
   turn: Turn | null
   answer: string
+  answered: boolean
   failed: string | null
   waiting: Waiting | null
   prompts: number
@@ -556,6 +557,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     const turn: Turn = { id: newTurn() }
     m.turn = turn
     m.answer = ""
+    m.answered = false
     m.failed = null
     report(id, () => ({ op: "turnStarted", session: sessionOf(id), turn: turn.id }))
     return turn
@@ -564,6 +566,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   function input(id: number, entry: number, kind: string, text: string) {
     const m = members.get(id)
     if (!m) return
+    if (m.turn && m.answered) endTurn(id, m)
     const started = m.turn === null
     const turn = startTurn(id, m)
     turn.input = { entry, prompt: promptDigest(text), ...(kind === userInput ? {} : { from: "agent" }) }
@@ -579,6 +582,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   function replied(id: number, text: string, stopReason: string | undefined) {
     const m = members.get(id)
     if (!m) return
+    m.answered = false
     if (stopReason === "error" || stopReason === "aborted") {
       m.failed = stopReason
       m.answer = ""
@@ -587,6 +591,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     if (stopReason === "toolUse") return
     m.failed = null
     if (text.trim()) m.answer = text
+    m.answered = m.answer !== ""
   }
 
   function endTurn(id: number, m: Member) {
@@ -597,6 +602,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     const reason = m.failed === "aborted" ? "aborted" : m.failed === "error" ? "error" : "complete"
     const answer = reason === "complete" ? m.answer.slice(0, answerLimit) : ""
     m.answer = ""
+    m.answered = false
     m.failed = null
     const after = turn.input ? { prompt: turn.input.prompt, ...(turn.input.from ? { from: turn.input.from } : {}) } : {}
     report(id, () => ({ op: "turnComplete", session: sessionOf(id), reason, answer, ...after }))
@@ -613,7 +619,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       if (!m) {
         members.set(summary.id, {
           helloed: false, greeting: false, resay: false, quiet: false, unsaid: false, busy: summary.busy, title,
-          turn: summary.busy ? { id: newTurn() } : null, answer: "", failed: null, waiting: null, prompts: 0, chain: Promise.resolve(),
+          turn: summary.busy ? { id: newTurn() } : null, answer: "", answered: false, failed: null, waiting: null, prompts: 0, chain: Promise.resolve(),
         })
         added = true
         continue

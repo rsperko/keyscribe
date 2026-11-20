@@ -42,6 +42,7 @@ final class SpokenResultOutput {
         var reason: String? = nil
         var returned: String? = nil
         var failure: String? = nil
+        var cause: SpokenResult.Cause? = nil
     }
 
     enum Unread: Equatable {
@@ -339,8 +340,9 @@ final class SpokenResultOutput {
                     summary.failure = Summary.unusable
                     break
                 }
+                let othersWait = self.playing != nil || !self.queued.isEmpty || self.generating.keys.contains { $0 != key }
                 let request = SpokenResult.request(
-                    answer: input, asked: cause?.asked, prompt: settings.effectivePrompt, tokenizer: Tokenizer())
+                    answer: input, asked: cause?.asked(naming: othersWait), prompt: settings.effectivePrompt, tokenizer: Tokenizer())
                 summary = await self.summary(of: request, connection: usable, handle: handle, deadline: self.deadlineSeconds)
                 summarizedBy = usable.name
             }
@@ -527,7 +529,7 @@ final class SpokenResultOutput {
                     connection: playing.connection, origin: source.origin,
                     attempt: playing.shownOnly ? nil : speech.attempt, reader: playing.shownOnly ? nil : speech.reader,
                     reason: !playing.shownOnly && speech.reader == .macOS ? speech.macOSReason : nil,
-                    returned: playing.returned, failure: source.failure))
+                    returned: playing.returned, failure: source.failure, cause: playing.merged.isEmpty ? playing.cause : nil))
             }
         }
     }

@@ -54,9 +54,11 @@ final class AgentOutput {
         then saved: @escaping @MainActor (_ entry: String?) -> Void = { _ in }
     ) {
         guard keepsHistory(), reporter.keepsHistory else { return saved(nil) }
-        let reply = HistoryEntry.SpokenReply(
+        var answered = HistoryEntry.SpokenReply(
             at: now, conversation: heard.name, text: heard.text, connection: heard.connection, voice: heard.reader?.rawValue,
             reason: heard.reason, returned: heard.returned, failure: heard.failure)
+        answered.answers = HistoryEntry.SpokenReply.answers(heard.cause)
+        let reply = answered
         if let origin = heard.origin {
             guard let take = recordedTakes.last(where: { $0.request == origin }) else { return saved(nil) }
             reporter.update(id: take.id, near: take.at, { current in

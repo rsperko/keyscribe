@@ -1228,6 +1228,7 @@ private struct HistoryDetailView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             detailRow("From", "\(reply.conversation) \u{00B7} \(reply.at.formatted(date: .omitted, time: .shortened))")
+            if let answers = reply.answersLabel { detailRow("Answers", answers) }
             if let connection = reply.connection { detailRow("Summarized by", connection) }
             if let failure = reply.failure { detailRow("No summary", failure) }
             playControl(reply)

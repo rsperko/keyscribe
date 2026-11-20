@@ -1785,7 +1785,8 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 > restored into speech: the summary says "a hidden value" in its place. Every result starts with the name of
 > the conversation that produced it, joined by who the reply answered when the turn says it came after a message
 > someone other than the user sent ("{name}, answering another agent:"); a reply that came right after the user's
-> own dictation is summarized with that dictation, bounded to `SpokenResult.askedCharacterLimit` characters and
+> own dictation, once the user has moved on from it (`AgentHub.movedOnAfter` has passed since it was sent, the user
+> dictated to another conversation since, or other replies are being read or summarized), is summarized with that dictation, bounded to `SpokenResult.askedCharacterLimit` characters and
 > redacted with the reply, so the summary can open by naming it; a changed `prompt` is then also told which part is
 > the request and which the reply, since only the default instruction says so itself. A summary that fails, times out or comes back empty is spoken as that
 > name followed by "No summary of the long reply. Open the conversation for the result." Unavailable summaries waiting

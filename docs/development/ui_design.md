@@ -2384,8 +2384,9 @@ a non-English summary is read by an English speaker or the macOS default voice.
 Every summary starts with the exact name of the conversation that produced it, even with only one open, and
 the default instruction asks for one or two short sentences, about 25 words in all, leading with anything that failed, is
 unverified, or waits on the developer, else the main result, and leaving out everything else. When the reply came
-right after the user's own dictation, the summary is asked with that dictation and opens with two to five words naming
-it, within the same length, while the order above still decides what follows; when it came after a message someone else sent, the name is joined by who, in a few words and
+right after the user's own dictation and the user has moved on from it (a couple of minutes have passed, they dictated
+to another conversation since, or other replies are waiting), the summary is asked with that dictation and opens with
+two to five words naming it; a reply while they are still on that request needs no cue and is summarized alone, within the same length, while the order above still decides what follows; when it came after a message someone else sent, the name is joined by who, in a few words and
 no new sentence ("{name}, answering another agent:", "{name}, after a background task:", "{name}, after a scheduled
 prompt:", "{name}, answering someone else:"), even for a short reply read as it is. When the connector cannot say which
 message the reply answers, it names neither: a cue that names the wrong request is worse than none. It gives no example: a
@@ -2862,8 +2863,9 @@ the agent is an entry of its own under the Agent mode, reading *Reply from backe
 History is on and the mode is not left out of History. A notice (an approval or a wait) is not kept: a long
 session would fill History with them, and the agent's own screen already shows them. Either way a
 **Reply** section shows the line, selectable, then **From** with the conversation it came from and when it was
-given, and, for a summary, **Summarized by**
-and the service; for a summary cut short, a caption under the line says it was shortened for reading, and a collapsed
+given, **Answers** with what the reply answered when the connector said so (*This dictation*, *Another agent*,
+*A background task*, *A scheduled prompt*, or *A message from someone else*; no row when it is not known), and, for a
+summary, **Summarized by** and the service; for a summary cut short, a caption under the line says it was shortened for reading, and a collapsed
 **Full summary** disclosure below the playback control holds everything the service returned, selectable; a missing one shows **No summary** with
 a sanitized reason (the service failed, timed out, returned nothing, or could not be used), never the service's own
 error text. Search matches both, and the text and Markdown exports carry them; the entry's badges add **Reply summary** and **Best-effort redaction**. The line is never

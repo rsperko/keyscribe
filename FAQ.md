@@ -875,12 +875,16 @@ asked. For Pi and omp, which tool call a prompt is about is a best guess; bb nam
 with the tool and command an approval is for, or the question's text. Without a service you hear "Waiting for approval." or "Waiting for an answer." when the prompt's kind says which, and "Waiting for you." otherwise. For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
 name and a short summary of the agent's final reply: a longer reply goes to that service, after its
 best-effort redaction, to be summarized; a reply of a few words is read as it is without any service. When the reply
-came right after what you dictated, your words go with it, so the summary opens with a few words naming what you asked.
+came right after what you dictated and you have since moved on (a couple of minutes have passed, you dictated to
+another conversation, or other replies are waiting), your words go with it, so the summary opens with a few words
+naming what you asked. A reply that comes while you are still on that request is summarized on its own.
 When it came after a message someone else sent the agent, the name is followed by who, such as "api, answering
 another agent:" or "api, after a background task:", so a reply you never asked for is never mistaken for an answer to
-you. When KeyScribe can't tell which message the reply answers, it names neither. With Pi and omp, once the agent
+you. When KeyScribe can't tell which message the reply answers, it names neither. With Pi, omp and Ultimate, once the agent
 has answered you, a message that reaches it from anywhere else starts a new exchange: your answer is read right
-away, and the reply to that message is not read as yours. With
+away, and the reply to that message is not read as yours. History shows, beside each reply it keeps, what the reply
+answered when KeyScribe knows: your dictation, another agent, a background task, a scheduled prompt, or a message
+from someone else. With
 **AI service** set to **None**, a longer reply is announced as "Replied. Open the conversation for the result." and
 nothing is sent. A reply you asked to hear that has no written text is announced as "Finished without a
 written reply. Open the conversation for the result." A turn that ends with an error is announced as "Ended with an error."; one you interrupt
