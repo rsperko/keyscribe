@@ -323,6 +323,15 @@ every rule above applies to it, with these sharpenings:
   the run (`agent-loop.js`). A steer Pi carries into a new run belongs to that run; a run that starts without a
   prompt digest keeps waiting for the `absorbed` (`AgentHub` `.turnStarted`). A later extension can still consume an
   accepted steer: it reads as sent, and no reply follows it.
+- **In Pi and omp, input that arrives once the agent has answered starts a turn of its own, even inside one run.**
+  An extension's message, another agent's, or one typed or steered in after an assistant message that ends without
+  a tool call ends the running turn there, so the answer to the dictation is reported at once and is never replaced
+  by the reply to what followed; that later turn reports `from: other` when an extension's message started it. Pi
+  marks no difference between a message from someone else and an extension continuing the user's request (a stop
+  hook, plan-mode's execute step), so a continuation of that kind also starts a turn of its own, and its reply is not
+  read as the dictation's. omp tells its own continuations apart (`agent_end` with `willContinue`), and those stay
+  in the turn (`Core.paused`). Input that arrives while the agent is still working (after a tool call) stays in the
+  turn, and its reply names no request.
 - **Pi and omp share one connector core, with an adapter per agent.** `Resources/PiConnector/index.ts` holds the core
   (queue, poll loop, submissions, receipts, read aloud, focus) and each agent's adapter for the signals that differ;
   the installer writes `installedFor` and gives each agent its own folder under `extensions/` (the plugin name with

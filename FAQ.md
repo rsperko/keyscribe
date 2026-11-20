@@ -878,7 +878,9 @@ best-effort redaction, to be summarized; a reply of a few words is read as it is
 came right after what you dictated, your words go with it, so the summary opens with a few words naming what you asked.
 When it came after a message someone else sent the agent, the name is followed by who, such as "api, answering
 another agent:" or "api, after a background task:", so a reply you never asked for is never mistaken for an answer to
-you. When KeyScribe can't tell which message the reply answers, it names neither. With
+you. When KeyScribe can't tell which message the reply answers, it names neither. With Pi and omp, once the agent
+has answered you, a message that reaches it from anywhere else starts a new exchange: your answer is read right
+away, and the reply to that message is not read as yours. With
 **AI service** set to **None**, a longer reply is announced as "Replied. Open the conversation for the result." and
 nothing is sent. A reply you asked to hear that has no written text is announced as "Finished without a
 written reply. Open the conversation for the result." A turn that ends with an error is announced as "Ended with an error."; one you interrupt

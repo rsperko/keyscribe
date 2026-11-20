@@ -171,6 +171,8 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
   let lastAnswer = ""
   let lastPrompt: string | null = null
   let repliedThisRun = false
+  let answered = false
+  let lastFrom: "other" | null = null
   let lastFailed = false
   let staleWatch: (() => void) | null = null
   let titleCheck: (() => void) | null = null
@@ -782,6 +784,35 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
     if (session) observe({ op: "turnComplete", session, reason: "unknown" })
   }
 
+  function beginTurn(): void {
+    if (!session || currentTurn !== null) return
+    lastAnswer = ""
+    said = ""
+    lastFailed = false
+    lastPrompt = null
+    lastFrom = null
+    repliedThisRun = false
+    answered = false
+    turns += 1
+    watchForStaleTurn()
+    currentTurn = `${instance}.${turns}`
+    observe({ op: "turnStarted", session, turn: currentTurn })
+  }
+
+  function finishTurn(aborted: boolean): void {
+    if (!session) return
+    stopStaleWatch()
+    currentTurn = null
+    if (aborted) observe({ op: "turnComplete", session, reason: "aborted" })
+    else if (lastFailed) observe({ op: "turnComplete", session, reason: "error" })
+    else observe({ op: "turnComplete", session, reason: "complete", answer: boundedAnswer(lastAnswer), prompt: lastPrompt ?? undefined, from: lastFrom ?? undefined })
+    lastAnswer = ""
+    lastPrompt = null
+    lastFrom = null
+    lastFailed = false
+    answered = false
+  }
+
   function received(message: unknown): void {
     const text = messageText(message)
     const serialIn = markedSerial(text)
@@ -1069,30 +1100,10 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
       if (!session) return
       accepted(text)
     },
-    turnStarted() {
-      if (!session || currentTurn !== null) return
-      lastAnswer = ""
-      said = ""
-      lastFailed = false
-      lastPrompt = null
-      repliedThisRun = false
-      turns += 1
-      watchForStaleTurn()
-      currentTurn = `${instance}.${turns}`
-      observe({ op: "turnStarted", session, turn: currentTurn })
-    },
-    turnFinished(aborted) {
-      if (!session) return
-      stopStaleWatch()
-      currentTurn = null
-      if (aborted) observe({ op: "turnComplete", session, reason: "aborted" })
-      else if (lastFailed) observe({ op: "turnComplete", session, reason: "error" })
-      else observe({ op: "turnComplete", session, reason: "complete", answer: boundedAnswer(lastAnswer), prompt: lastPrompt ?? undefined })
-      lastAnswer = ""
-      lastPrompt = null
-      lastFailed = false
-    },
+    turnStarted: beginTurn,
+    turnFinished: finishTurn,
     paused(on) {
+      if (on) answered = false
       if (on) stopStaleWatch()
       else if (session && currentTurn !== null && staleWatch === null) watchForStaleTurn()
     },
@@ -1108,12 +1119,23 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
       lastFailed = stop === "error" || stop === "aborted"
       lastAnswer = lastFailed ? "" : messageText(message)
       repliedThisRun = true
+      answered = !lastFailed && stop !== "toolUse" && !callsTool(message)
       if (lastAnswer.trim()) said = lastAnswer.trim().slice(-waitingSaidLimit)
     },
     userStarted(message) {
       const role = (message as { role?: string } | undefined)?.role
-      if (session && role === "custom" && repliedThisRun) lastPrompt = null
-      if (!session || !message || role !== "user") return
+      if (!session || !message || (role !== "user" && role !== "custom")) return
+      const after = currentTurn !== null && answered
+      if (after) {
+        finishTurn(false)
+        beginTurn()
+      }
+      if (role === "custom") {
+        if (after) lastFrom = "other"
+        else if (repliedThisRun) lastPrompt = null
+        return
+      }
+      lastFrom = null
       received(message)
     },
     compacting(on) {
@@ -1390,6 +1412,11 @@ function promptDigest(text: string): string {
   let hash = 0xcbf29ce484222325n
   for (const byte of new TextEncoder().encode(plain)) hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn
   return hash.toString(16).padStart(16, "0")
+}
+
+function callsTool(message: unknown): boolean {
+  const content = (message as { content?: unknown }).content
+  return Array.isArray(content) && content.some((part) => part && typeof part === "object" && (part as { type?: string }).type === "toolCall")
 }
 
 function messageText(message: unknown): string {

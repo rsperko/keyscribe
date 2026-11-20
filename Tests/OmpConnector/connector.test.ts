@@ -569,6 +569,18 @@ test("a stop-hook continuation and goal or reminder turns stay inside one turn",
   assert.deepEqual(complete.map((b) => b.answer), ["HELLO CONTINUED"])
 })
 
+test("a message an extension adds once the agent has answered, without omp continuing the run, starts a turn of its own", async () => {
+  const h = harness()
+  await h.connect()
+  await h.runStarts()
+  h.emit("message_end", h.assistant("HELLO"))
+  h.emit("message_start", { message: { role: "custom", customType: "bridge", content: "Found a race in the cache." } })
+  h.emit("message_end", h.assistant("The race is fixed."))
+  await h.runEnds()
+  assert.equal(h.events().filter((b) => b.op === "turnStarted").length, 2)
+  assert.deepEqual(h.events().filter((b) => b.op === "turnComplete").map((b) => [b.answer, b.from]), [["HELLO", undefined], ["The race is fixed.", "other"]])
+})
+
 test("background work keeping the run open is not finished even though omp reports itself idle", async () => {
   const h = harness()
   await h.connect()

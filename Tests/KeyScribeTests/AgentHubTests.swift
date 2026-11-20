@@ -354,6 +354,27 @@ struct AgentHubTests {
         #expect(causes == [expected])
     }
 
+    @Test func aTurnAnExtensionsMessageStartsAfterTheDictationWasAnsweredIsNotReadAsTheDictationsReply() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        greet(hub, steering("idle"))
+        var results: [(String, String?, SpokenResult.Cause?)] = []
+        hub.onResult = { _, _, answer, _, origin, cause in results.append((answer, origin, cause)) }
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("Yes to all four.", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        #expect(await receipt == .sent("keyscribe"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All four are in.",
+                                 after: AgentTurnInput(from: nil, prompt: AgentPromptDigest.of("Yes to all four."))))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "The disk writer is a software update.",
+                                 after: AgentTurnInput(from: .other, prompt: nil)))
+        #expect(results.map(\.0) == ["All four are in."])
+        #expect(results.map(\.1) == ["r1"])
+        #expect(results.map(\.2) == [.request("Yes to all four.")])
+    }
+
     @Test func aSteerAcceptedBeforeItsTurnIsKnownIsSentAndHasTheReplyOfTheTurnThatTakesItIn() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry, status: "busy")

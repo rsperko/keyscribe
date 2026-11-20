@@ -1865,7 +1865,70 @@ test("a reply to the dictation that started the run says it came after that dict
   assert.equal(done.prompt, digest("Yes to all four."))
 })
 
-test("a reply after a message added once the agent had answered names no request, and one typed or sent by another extension names its prompt", async () => {
+test("a message an extension adds once the agent has answered a dictation ends that dictation's turn with its answer at once, and the reply to it is a turn of its own from someone else", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "Yes to all four.", { expectedPrompts: 0 })])
+  await h.accepted()
+  h.emit("message_end", { message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "bash" }] } })
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "All four are in." }] } })
+  h.emit("message_start", { message: { role: "custom", content: "Found a race in the cache." } })
+  await h.settle()
+  await h.answerEvents()
+  assert.deepEqual(
+    h.events().filter((b) => b.op === "turnComplete").map((b) => [b.answer, b.prompt, b.from]),
+    [["All four are in.", digest("Yes to all four."), undefined]],
+  )
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "The disk writer is a software update." }] } })
+  await h.finished()
+  await h.answerEvents()
+  assert.deepEqual(
+    h.events().filter((b) => b.op === "turnStarted" || b.op === "turnComplete").map((b) => [b.op, b.turn, b.answer, b.prompt, b.from]),
+    [
+      ["turnStarted", h.turn(1), undefined, undefined, undefined],
+      ["turnComplete", undefined, "All four are in.", digest("Yes to all four."), undefined],
+      ["turnStarted", h.turn(2), undefined, undefined, undefined],
+      ["turnComplete", undefined, "The disk writer is a software update.", undefined, "other"],
+    ],
+  )
+})
+
+test("a message added while the agent is still working on a dictation keeps one turn whose reply names no request", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "Yes to all four.", { expectedPrompts: 0 })])
+  await h.accepted()
+  h.emit("message_end", { message: { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "Checking." }, { type: "toolCall", name: "bash" }] } })
+  h.emit("message_start", { message: { role: "custom", content: "Found a race in the cache." } })
+  h.emit("message_end", { message: { role: "assistant", stopReason: "error", content: [] } })
+  h.emit("message_start", { message: { role: "custom", content: "Retry." } })
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "All four are in." }] } })
+  await h.finished()
+  await h.answerEvents()
+  assert.equal(h.ops().filter((op) => op === "turnStarted").length, 1)
+  assert.deepEqual(
+    h.events().filter((b) => b.op === "turnComplete").map((b) => [b.answer, b.prompt, b.from]),
+    [["All four are in.", undefined, undefined]],
+  )
+})
+
+test("a message typed into the agent once it has answered a dictation ends that dictation's turn, and the reply to it names the typed prompt", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "Yes to all four.", { expectedPrompts: 0 })])
+  await h.accepted()
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "All four are in." }] } })
+  h.emit("message_start", { message: { role: "user", content: "now the docs" } })
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Docs updated." }] } })
+  await h.finished()
+  await h.answerEvents()
+  assert.deepEqual(
+    h.events().filter((b) => b.op === "turnComplete").map((b) => [b.answer, b.prompt, b.from]),
+    [["All four are in.", digest("Yes to all four."), undefined], ["Docs updated.", digest("now the docs"), undefined]],
+  )
+})
+
+test("a reply after a message added once the agent had answered is from someone else, and one typed or sent by another extension names its prompt", async () => {
   const h = harness()
   await h.connect()
   await h.deliver([h.submit("r1", "Yes to all four.", { expectedPrompts: 0 })])
@@ -1886,6 +1949,6 @@ test("a reply after a message added once the agent had answered names no request
   await h.answerEvents()
   assert.deepEqual(
     h.events().filter((b) => b.op === "turnComplete").map((b) => [b.from, b.prompt]),
-    [[undefined, undefined], [undefined, digest("now the docs")], [undefined, digest("from a bridge")]],
+    [[undefined, digest("Yes to all four.")], ["other", undefined], [undefined, digest("now the docs")], [undefined, digest("from a bridge")]],
   )
 })
