@@ -694,6 +694,11 @@ final class AgentHub {
 
     var openPrompts: [String: AgentPrompt] { waitingPrompts }
 
+    var formerNames: [String: String] {
+        guard namesProblem == nil else { return [:] }
+        return directory.formerNames
+    }
+
     var disconnectedNames: [String: String] {
         guard namesProblem == nil else { return [:] }
         return Dictionary(disconnected.map { ($0.handle, $0.id) }, uniquingKeysWith: { first, _ in first })

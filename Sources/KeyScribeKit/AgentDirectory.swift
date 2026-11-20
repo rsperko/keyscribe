@@ -110,6 +110,7 @@ public struct AgentDirectory: Sendable {
     private var sourceById: [String: AgentNameSource] = [:]
     private var placeNameById: [String: AgentPlaceName] = [:]
     private var folderUnknown: Set<String> = []
+    private var former: [String: String] = [:]
     public private(set) var sharedPlaceNames: [String: AgentRecipient.SharedName] = [:]
 
     public init(chosen: [String: String] = [:], remembered: [String: RememberedName] = [:]) {
@@ -135,6 +136,12 @@ public struct AgentDirectory: Sendable {
 
     public var handles: [String] { conversations.map(\.handle) }
 
+    public var formerNames: [String: String] {
+        let current = Set(handleById.values.map(AgentHandles.matchKey))
+        return Dictionary(
+            former.filter { !current.contains(AgentHandles.matchKey($0.value)) }.map { ($0.value, $0.key) }, uniquingKeysWith: { first, _ in first })
+    }
+
     public func conversation(handle: String) -> AgentConversation? {
         let wanted = AgentHandles.matchKey(handle)
         return conversations.first { AgentHandles.matchKey($0.handle) == wanted }
@@ -154,6 +161,7 @@ public struct AgentDirectory: Sendable {
             let normalized = AgentHandles.normalize(name)
             return normalized.isEmpty || AgentHandles.isReserved(normalized) ? nil : normalized
         }
+        let before = handleById
         var placed: [String: (name: String, place: AgentPlaceName)] = [:]
         var sharing: [String: (label: String, members: [String], surface: String)] = [:]
         let known = places
@@ -263,6 +271,10 @@ public struct AgentDirectory: Sendable {
         handleById = AgentHandles.assign(
             (named + unnamed).map { AgentHandles.Conversation(id: conversationId($0), folder: $0.nameBase, name: preferred[conversationId($0)]) },
             existing: handleById, reserved: away)
+        for (id, old) in before where liveIds.contains(id) {
+            if let now = handleById[id], AgentHandles.matchKey(now) != AgentHandles.matchKey(old) { former[id] = old }
+        }
+        former = former.filter { liveIds.contains($0.key) }
         folderUnknown = Set(entries.filter { $0.folder.isEmpty && preferred[conversationId($0)] == nil }.map(conversationId))
         sourceById = sources
         placeNameById = placed.mapValues(\.place).merging(placeNameById.filter { unplaced.contains($0.key) }) { now, _ in now }
@@ -431,8 +443,10 @@ public struct AgentDirectory: Sendable {
 
     public mutating func rename(_ id: String, to raw: String) throws {
         if let problem = renameProblem(id, to: raw) { throw problem }
+        let old = handleById[id]
         handleById = try AgentHandles.rename(id, to: raw, in: handleById)
         chosen[id] = handleById[id]
+        if let old, old != handleById[id] { former[id] = old }
         func renamed(_ conversation: AgentConversation) -> AgentConversation {
             var c = conversation
             c.handle = handleById[c.id] ?? c.handle

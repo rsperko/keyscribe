@@ -262,6 +262,39 @@ struct AgentDirectoryPlaceTests {
         #expect(Set(handles(directory).values) == ["ultimate", "ultimate blue"])
     }
 
+    @Test func aConversationWhoseNameChangesStillAnswersToItsPreviousName() {
+        var directory = AgentDirectory()
+        directory.update(entries: [session("ultimate", "a", name: "ultimate 39")], live: [])
+        directory.update(entries: [session("ultimate", "a", name: "reply with kiwi")], live: [])
+        #expect(directory.handles == ["reply with kiwi"])
+        #expect(directory.formerNames == ["ultimate 39": "ultimate:a"])
+    }
+
+    @Test func aPreviousNameAnotherConversationNowHasIsThatConversationsAlone() {
+        var directory = AgentDirectory()
+        directory.update(entries: [session("ultimate", "a", name: "ultimate 39")], live: [])
+        directory.update(entries: [session("ultimate", "a", name: "reply with kiwi")], live: [])
+        directory.update(entries: [session("ultimate", "a", name: "reply with kiwi"), session("ultimate", "b", pid: 20, name: "ultimate 39")], live: [])
+        #expect(handles(directory)["ultimate:b"] == "ultimate 39")
+        #expect(directory.formerNames.isEmpty)
+    }
+
+    @Test func aPreviousNameEndsWithItsConversation() {
+        var directory = AgentDirectory()
+        directory.update(entries: [session("ultimate", "a", name: "ultimate 39")], live: [])
+        directory.update(entries: [session("ultimate", "a", name: "reply with kiwi")], live: [])
+        directory.update(entries: [], live: [])
+        #expect(directory.formerNames.isEmpty)
+    }
+
+    @Test func onlyTheNameJustBeforeTheCurrentOneIsKept() {
+        var directory = AgentDirectory()
+        for name in ["ultimate 39", "reply with kiwi", "release notes"] {
+            directory.update(entries: [session("ultimate", "a", name: name)], live: [])
+        }
+        #expect(directory.formerNames == ["reply with kiwi": "ultimate:a"])
+    }
+
     private func titled(_ title: String, workspace: String?, id: String) -> AgentPlace {
         var labels: [AgentPlace.Label] = [.init(text: title, level: .title, container: "\(id)#conversation")]
         var containers = ["\(id)#conversation"]

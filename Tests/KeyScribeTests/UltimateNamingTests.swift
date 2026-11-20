@@ -134,6 +134,21 @@ struct UltimateNamingTests {
         #expect(AgentAddress.parse("tell ultimate 70 run the tests", names: names) == .name("ultimate 70", body: "run the tests"))
     }
 
+    @Test func aBranchNamedSinceTheLastTakeIsStillReachedByItsNumberAndNeverByTheStandingAgent() async throws {
+        let (hub, _) = await hub(.oneUntitled, .besideAnother, .one)
+        let home = Self.projects(.one)[0].home
+        let session = AgentSessionID.make(agent: "ultimate", native: AgentHostLocation(host: "ultimate", instance: home, native: "61").conversationKey)
+        var hello = AgentHostTests.hello(session)
+        hello.agent = "ultimate"
+        hello.title = "release notes"
+        hub.handle(.hello(hello))
+        await hub.rescan()
+        #expect(hub.directory.conversations.contains { $0.id == session && $0.handle == "release notes" })
+        let snapshot = AgentSnapshot(names: hub.names, conversations: hub.recordingOrder, former: hub.formerNames)
+        #expect(AgentAddress.parse("tell ultimate 61 run the tests", names: snapshot.spokenNames) == .name("ultimate 61", body: "run the tests"))
+        #expect(snapshot.addressable["ultimate 61"] == session)
+    }
+
     @Test func aMessageToTheStandingAgentThatStartsWithALiveBranchsNumberGoesToThatBranch() async {
         let (hub, _) = await hub(.twoUntitled, .besideAnother, .one)
         let names = hub.directory.conversations.map(\.handle)

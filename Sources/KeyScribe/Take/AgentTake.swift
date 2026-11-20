@@ -6,12 +6,13 @@ struct AgentSnapshot {
     let conversations: [AgentConversation]
     var namesAvailable = true
     var disconnected: [String: String] = [:]
+    var former: [String: String] = [:]
     var shared: [String: AgentRecipient.SharedName] = [:]
     var late: [String: String] = [:]
     var lateShared: [String: AgentRecipient.SharedName] = [:]
     var rows: [String] { conversations.map(\.id) }
     private var merged: (names: [String: String], shared: [String: AgentRecipient.SharedName]) {
-        AgentRecipient.addingLate(late, sharing: lateShared, to: names.merging(disconnected) { kept, _ in kept }, sharing: shared)
+        AgentRecipient.addingLate(late, sharing: lateShared, to: names.merging(disconnected) { kept, _ in kept }.merging(former) { kept, _ in kept }, sharing: shared)
     }
     var addressable: [String: String] { merged.names }
     var sharedNames: [String: AgentRecipient.SharedName] { merged.shared }
@@ -117,7 +118,7 @@ final class AgentTake {
     private static func snapshot(of agents: AgentHub) -> AgentSnapshot {
         AgentSnapshot(
             names: agents.names, conversations: agents.recordingOrder,
-            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
+            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, former: agents.formerNames, shared: agents.sharedNames)
     }
 
     private func settlePlaceNames(_ agents: AgentHub) async -> Bool {
@@ -237,7 +238,7 @@ final class AgentTake {
         let snapshot = {
             var frozen = pressed
             if frozen.namesAvailable, agents.namesProblem == nil {
-                frozen.late = agents.names.merging(agents.disconnectedNames) { kept, _ in kept }
+                frozen.late = agents.names.merging(agents.disconnectedNames) { kept, _ in kept }.merging(agents.formerNames) { kept, _ in kept }
                 frozen.lateShared = agents.sharedNames
             }
             return frozen

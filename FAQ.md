@@ -794,7 +794,8 @@ the workspace name and its agent, such as “cos claude” and “cos pi”, and
 you meant. When two conversations in different workspaces show the same name, such as two panes titled
 “marvin” in workspaces “cos” and “web”, each is called by its workspace and that name, “cos marvin” and
 “web marvin”. A conversation keeps its longer name after the other one closes, so what you learned to say
-keeps working. Name the panes in herdr to give each its own name. A new conversation started in a named pane
+keeps working, and when a conversation's name changes, its previous name still reaches it while no other
+conversation has that name. Name the panes in herdr to give each its own name. A new conversation started in a named pane
 gets that pane's name once the old one has closed. If you say a conversation's herdr tab or workspace name
 after “tell”, “ask” or “open” and that is not its name, nothing is sent: KeyScribe tells you the name to
 say instead. Renaming a pane or workspace takes effect within a few
