@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import { focusConnectionContract } from "../AgentConformance/lib/focus-contract.ts"
 import { ComposerAnswers, acceptedInEndedTurn, commandAnswer, composeInto, keyscribe, promptDigest, readAloudReply, rowLabel, spokenMentions, shownThread, waitingFor, type Bb, type Composed, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
 
 type Request = { path: string; body: any; auth: string; answer: (status: number, text?: string) => void; settled: boolean; cancelled: boolean }
@@ -139,6 +140,19 @@ async function connected(options: Parameters<typeof harness>[0] = {}) {
   await h.settle()
   return Object.assign(h, { plugin })
 }
+
+focusConnectionContract("bb", async () => {
+  const h = harness()
+  const plugin = keyscribe(h.bb, h.host, ["/p/keyscribe.json"])
+  await h.settle()
+  return {
+    focus: async focused => { plugin.window({ window: "w1", focused: true, thread: focused ? "thr_a" : null }); await h.settle() },
+    connect: h.answerHellos,
+    drain: async () => { for (let i = 0; i < 4; i++) await h.answerEvents() },
+    reports: () => h.sent("shown"),
+    stop: plugin.stop,
+  }
+})
 
 test("says hello for every thread under its conversation key with what it knows, then one poll serves them all", async () => {
   const h = harness()

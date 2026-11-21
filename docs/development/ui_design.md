@@ -373,7 +373,8 @@ the user named (only while tmux shows its status line, and a window name only wh
 programs rename windows), a Zellij tab the user renamed (a Zellij pane title follows the program's own
 title, so it is not a name), a bb thread's title as bb shows it, a Codex conversation's title, an Ultimate
 standing agent's handle or a title the user gave an Ultimate conversation (never one Ultimate generated; an untitled
-Ultimate branch is called `ultimate` and the number Ultimate shows, `ultimate 61` for #61; its current sidebar title
+Ultimate branch is called `ultimate` and the number Ultimate shows, `ultimate 61` for #61, which stays one of its
+other names once it has a title, and a number after `ultimate` that names no listed conversation holds; its current sidebar title
 is also an explicit address after “tell”, “open” or “check on”, including generated titles), a Ghostty
 terminal or tab name the user set (a tab only in a window without splits, since Ghostty does not say which
 split belongs to which tab), and an iTerm tab title the user set. A title a program writes into its

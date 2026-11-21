@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { mkdirSync, openSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { type AgentDriver, type Message, command, removeScratch, scratch, settled } from "./driver.ts"
 import { freePort, sleep, until } from "./util.ts"
@@ -61,6 +61,7 @@ export class UltimateDriver implements AgentDriver {
   }
 
   get conversation() { return this.id === undefined ? undefined : `ultimate:${this.id}@${realpathSync(this.home)}` }
+  get addresses() { return this.id === undefined ? undefined : { said: `ultimate ${this.id}`, absent: `ultimate ${this.id + 9000}` } }
 
   owns(conversation: string | undefined) {
     return this.id !== undefined && !!conversation && conversation.startsWith(`ultimate:${this.id}@`)
@@ -69,6 +70,7 @@ export class UltimateDriver implements AgentDriver {
   get url() { return this.origin }
   get projectHome() { return this.home }
   get conversationId() { return this.id }
+  get tracePath() { return join(this.root, "bridge-trace.jsonl") }
 
   api(path: string, payload?: object) {
     return fetch(this.origin + path, {
@@ -93,6 +95,7 @@ export class UltimateDriver implements AgentDriver {
     const log = openSync(join(this.root, "ultimate.log"), "a")
     this.process = spawn(this.tool, [this.project, "--port", String(port), "--no-open"], {
       env: { ...environment, ULTIMATE_USER_HOME: this.user, ULTIMATE_HOME: this.home, NO_COLOR: "1",
+        KEYSCRIBE_ULTIMATE_TRACE: this.tracePath,
         ...(process.env.ULTIMATE_MODEL ? { ULTIMATE_MODEL: process.env.ULTIMATE_MODEL } : {}) },
       stdio: ["ignore", log, log],
       detached: true,
@@ -112,6 +115,16 @@ export class UltimateDriver implements AgentDriver {
       if (!answer.ok) throw new Error(`Ultimate history answered ${answer.status}`)
       return await answer.json() as HistoryPage
     })
+  }
+
+  diagnostics() {
+    const tailText = (path: string, limit = 64 * 1024) => existsSync(path) ? readFileSync(path, "utf8").slice(-limit) : ""
+    return {
+      "ultimate-log": () => tailText(join(this.root, "ultimate.log")),
+      "bridge-trace": () => tailText(this.tracePath).trim().split("\n").filter(Boolean).slice(-200).map(line => {
+        try { return JSON.parse(line) } catch { return line }
+      }),
+    }
   }
 
   async stop(keep: boolean) {

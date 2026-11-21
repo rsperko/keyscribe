@@ -92,17 +92,23 @@ trap 'rm -rf "$PF_CFG" 2>/dev/null' EXIT
 # is reused only when the recorded input-sig still matches (source for swift test, artifact for A/C,
 # corpus+engines for B) — so a rebuild or corpus change re-runs the affected checks instead of lying.
 RUNKEY="$(git rev-parse HEAD 2>/dev/null || echo nogit)"
-if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-  RUNKEY="${RUNKEY}+dirty.$(git status --porcelain 2>/dev/null | shasum | cut -c1-8)"
-fi
+SOURCE_SIG="$(timeout 60 python3 -B "$REPO_ROOT/scripts/verification_inputs.py" source "$REPO_ROOT")" || exit 1
+RUNKEY="${RUNKEY}.${SOURCE_SIG}"
 LEDGER_DIR="$REPO_ROOT/.preflight-state/$RUNKEY"
 mkdir -p "$LEDGER_DIR"
 
 if [ "$RESET" = 1 ]; then rm -rf "$LEDGER_DIR"; echo "cleared ledger for $RUNKEY"; exit 0; fi
 
-sig_source() { echo "src"; }                                   # captured by RUNKEY (commit + dirty diff)
-sig_artifact() { [ -e "$EXE" ] && stat -f '%m.%z' "$EXE" 2>/dev/null || echo none; }
-sig_dmg() { [ -e "$1" ] && stat -f '%m.%z' "$1" 2>/dev/null || echo none; }
+sig_source() { echo "$SOURCE_SIG"; }
+sig_artifact() { echo "$ARTIFACT_SIG"; }
+DMG_SIG=""; DMG_SIG_PATH=""
+sig_dmg() {
+  if [ "$DMG_SIG_PATH" != "$1" ] || [ -z "$DMG_SIG" ]; then
+    DMG_SIG="$(timeout 90 python3 -B "$REPO_ROOT/scripts/verification_inputs.py" artifact "$1")" || return 1
+    DMG_SIG_PATH="$1"
+  fi
+  echo "$DMG_SIG"
+}
 CORPUS_SIG=""   # computed lazily (needs the app binary for --list-engines)
 
 # ── output helpers + tally ────────────────────────────────────────────────────────────────────────
@@ -128,7 +134,12 @@ led_write()  { printf '%s\t%s\t%s\n' "$2" "$3" "$4" > "$LEDGER_DIR/$1"; }
 
 only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
-CONNECTOR_CHECKS="a-connector-tests a-pi-connector-tests a-omp-connector-tests a-bb-plugin-tests a-codex-connector-tests"
+CONNECTOR_CHECKS=""
+while IFS=$'\t' read -r _vid _pfid _rest; do
+  [ -z "$_vid" ] && continue
+  case "$_vid" in \#*) continue ;; esac
+  CONNECTOR_CHECKS="${CONNECTOR_CHECKS:+$CONNECTOR_CHECKS }$_pfid"
+done < "$REPO_ROOT/scripts/connector_checks.tsv"
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
 PRE_CHECKS=" a-deps a-swift-test $CONNECTOR_CHECKS a-release-tools a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
@@ -191,6 +202,8 @@ if [ "$LIST_ONLY" = 1 ]; then
   exit 0
 fi
 
+ARTIFACT_SIG="$(timeout 90 python3 -B "$REPO_ROOT/scripts/verification_inputs.py" artifact "$APP_PATH")" || exit 1
+
 corpus_sig() {
   if [ -z "$CORPUS_SIG" ]; then
     CORPUS_SIG="$({ cat "$REPO_ROOT/corpus/commands/manifest.json" 2>/dev/null
@@ -217,68 +230,29 @@ chk_a_swift_test() {
 }
 guard a-swift-test "$(sig_source)" chk_a_swift_test
 
-chk_a_connector_tests() {
-  # The Claude Code connector runs inside the agent, so its behavior tests run on the CLI's own mod test
-  # runner. A machine without the CLI can still build and ship the app: that is a loud skip, never a pass.
-  timeout --foreground 600 ./scripts/test-claude-connector.sh >/tmp/preflight-connector.log 2>&1
+CHK_CONN_ID=""; CHK_CONN_LABEL=""; CHK_CONN_CMD=""; CHK_CONN_LIMIT=""; CHK_CONN_SKIP2=""
+chk_connector_row() {
+  local log="/tmp/preflight-${CHK_CONN_ID}.log"
+  local -a argv=()
+  read -r -a argv <<< "$CHK_CONN_CMD"
+  timeout --foreground "$CHK_CONN_LIMIT" "${argv[@]}" >"$log" 2>&1
   local status=$?
   if [ "$status" = 0 ]; then
-    result pass "connector tests — $(head -1 /tmp/preflight-connector.log | sed 's/^test-claude-connector: //')"
-  elif [ "$status" = 2 ] && grep -q "was not found" /tmp/preflight-connector.log; then
-    result skip "connector tests — the claude CLI is not installed here; run make test-connector on a machine that has it"
-  else
-    tail -20 /tmp/preflight-connector.log
-    result fail "connector tests — see /tmp/preflight-connector.log"
-  fi
-}
-guard a-connector-tests "$(sig_source)" chk_a_connector_tests
-
-extension_connector_tests() {
-  # Pi's and omp's connector run inside their agent as a TypeScript extension, so each agent's behavior tests run
-  # under Node against a stubbed extension API. A machine without a recent Node can still build and ship: a loud skip.
-  local agent="$1" label="$2" log="/tmp/preflight-$1-connector.log"
-  timeout --foreground 600 ./scripts/test-extension-connector.sh "$agent" >"$log" 2>&1
-  local status=$?
-  if [ "$status" = 0 ]; then
-    result pass "$label connector tests — $(head -1 "$log" | sed "s/^test-$agent-connector: //")"
-  elif [ "$status" = 2 ]; then
-    result skip "$label connector tests — $(tail -1 "$log" | sed "s/^test-$agent-connector: //"); run make test-$agent-connector on a machine with a recent node"
+    local detail; detail="$(head -1 "$log" | sed -E 's/^test-[^:]+: //')"
+    result pass "$CHK_CONN_LABEL${detail:+ — $detail}"
+  elif [ "$CHK_CONN_SKIP2" = "1" ] && [ "$status" = 2 ]; then
+    local detail; detail="$(tail -1 "$log" | sed -E 's/^test-[^:]+: //')"
+    result skip "$CHK_CONN_LABEL — ${detail:-prerequisite missing}"
   else
     tail -20 "$log"
-    result fail "$label connector tests — see $log"
+    result fail "$CHK_CONN_LABEL — see $log"
   fi
 }
-chk_a_pi_connector_tests() { extension_connector_tests pi Pi; }
-chk_a_omp_connector_tests() { extension_connector_tests omp omp; }
-guard a-pi-connector-tests "$(sig_source)" chk_a_pi_connector_tests
-guard a-omp-connector-tests "$(sig_source)" chk_a_omp_connector_tests
-
-chk_a_bb_plugin_tests() {
-  # The bb plugin runs inside bb's server under Node, so its behavior tests run under Node against a stubbed
-  # plugin API. A machine without a recent Node can still build and ship the app: a loud skip.
-  timeout --foreground 600 ./scripts/test-bb-plugin.sh >/tmp/preflight-bb-plugin.log 2>&1
-  local status=$?
-  if [ "$status" = 0 ]; then
-    result pass "bb plugin tests — $(head -1 /tmp/preflight-bb-plugin.log | sed 's/^test-bb-plugin: //')"
-  elif [ "$status" = 2 ]; then
-    result skip "bb plugin tests — $(tail -1 /tmp/preflight-bb-plugin.log | sed 's/^test-bb-plugin: //'); run make test-bb-plugin on a machine with a recent node"
-  else
-    tail -20 /tmp/preflight-bb-plugin.log
-    result fail "bb plugin tests — see /tmp/preflight-bb-plugin.log"
-  fi
-}
-guard a-bb-plugin-tests "$(sig_source)" chk_a_bb_plugin_tests
-
-chk_a_codex_connector_tests() {
-  timeout --foreground 300 ./scripts/test-codex-connector.sh >/tmp/preflight-codex-connector.log 2>&1
-  if [ "$?" = 0 ]; then
-    result pass "Codex connector tests — $(tail -1 /tmp/preflight-codex-connector.log | sed 's/^test-codex-connector: //')"
-  else
-    tail -20 /tmp/preflight-codex-connector.log
-    result fail "Codex connector tests — see /tmp/preflight-codex-connector.log"
-  fi
-}
-guard a-codex-connector-tests "$(sig_source)" chk_a_codex_connector_tests
+while IFS=$'\t' read -r -u 3 _vid CHK_CONN_ID CHK_CONN_LABEL CHK_CONN_CMD CHK_CONN_LIMIT CHK_CONN_SKIP2; do
+  [ -z "$_vid" ] && continue
+  case "$_vid" in \#*) continue ;; esac
+  guard "$CHK_CONN_ID" "$(sig_source)" chk_connector_row
+done 3< "$REPO_ROOT/scripts/connector_checks.tsv"
 
 chk_a_cheatsheet() {
   # The printable desk reference renders through its own Python dependencies. A machine without uv can
@@ -459,7 +433,7 @@ else
   }
   guard a-entitlements "$(sig_artifact)" chk_a_entitlements
 
-  VERSION="$(cd "$REPO_ROOT" && python3 scripts/release_tools.py current | sed 's/^v//')"
+  VERSION="$(cd "$REPO_ROOT" && python3 -B scripts/release_tools.py current | sed 's/^v//')"
   DMG="$REPO_ROOT/KeyScribe-$VERSION.dmg"
   chk_a_dmg() {
     if [ -n "$VERSION" ] && [ -f "$DMG" ]; then
@@ -804,6 +778,12 @@ fi
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════
 section "Result"
+CURRENT_SOURCE_SIG="$(timeout 60 python3 -B "$REPO_ROOT/scripts/verification_inputs.py" source "$REPO_ROOT")" || exit 1
+CURRENT_ARTIFACT_SIG="$(timeout 90 python3 -B "$REPO_ROOT/scripts/verification_inputs.py" artifact "$APP_PATH")" || exit 1
+if [ "$SOURCE_SIG" != "$CURRENT_SOURCE_SIG" ] || [ "$ARTIFACT_SIG" != "$CURRENT_ARTIFACT_SIG" ]; then
+  FAILED=$((FAILED+1))
+  info "Source or app contents changed during preflight. Run it again on the final inputs."
+fi
 printf '  %s passed (%s cached, %s overridden) · %s failed · %s skipped\n' \
   "$PASSED" "$CACHED" "$OVERRIDDEN" "$FAILED" "$SKIPPED"
 
@@ -857,7 +837,7 @@ fi
 # Everything required is pass / override / skip → write the stamp keyed to this exact commit. First line
 # stays the raw SHA (publish.sh matches on it); the breakdown below records overrides and skips truthfully.
 SHA="$(git rev-parse HEAD)"
-TAG="$(cd "$REPO_ROOT" && python3 scripts/release_tools.py current)"; TAG="${TAG:-(untagged)}"
+TAG="$(cd "$REPO_ROOT" && python3 -B scripts/release_tools.py current)"; TAG="${TAG:-(untagged)}"
 {
   echo "$SHA"
   echo "$TAG"

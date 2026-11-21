@@ -7,20 +7,23 @@ import { fileURLToPath } from "node:url"
 import { Instance, type TakeResult } from "./lib/instance.ts"
 import { UltimateDriver } from "./lib/ultimate.ts"
 import { freePort, run, sha256, until } from "./lib/util.ts"
+import { failureBundle } from "./lib/artifacts.ts"
+import { matchesPageCase, parsePageOptions, type PageTargetKind } from "./lib/options.ts"
 
+const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const clone = process.env.ULTIMATE_CLONE
 assert.ok(clone, "set ULTIMATE_CLONE to an installed Ultimate checkout")
 const { chromium } = createRequire(join(resolve(clone), "package.json"))("playwright-core")
-const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const instance = new Instance(Instance.locate())
 const agent = new UltimateDriver("kestrel")
-const keep = process.argv.includes("--keep")
-const replyWait = Number(process.env.REPLY_WAIT ?? 90)
+const options = parsePageOptions(process.argv.slice(2), process.env)
+const { keep, replyWait, only, targets: selectedTargets, failFast, repeat } = options
 let browser: any
 let clipboardSaved = false
 let failure: unknown
 let cleaning: Promise<void> | undefined
 let stopping = false
+let stoppedEarly = false
 const results: { case: string; conversation: number; ok: boolean; why?: string }[] = []
 const clipboardFile = join(instance.folder, "clipboard.plist")
 
@@ -32,10 +35,15 @@ function command(tool: string, args: string[], timeout = 30) {
 const clipboard = (...args: string[]) => command("xcrun", ["swift", join(repository, "Tests/AgentConformance/clipboard.swift"), ...args])
 function cleanup() {
   return cleaning ??= (async () => {
-    if (clipboardSaved) clipboard("restore", clipboardFile)
-    await browser?.close()
-    await agent.stop(keep || !!failure)
-    await instance.dispose(keep || !!failure)
+    try {
+      if (clipboardSaved) clipboard("restore", clipboardFile)
+    } finally {
+      try { await browser?.close() }
+      finally {
+        try { await agent.stop(keep || !!failure) }
+        finally { await instance.dispose(keep || !!failure) }
+      }
+    }
   })()
 }
 process.once("SIGTERM", () => { stopping = true; failure = new Error("conformance interrupted"); void cleanup().finally(() => process.exit(1)) })
@@ -108,14 +116,15 @@ async function shown(page: any, id: number, side?: number) {
   return editor
 }
 async function delivered(id: number, text: string, explicit = true, reply = true): Promise<TakeResult> {
+  const since = (await agent.messages(id)).length
   const result = take(explicit ? `tell ${name(id)}, ${text}` : text, reply)
   assert.equal(result.ok, true, JSON.stringify(result))
   assert.equal(result.conversation, key(id), JSON.stringify(result))
   await until("Ultimate's own record of the take", async () =>
-    (await agent.messages(id)).some(m => m.role === "user" && m.text.includes(text)) ? true : undefined, 30)
+    (await agent.messages(id)).slice(since).some(m => m.role === "user" && m.text.includes(text)) ? true : undefined, 30)
   if (reply) {
     assert.ok(result.reply, JSON.stringify(result))
-    const messages = await agent.messages(id)
+    const messages = (await agent.messages(id)).slice(since)
     const input = messages.filter(m => m.role === "user" && m.text.includes(text)).at(-1)!
     const answer = messages.filter(m => m.role === "agent" && m.turn === input.turn).at(-1)
     assert.ok(answer, "the take has its own reply")
@@ -123,15 +132,34 @@ async function delivered(id: number, text: string, explicit = true, reply = true
   }
   return result
 }
-async function attempt(id: number, label: string, test: () => Promise<void>) {
-  assert.ok(!stopping, "conformance interrupted")
-  const started = Date.now()
-  try { await test(); results.push({ case: label, conversation: id, ok: true }) }
-  catch (error) { results.push({ case: label, conversation: id, ok: false,
-    why: `${String(error)}${error instanceof Error && error.cause ? `; cause: ${String(error.cause)}` : ""}` }) }
-  const result = results.at(-1)!
-  console.log(`${result.ok ? "PASS" : "FAIL"} #${id} ${label} ${((Date.now() - started) / 1000).toFixed(1)}s${result.why ? ` ${result.why}` : ""}`)
-  writeFileSync(join(instance.folder, "conformance.json"), JSON.stringify(results, null, 2))
+async function attempt(id: number, label: string, test: () => Promise<void>, kind = "page") {
+  if (stoppedEarly || !matchesPageCase(only, label, kind)) return
+  for (let round = 0; round < repeat && !stoppedEarly; round++) {
+    assert.ok(!stopping, "conformance interrupted")
+    const tag = repeat > 1 ? `${label} [${round + 1}/${repeat}]` : label
+    const started = Date.now()
+    try { await test(); results.push({ case: tag, conversation: id, ok: true }) }
+    catch (error) { results.push({ case: tag, conversation: id, ok: false,
+      why: `${String(error)}${error instanceof Error && error.cause ? `; cause: ${String(error.cause)}` : ""}` })
+      await failureBundle(instance.folder, `${id}/${tag}`, error, {
+        "agent-history": () => agent.messages(id),
+        "discovery": () => instance.cli(["--discovery-report"], 15),
+        "windows": () => windows(),
+        ...(agent.diagnostics?.() ?? {}),
+        "page": async () => browser?.contexts()[0]?.pages()[0]?.evaluate(() => ({
+          url: location.href, focused: document.hasFocus(), visibility: document.visibilityState,
+          editors: Array.from(document.querySelectorAll("textarea[data-conversation]")).map(editor => ({
+            conversation: editor.getAttribute("data-conversation"),
+            visible: !!(editor as HTMLElement).getClientRects().length, active: editor === document.activeElement,
+          })),
+        })),
+      }).catch(failure => console.error(`Could not capture failure evidence: ${failure}`))
+    }
+    const result = results.at(-1)!
+    console.log(`${result.ok ? "PASS" : "FAIL"} #${id} ${tag} ${((Date.now() - started) / 1000).toFixed(1)}s${result.why ? ` ${result.why}` : ""}`)
+    writeFileSync(join(instance.folder, "conformance.json"), JSON.stringify(results, null, 2))
+    if (!result.ok && failFast) stoppedEarly = true
+  }
 }
 
 try {
@@ -174,6 +202,7 @@ try {
   chromeWindow = await until("the native Chrome app window", () => windows().find(w => w.title.includes(agent.project))?.spec, 30)
   otherWindow = windows().find(w => w.app !== "com.google.Chrome" && w.app !== "com.keyscribe.app.dev")!.spec
   assert.ok(otherWindow, "the run needs another native app window")
+  const dialogCountBefore = results.length
   await attempt(main, "first-run dialog holds and names the obstruction", async () => {
     focus(chromeWindow)
     await page.keyboard.press("Meta+k")
@@ -186,8 +215,9 @@ try {
     assert.match(result.hud ?? "", /dialog covers/, JSON.stringify(result))
     assert.ok(!(await agent.messages(main)).some(m => m.text.includes("modalblocked")))
     await page.getByRole("button", { name: "Close", exact: true }).click()
-  })
-  assert.equal(results.at(-1)?.ok, true, "the dialog fixture must close before delivery cases start")
+  }, "dialog")
+  if (results.length > dialogCountBefore) assert.equal(results.at(-1)?.ok, true, "the dialog fixture must close before delivery cases start")
+  const styleCountBefore = results.length
   await attempt(main, "a dialog shown by a style change alone holds within a heartbeat", async () => {
     focus(chromeWindow)
     await page.locator(`textarea[data-conversation="${main}"]:visible`).click()
@@ -217,21 +247,35 @@ try {
         document.getElementById("ks-quiet-style")?.remove()
       })
     }
-  })
-  assert.equal(results.at(-1)?.ok, true, "the style-change dialog fixture must close before delivery cases start")
-  console.log("Asking the standing agent for a real coordinator branch")
-  await request(`/api/conversations/${main}/submit`, { text: "Call your branch tool to start one coordinator branch discussing plum orchards. Tell it to reply only ready. Keep the branch open afterward: do not conclude or stop it. Do not edit files, commit, or push. Use the branch tool, not an API-created conversation or the subagent tool." })
-  const branch = await until("a branch made by the branch tool", async () => (await summaries()).find(c => c.label === "coordinator"), 120, 500)
-  assert.ok(branch.cwd.includes("worktrees"), "the branch has its own workspace")
-  const side = await until("the standing agent's finished turn to fork", async () => {
-    const response = await agent.api("/api/extensions/side-chat/actions/open", {
-      conversationId: main, args: { text: "Reply only ready. Do not edit files or call tools." },
-    })
-    const body = await response.json() as any
-    if (response.status === 500 && body.error === "@ultimate has no finished turn to fork yet") return undefined
-    assert.ok(response.ok, JSON.stringify(body))
-    return body.result
-  }, 120, 500)
+  }, "dialog")
+  if (results.length > styleCountBefore) assert.equal(results.at(-1)?.ok, true, "the style-change dialog fixture must close before delivery cases start")
+  const needsBranch = !selectedTargets || selectedTargets.has("branch") || selectedTargets.has("worker")
+  const needsWorker = !selectedTargets || selectedTargets.has("worker")
+  const needsSide = !selectedTargets || selectedTargets.has("side")
+  const wantsTabSide = matchesPageCase(only, "Tab new side-chat mode opens a new side chat instead of sending to @ultimate", "main")
+  let branch: any
+  let side: any
+  if (!stoppedEarly && needsBranch) {
+    console.log("Asking the standing agent for a real coordinator branch")
+    await request(`/api/conversations/${main}/submit`, { text: "Call your branch tool to start one coordinator branch discussing plum orchards. Tell it to reply only ready. Keep the branch open afterward: do not conclude or stop it. Do not edit files, commit, or push. Use the branch tool, not an API-created conversation or the subagent tool." })
+    branch = await until("a branch made by the branch tool", async () => (await summaries()).find(c => c.label === "coordinator"), 120, 500)
+    assert.ok(branch.cwd.includes("worktrees"), "the branch has its own workspace")
+  } else if (!stoppedEarly && (needsSide || wantsTabSide)) {
+    await request(`/api/conversations/${main}/submit`, { text: "Reply only ready. Do not edit files or call tools." })
+    await until("the standing agent's initial turn", async () =>
+      fileListing().find(c => c.id === main)?.answerAt !== undefined ? true : undefined, 120, 500)
+  }
+  if (!stoppedEarly && needsSide) {
+    side = await until("the standing agent's finished turn to fork", async () => {
+      const response = await agent.api("/api/extensions/side-chat/actions/open", {
+        conversationId: main, args: { text: "Reply only ready. Do not edit files or call tools." },
+      })
+      const body = await response.json() as any
+      if (response.status === 500 && body.error === "@ultimate has no finished turn to fork yet") return undefined
+      assert.ok(response.ok, JSON.stringify(body))
+      return body.result
+    }, 120, 500)
+  }
   await attempt(main, "Tab new side-chat mode opens a new side chat instead of sending to @ultimate", async () => {
     const beforeIds = new Set((await summaries()).filter(c => c.label === "side-chat").map(c => c.id))
     await shown(page, main)
@@ -252,7 +296,7 @@ try {
     const answer = messages.filter(m => m.role === "agent" && m.turn === input.turn).at(-1)
     assert.ok(answer, "the new side chat answered its take")
     assert.equal(result.reply!.sha256, sha256(answer.text))
-  })
+  }, "main")
   const lander = fileListing().find(c => c.label === "lander")
   assert.ok(lander, "the project has its standing lander")
   await attempt(lander.id, "lander hold identifies the conversation", async () => {
@@ -263,119 +307,140 @@ try {
     const result = take("Reply with only landerblocked.")
     assert.equal(result.ok, false, JSON.stringify(result))
     assert.match(result.hud ?? "", /lander/)
-  })
+  }, "lander")
   const created = await request("/api/conversations", {})
+  const createdCountBefore = results.length
   await attempt(created.id, "new conversation accepts its first foreground take immediately", async () => {
     await shown(page, created.id)
     await delivered(created.id, "Reply with only firstready.", false)
-  })
-  assert.equal(results.at(-1)?.ok, true, "immediate page discovery must work before the matrix starts")
-  console.log("Waiting for the standing agent to settle the branch's answer")
-  let idleSince = 0
-  await until("the standing agent idle after the branch answered", async () => {
-    const answered = fileListing().find(c => c.id === branch.id)?.answerAt !== undefined
-    const idle = answered && !(await summaries()).find(c => c.id === main)?.busy
-    idleSince = idle ? idleSince || Date.now() : 0
-    return idleSince && Date.now() - idleSince > 3000 ? true : undefined
-  }, 120, 500)
-  const reopened = await action("conversations", "resume", { ids: [branch.id] })
-  if (reopened.resumed.length) console.log(`The standing agent concluded branch ${branch.id}; resumed it as a user would`)
-  console.log("Asking the coordinator branch for a real owned subagent")
-  const workerArgs = { action: "start", label: "feather", tools: ["bash"], isolate: "none", background: true,
-    instructions: "Answer user messages. Do not edit files, commit, push, or delegate.", task: "Reply only ready.",
-    ...(process.env.ULTIMATE_MODEL ? { model: process.env.ULTIMATE_MODEL } : {}) }
-  await request(`/api/conversations/${branch.id}/submit`, {
-    whenBusy: "steer",
-    text: `Call codemode with this exact code, preserving the argument object without adding any keys:\nreturn await tools.subagent(${JSON.stringify(workerArgs)});\nThis starts one real owned subagent. Do not call the subagent tool directly: use the exact codemode code. Create no worktree and make no other changes.`,
-  })
-  const worker = await until("the coordinator's owned subagent", async () => (await summaries()).find(c => c.label === "feather" && c.parentConversationId !== undefined), 120, 500)
-  assert.equal(worker.parentConversationId, branch.id)
-  assert.ok(worker.ownerTaskId, "the subagent belongs to its parent's task")
-  const targets = [worker.id, main, branch.id, created.id, side.id]
-  for (const id of targets) {
-    const show = () => shown(page, id === side.id ? main : id, id === side.id ? side.id : undefined)
+  }, "created")
+  if (results.length > createdCountBefore) assert.equal(results.at(-1)?.ok, true, "immediate page discovery must work before the matrix starts")
+  let worker: any
+  if (!stoppedEarly && branch) {
+    console.log("Waiting for the standing agent to settle the branch's answer")
+    let idleSince = 0
+    await until("the standing agent idle after the branch answered", async () => {
+      const answered = fileListing().find(c => c.id === branch.id)?.answerAt !== undefined
+      const idle = answered && !(await summaries()).find(c => c.id === main)?.busy
+      idleSince = idle ? idleSince || Date.now() : 0
+      return idleSince && Date.now() - idleSince > 3000 ? true : undefined
+    }, 120, 500)
+    const reopened = await action("conversations", "resume", { ids: [branch.id] })
+    if (reopened.resumed.length) console.log(`The standing agent concluded branch ${branch.id}; resumed it as a user would`)
+  }
+  if (!stoppedEarly && needsWorker && branch) {
+    console.log("Asking the coordinator branch for a real owned subagent")
+    const workerArgs = { action: "start", label: "feather", tools: ["bash"], isolate: "none", background: true,
+      instructions: "Answer user messages. Do not edit files, commit, push, or delegate.", task: "Reply only ready.",
+      ...(process.env.ULTIMATE_MODEL ? { model: process.env.ULTIMATE_MODEL } : {}) }
+    await request(`/api/conversations/${branch.id}/submit`, {
+      whenBusy: "steer",
+      text: `Call codemode with this exact code, preserving the argument object without adding any keys:\nreturn await tools.subagent(${JSON.stringify(workerArgs)});\nThis starts one real owned subagent. Do not call the subagent tool directly: use the exact codemode code. Create no worktree and make no other changes.`,
+    })
+    worker = await until("the coordinator's owned subagent", async () => (await summaries()).find(c => c.label === "feather" && c.parentConversationId !== undefined), 120, 500)
+    assert.equal(worker.parentConversationId, branch.id)
+    assert.ok(worker.ownerTaskId, "the subagent belongs to its parent's task")
+  }
+  const allTargets: { kind: PageTargetKind; id: number }[] = [
+    ...(worker ? [{ kind: "worker" as const, id: worker.id }] : []),
+    { kind: "main" as const, id: main },
+    ...(branch ? [{ kind: "branch" as const, id: branch.id }] : []),
+    { kind: "created" as const, id: created.id },
+    ...(side ? [{ kind: "side" as const, id: side.id }] : []),
+  ]
+  const targetEntries = selectedTargets ? allTargets.filter(t => selectedTargets.has(t.kind)) : allTargets
+  const targets = targetEntries.map(t => t.id)
+  for (const { kind, id } of targetEntries) {
+    if (stoppedEarly) break
+    const show = () => shown(page, side && id === side.id ? main : id, side && id === side.id ? side.id : undefined)
     const token = `case${id}`
-    await attempt(id, "unnamed front take and silent reply", async () => {
+    const runCase = (label: string, fn: () => Promise<void>) => attempt(id, label, fn, kind)
+    await runCase("unnamed front take and silent reply", async () => {
       await show()
       const body = `Reply with only ${token}front.`
       await delivered(id, body, false)
       assert.equal(record(body)?.facts.find((f: any) => f.label === "Chosen by")?.value, "The conversation in front")
       assert.ok(record(body)?.steps.some((s: any) => /was in front when it finished/.test(s.text)))
-      if (id === side.id) assert.ok(!(await agent.messages(main)).some(m => m.text === body))
+      if (side && id === side.id) assert.ok(!(await agent.messages(main)).some(m => m.text === body))
     })
-    await attempt(id, "named idle delivery and exact reply", async () => { await show(); await delivered(id, `Reply with only ${token}idle.`) })
-    await attempt(id, "slash text", async () => { await delivered(id, "/status", true, false) })
-    await attempt(id, "two identical takes", async () => {
+    await runCase("named idle delivery and exact reply", async () => { await show(); await delivered(id, `Reply with only ${token}idle.`) })
+    await runCase("slash text", async () => { await delivered(id, "/status", true, false) })
+    await runCase("two identical takes", async () => {
       const body = `Reply with only ${token}twice.`
+      const since = (await agent.messages(id)).length
       const first = await delivered(id, body)
       const second = await delivered(id, body)
       assert.notEqual(first.request, second.request)
-      assert.equal((await agent.messages(id)).filter(m => m.role === "user" && m.text === body).length, 2)
+      assert.equal((await agent.messages(id)).slice(since).filter(m => m.role === "user" && m.text === body).length, 2)
     })
-    await attempt(id, "take while busy", async () => {
+    await runCase("take while busy", async () => {
       await show()
       await delivered(id, "Use your shell tool to sleep 20 seconds, then reply ready. Do not edit files.", true, false)
       await page.getByTitle("Stop (Esc)", { exact: true }).filter({ visible: true }).first().waitFor()
       const result = await delivered(id, `When the sleep finishes, reply with only ${token}busy.`, true)
       assert.equal(result.reply?.sha256, sha256(`${token}busy`), "the working conversation answered the second take")
     })
-    await attempt(id, "long take", async () => {
+    await runCase("long take", async () => {
       const body = `Read this sample: ${"plum orchard ".repeat(250)}. Reply only ${token}long.`
       await delivered(id, body)
     })
-    await attempt(id, "ask address", async () => {
+    await runCase("ask address", async () => {
       const body = `Reply with only ${token}ask.`
+      const since = (await agent.messages(id)).length
       const result = take(`ask ${name(id)}, ${body}`, true)
       assert.equal(result.conversation, key(id), JSON.stringify(result))
-      assert.ok((await agent.messages(id)).some(m => m.role === "user" && m.text === body))
+      assert.ok((await agent.messages(id)).slice(since).some(m => m.role === "user" && m.text === body))
     })
-    await attempt(id, "near-miss number sends nothing", async () => {
+    await runCase("near-miss number sends nothing", async () => {
       const body = `never${token}`
       const result = take(`tell ultimate 999999, ${body}`)
       assert.equal(result.ok, false, JSON.stringify(result))
       for (const target of targets) assert.ok(!(await agent.messages(target)).some(m => m.role === "user" && m.text.includes(body)))
     })
-    await attempt(id, "clipboard text", async () => {
+    await runCase("clipboard text", async () => {
       clipboard("text", `clipboard${token}`)
+      const since = (await agent.messages(id)).length
       const result = take(`tell ${name(id)}, Reply ready about insert clipboard contents.`, true)
       assert.equal(result.conversation, key(id), JSON.stringify(result))
-      assert.ok((await agent.messages(id)).some(m => m.role === "user" && m.text.includes(`clipboard${token}`)))
+      assert.ok((await agent.messages(id)).slice(since).some(m => m.role === "user" && m.text.includes(`clipboard${token}`)))
     })
-    await attempt(id, "clipboard image", async () => {
+    await runCase("clipboard image", async () => {
       clipboard("image")
+      const newest = async () => (await request(`/api/conversations/${id}/history?before=${Number.MAX_SAFE_INTEGER}`)).entries
+      const last = Math.max(0, ...(await newest()).map((e: any) => Number(e.id)))
       const result = take(`tell ${name(id)}, Describe insert clipboard contents in one word.`, true)
       assert.equal(result.conversation, key(id), JSON.stringify(result))
-      const history = await request(`/api/conversations/${id}/history?before=${Number.MAX_SAFE_INTEGER}`)
-      assert.ok(history.entries.some((e: any) => e.input && JSON.stringify(e.model).includes('"type":"image"')))
+      assert.ok((await newest()).some((e: any) => Number(e.id) > last && e.input && JSON.stringify(e.model).includes('"type":"image"')))
     })
-    for (const background of [false, true]) await attempt(id, `draft ${background ? "background" : "front"}`, async () => {
+    for (const background of [false, true]) await runCase(`draft ${background ? "background" : "front"}`, async () => {
       const editor = await show()
       const draft = `draft${token}${background ? "back" : "front"}`
+      const since = (await agent.messages(id)).length
       await editor.fill(draft)
       await page.waitForTimeout(300)
       if (background) focus(otherWindow)
       const result = take(`tell ${name(id)}, Reply only ready.`, true)
       assert.equal(result.conversation, key(id), JSON.stringify(result))
-      const merged = (await agent.messages(id)).some(m => m.role === "user" && m.text.includes(draft))
+      const merged = (await agent.messages(id)).slice(since).some(m => m.role === "user" && m.text.includes(draft))
       assert.ok(merged || (await editor.inputValue()).includes(draft), "the draft was delivered or remains in its composer")
       await editor.fill("")
     })
-    await attempt(id, "unknown name sends nothing", async () => {
+    await runCase("unknown name sends nothing", async () => {
       const result = take(`tell zebrafinch, never${token}`)
       assert.equal(result.ok, false, JSON.stringify(result))
       assert.equal(result.conversation, undefined)
     })
-    await attempt(id, "reply read with another app in front", async () => {
+    await runCase("reply read with another app in front", async () => {
       await show(); focus(otherWindow)
       const body = `Reply with only ${token}away.`
       await delivered(id, body)
       await until("the spoken reply in History", () => record(body)?.spoken_reply ? true : undefined, 30)
     })
-    await attempt(id, "repeat that", async () => {
+    await runCase("repeat that", async () => {
       const result = take("repeat that")
       assert.ok(result.ok, JSON.stringify(result))
     })
-    for (const verb of ["open", "go to"]) await attempt(id, `${verb} brings the conversation forward`, async () => {
+    for (const verb of ["open", "go to"]) await runCase(`${verb} brings the conversation forward`, async () => {
       await shown(page, created.id)
       focus(otherWindow)
       const result = take(`${verb} ${name(id)}`)
@@ -383,7 +448,7 @@ try {
       assert.ok(instance.cli(["--front-probe"], 15).stdout.includes("front=com.google.Chrome"))
       await page.waitForURL(new RegExp(`conversation=${id}(?:&|$)`))
     })
-    await attempt(id, "check on then unnamed send", async () => {
+    await runCase("check on then unnamed send", async () => {
       await show()
       const result = take(`check on ${name(id)}`)
       assert.ok(result.ok, JSON.stringify(result))
@@ -391,12 +456,12 @@ try {
       await page.waitForFunction(() => document.hasFocus() && document.visibilityState === "visible")
       await delivered(id, `Reply with only ${token}afterstatus.`, false)
     })
-    await attempt(id, "switch conversations and back", async () => {
+    await runCase("switch conversations and back", async () => {
       await shown(page, id === main ? created.id : main)
       await show()
       await delivered(id, `Reply with only ${token}back.`, false)
     })
-    await attempt(id, "current sidebar title after an address verb", async () => {
+    await runCase("current sidebar title after an address verb", async () => {
       const title = (await summaries()).find(c => c.id === id)?.title
       assert.ok(title, "the sidebar has a title to address")
       const result = take(`check on ${title}`)
@@ -411,8 +476,15 @@ try {
   const preserved = JSON.parse(readFileSync(join(agent.folder, "settings.json"), "utf8"))
   assert.equal(preserved.onboarding, true)
   assert.ok(preserved.extensions.disable.includes("sample-unrelated-extension"))
+  assert.ok(results.length > 0, "filter matched zero conformance cases")
   assert.ok(results.every(r => r.ok), `${results.filter(r => !r.ok).length} conformance cases failed`)
-} catch (error) { failure = error; console.error(error) }
+} catch (error) {
+  failure = error
+  console.error(error)
+  await failureBundle(instance.folder, "ultimate-page/setup-or-completion", error, {
+    ...(agent.diagnostics?.() ?? {}),
+  }).catch(failure => console.error(`Could not capture setup evidence: ${failure}`))
+}
 finally {
   await cleanup()
   console.log(`Ultimate page conformance: ${results.filter(r => r.ok).length} passed, ${results.filter(r => !r.ok).length} failed; ${instance.folder}`)

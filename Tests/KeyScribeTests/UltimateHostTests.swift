@@ -172,8 +172,9 @@ struct UltimateHostTests {
         let ultimate = host(front, conversations: { _ in greeted.on ? [.init(id: "70", folder: "/w/app")] : [] })
         let transport = AgentHubTests.FakeTransport()
         let hub = AgentHub(transport: transport, discovery: [], names: nil, focus: nil, front: nil,
-                           receiptTimeout: .milliseconds(50), scanDeadline: .seconds(3), places: nil,
-                           hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })], hostAllowed: { _ in true })
+                           receiptTimeout: .milliseconds(50), scanDeadline: .seconds(60), places: nil,
+                           hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })], hostAllowed: { _ in true },
+                           hostDeadline: .seconds(60))
         await hub.rescan()
         let id = session("70")
         transport.live.insert(id)

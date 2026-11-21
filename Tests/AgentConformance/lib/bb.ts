@@ -81,6 +81,15 @@ export class BBDriver implements AgentDriver {
     return messages
   }
 
+  diagnostics() {
+    return {
+      "bb-runtime": () => {
+        const path = join(this.folder, "bb-app-runtime.json")
+        return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : { missing: path }
+      },
+    }
+  }
+
   async stop(keep: boolean) {
     for (const pid of this.appPids) { try { process.kill(pid, "SIGTERM") } catch {} }
     await sleep(1000)

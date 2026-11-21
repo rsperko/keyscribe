@@ -149,6 +149,8 @@ final class AgentHub {
     private let glance: AgentFronting?
     private let discoveries: [any AgentDiscovery]
     private let hosts: [HostDiscovery]
+    private let addresses: [AgentNativeAddress]
+    private let addressesTurnedOn: @MainActor (String) -> Bool
     private let hostDeadline: Duration
     private let hostConfirmDelay: Duration
     private let heldLimit: Duration
@@ -223,7 +225,7 @@ final class AgentHub {
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil,
         receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), checkWait: Duration = AgentHub.defaultCheckWait,
         disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
-        places: (any AgentPlaceReading)? = nil, hosts: [AgentHostIntegration] = [],
+        places: (any AgentPlaceReading)? = nil, hosts: [AgentHostIntegration] = [], addresses: [AgentNativeAddress] = [],
         hostAllowed: @escaping @MainActor (String) -> Bool = { _ in false },
         hostDeadline: Duration = AgentHub.defaultHostDeadline, hostConfirmDelay: Duration = .seconds(3), heldLimit: Duration = .seconds(120),
         processEnvironment: @escaping (_ pid: Int, _ keys: Set<String>) -> [String: String] = { _, _ in [:] },
@@ -235,6 +237,8 @@ final class AgentHub {
         self.processEnvironment = processEnvironment
         self.processParent = processParent
         self.hosts = hosts.map { host in HostDiscovery(host, allowed: { hostAllowed(host.kind.id) }, now: now) }
+        self.addresses = addresses + hosts.compactMap(\.addresses)
+        self.addressesTurnedOn = hostAllowed
         self.hostDeadline = hostDeadline
         self.hostConfirmDelay = hostConfirmDelay
         self.heldLimit = heldLimit
@@ -841,6 +845,31 @@ final class AgentHub {
         return Dictionary(disconnected.map { ($0.handle, $0.id) }, uniquingKeysWith: { first, _ in first })
     }
 
+    var nativeRoster: AgentNativeRoster {
+        let listed = namesProblem == nil ? directory.conversations + disconnected : []
+        let places = effectivePlaces
+        let reaching = sharedNames.reduce(into: [String: [String]]()) { reaching, shared in
+            for handle in shared.value.names { reaching[handle, default: []].append(shared.key) }
+        }
+        let members = listed.map { conversation in
+            AgentNativeRoster.Member(
+                agent: conversation.agent, native: conversation.host?.native ?? AgentSessionID.native(conversation.id),
+                id: conversation.id, handle: conversation.handle,
+                otherNames: (reaching[conversation.handle] ?? []).sorted(),
+                workspace: places[conversation.id]?.workspace)
+        }
+        return AgentNativeRoster(
+            addresses: addresses.filter { address in addressesTurnedOn(address.agent) || members.contains { $0.agent == address.agent } },
+            members: members)
+    }
+
+    private var effectivePlaces: [String: AgentPlace] {
+        let hostPlaces = lastExtras.values.reduce(into: [String: AgentPlace]()) { places, extras in
+            places.merge(extras.places) { kept, _ in kept }
+        }
+        return (placeTracker?.places ?? [:]).merging(hostPlaces) { tracked, _ in tracked }
+    }
+
     func disconnect(_ id: String) {
         guard exclusions.isKnown else { return }
         exclusions.insert(id)
@@ -1133,13 +1162,10 @@ final class AgentHub {
         }
         let excluded = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter(exclusions.excludes))
         let live = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter { !excluded.contains($0) && transport.isLive(session: $0) })
-        let hostPlaces = lastExtras.values.reduce(into: [String: AgentPlace]()) { places, extras in
-            places.merge(extras.places) { kept, _ in kept }
-        }
         let hostListed = lastExtras.values.reduce(into: Set<String>()) { $0.formUnion($1.listed) }
         directory.update(
             entries: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning, excluded: excluded,
-            places: (placeTracker?.places ?? [:]).merging(hostPlaces) { tracked, _ in tracked },
+            places: effectivePlaces,
             unplaced: placeTracker.map { tracker in
                 tracker.unchecked(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) })
                     .subtracting(tracker.places.keys).subtracting(hostListed)
@@ -2832,7 +2858,7 @@ final class AgentRuntime {
 
     init(
         supportDir: URL, surfaces: ResolvedSurfaces, placeSources: [any AgentPlaceReading], discovery: [any AgentDiscovery],
-        setups: ConnectorSetupRegistry, legacyAgent: String, hosts: [AgentHostIntegration] = [],
+        setups: ConnectorSetupRegistry, legacyAgent: String, hosts: [AgentHostIntegration] = [], addresses: [AgentNativeAddress] = [],
         hostAllowed: @escaping @MainActor (String) -> Bool
     ) throws {
         let directory = Self.bridgeDirectory(supportDir: supportDir)
@@ -2870,7 +2896,7 @@ final class AgentRuntime {
                 noun: AgentTerminalFocus.noun(surfaces)),
             front: AgentFront(surfaces: surfaces), glance: AgentFront.confirmingWithoutAsking(surfaces), exclusions: exclusions,
             places: Self.places(surfaces: surfaces, sources: placeSources),
-            hosts: hosts.map { $0.bound(to: setups, surfaces: surfaces) }, hostAllowed: hostAllowed,
+            hosts: hosts.map { $0.bound(to: setups, surfaces: surfaces) }, addresses: addresses, hostAllowed: hostAllowed,
             processEnvironment: { pid, keys in SystemTerminalFacts.arguments(of: pid, keeping: keys)?.environment ?? [:] },
             processParent: { SystemTerminalFacts.parent(of: $0) })
         box.hub = hub

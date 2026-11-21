@@ -47,6 +47,11 @@ to Tier C. A cached green is reused only while its input signature still matches
 `swift test`, the built artifact for Tier A/C, the corpus + installed-engine set for Tier B — so a
 rebuild or a corpus change re-runs the affected checks instead of trusting a stale pass.
 
+Source signatures hash tracked and non-ignored untracked file contents, missing files, executable bits
+and linked targets. Editing the same dirty paths changes the signature. App and disk-image signatures
+hash their contents too; timestamps and sizes alone do not establish identity. Preflight refuses to
+pass if source or app contents change during the run.
+
 - **Re-run just the failures:** `--only <id[,id]>` runs a subset; `--force [id[,id]]` ignores the cache
   (all checks, or the listed ones). The stamp is still only written once **every** required check is
   green for the commit — a partial `--only` run reports what is still outstanding and writes no stamp.

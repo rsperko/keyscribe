@@ -250,7 +250,7 @@ struct AgentDeliveryWiringTests {
         glance: (any AgentFronting)? = nil, engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1),
         maxRecordingSeconds: Double = RecordingLimit.backstopSeconds, places: (any AgentPlaceReading)? = nil,
         clipboard: String? = nil, pasteboard: ((NSPasteboard) -> Void)? = nil, unconnected: [AgentCandidate] = [],
-        hosts: [AgentHostIntegration] = []
+        hosts: [AgentHostIntegration] = [], addresses: [AgentNativeAddress] = []
     ) async -> Rig {
         let glance = glance ?? focused.map { Front($0) }
         let front = front ?? FrontWindow(glance == nil ? TargetSnapshot(bundleId: "test.bundle") : Self.terminal)
@@ -287,7 +287,7 @@ struct AgentDeliveryWiringTests {
             transport: transport, discovery: [ClaudeDiscovery(scan: { entries() }), Unconnected(candidates: unconnected)],
             names: AgentNameStore(directory: agentsDir), focus: focus, front: sessionInFront, glance: glance,
             receiptTimeout: receiptTimeout, scanDeadline: .seconds(30), places: places,
-            hosts: hosts, hostAllowed: { _ in true })
+            hosts: hosts, addresses: addresses, hostAllowed: { _ in true })
         transport.hub = hub
         await hub.rescan()
 
@@ -2123,6 +2123,74 @@ struct AgentDeliveryWiringTests {
         await rig.controller.dictationTask?.value
         #expect(host.delivered.map(\.0) == ["Plan the release."])
         #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The conversation in front")
+    }
+
+    nonisolated private static let tickets = AgentNativeAddress(agent: "example") { words in
+        guard words.first == "flex", let number = SpokenNumber.read(words.dropFirst(), forms: [.whole, .grouped, .digits]) else { return nil }
+        return .init(native: number.value.map { "FLEX-\($0)" }, words: 1 + number.words)
+    }
+
+    @Test(arguments: [
+        ("tell flex two forty, reply ready", ["reply ready"]),
+        ("Tell FLEX-240: reply ready", ["reply ready"]),
+        ("tell flex two four zero reply ready", ["reply ready"]),
+        ("tell flex 999 reply ready", []),
+        ("tell flex two forty two, reply ready", []),
+    ])
+    func aTakeReadsAHostsOwnAddressesFromTheRosterFrozenAtThePress(said: String, texts: [String]) async {
+        let host = AgentHostTests.FakeHost()
+        var ticket = AgentHostTests.thread("FLEX-240")
+        ticket.explicitName = "Login bug"
+        host.conversations = [ticket]
+        var integration = AgentHostIntegration(kind: AgentHostTests.kind, make: { host })
+        integration.addresses = Self.tickets
+        let rig = await rig(said, focused: "claude:s1", hosts: [integration])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(host.delivered.map(\.0) == texts)
+        #expect(host.delivered.map(\.2) == texts.map { _ in AgentHostTests.location("FLEX-240") })
+        #expect(rig.sent.isEmpty)
+    }
+
+    @Test func aTerminalAgentsAddressIsNarrowedByTheWorkspaceItsPaneShows() async {
+        let reader = AgentPlaceTrackerTests.Reader()
+        reader.answers = [
+            "claude:s1": .found(AgentPlace(surface: "herdr", labels: [], containers: ["/a"], workspace: "app")),
+            "claude:s2": .found(AgentPlace(surface: "herdr", labels: [], containers: ["/w"], workspace: "web")),
+        ]
+        let sessions = AgentNativeAddress(agent: "claude") { words in
+            guard words.first == "pane", let number = SpokenNumber.read(words.dropFirst(), forms: [.whole]) else { return nil }
+            return .init(native: number.value.map { "s\($0 % 2 + 1)" }, words: 1 + number.words)
+        }
+        let rig = await rig("tell web pane one, run the tests.", focused: "claude:s1", places: reader, addresses: [sessions])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        await rig.hub.rescan()
+        #expect(Dictionary(uniqueKeysWithValues: rig.hub.nativeRoster.members.map { ($0.id, $0.workspace) }) == ["claude:s1": "app", "claude:s2": "web"])
+        await take(rig)
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
+    }
+
+    @Test func aPlaceLabelEqualToAnotherConversationsAddressAsksRatherThanPickingTheAddress() async {
+        let reader = AgentPlaceTrackerTests.Reader()
+        reader.answers = [
+            "claude:s1": .found(AgentPlace(surface: "herdr", labels: [
+                .init(text: "marvin", level: .pane, container: "/t1#p"), .init(text: "pane one", level: .tab, container: "/t1"),
+            ], containers: ["/t1", "/t1#p"])),
+            "claude:s2": .found(AgentPlace(surface: "herdr", labels: [], containers: ["/t2"])),
+        ]
+        let sessions = AgentNativeAddress(agent: "claude") { words in
+            guard words.first == "pane", let number = SpokenNumber.read(words.dropFirst(), forms: [.whole]) else { return nil }
+            return .init(native: number.value.map { "s\($0 % 2 + 1)" }, words: 1 + number.words)
+        }
+        let rig = await rig("tell pane one, run the tests.", focused: "claude:s1", places: reader, addresses: [sessions])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        await rig.hub.rescan()
+        #expect(rig.hub.names["marvin"] == "claude:s1")
+        #expect(AgentRecipient.afterVerbNames(rig.hub.sharedNames).contains("pane one"))
+        await take(rig)
+        #expect(rig.sent.isEmpty)
     }
 
     private func waitUntilParkedOnHostReport(_ hub: AgentHub) async {

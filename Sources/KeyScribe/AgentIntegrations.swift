@@ -6,6 +6,7 @@ struct AgentIntegration: Sendable {
     var rule: AgentProcesses.Rule?
     let discovery: @MainActor @Sendable (ConnectorSetupRegistry, AgentProcessTable) -> any AgentDiscovery
     let connector: @MainActor @Sendable (_ agentsDir: URL, _ pluginName: String, ConnectorSurfaces) -> any AgentConnector
+    var addresses: AgentNativeAddress? = nil
 
     var folderVariable: String? { rule?.setupVariable }
 }
@@ -35,6 +36,8 @@ public struct AgentIntegrations: Sendable {
     @MainActor func discoveries(setups: ConnectorSetupRegistry, processes: AgentProcessTable) -> [any AgentDiscovery] {
         agents.map { $0.discovery(setups, processes) }
     }
+
+    var agentAddresses: [AgentNativeAddress] { agents.compactMap(\.addresses) }
 
     public func resolve() throws -> ResolvedSurfaces {
         try AgentSurfaces.checkKinds(agents.map(\.kind.id) + hosts.map(\.kind.id))

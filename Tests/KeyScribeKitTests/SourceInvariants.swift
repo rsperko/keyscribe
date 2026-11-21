@@ -155,6 +155,23 @@ enum SourceInvariants {
             own: SourceInvariants.integrationTool
         ),
         SourceRule(
+            pattern: #"(?i)\bultimate\b"#,
+            allowed: [
+                "Sources/KeyScribe/AgentIntegrations.swift": 1,
+            ],
+            reason: "Everything Ultimate needs, its conversation numbers included, lives in its own Integrations/Ultimate/ "
+                + "folder; shared code speaks AgentHost, AgentHostLocation and AgentNativeAddress, so another host is another "
+                + "adapter, never a branch (docs/development/areas/voice-commands.md). The composition root lists the hosts.",
+            own: SourceInvariants.integrationTool
+        ),
+        SourceRule(
+            pattern: #"Int\([^()]*\.native\)"#,
+            allowed: [:],
+            reason: "A native conversation id is opaque outside its integration: only that integration's AgentNativeAddress "
+                + "reads one from speech, and shared code compares ids as strings (docs/development/areas/voice-commands.md).",
+            exempt: { $0.contains("/Integrations/") }
+        ),
+        SourceRule(
             pattern: #"(?<![.\w])Pi(?![a-z])"#,
             allowed: [
                 "Sources/KeyScribeKit/Features.swift": 1,

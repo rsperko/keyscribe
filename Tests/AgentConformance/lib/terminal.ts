@@ -66,6 +66,10 @@ export abstract class TerminalAgent implements AgentDriver {
     throw new Error(`${this.kind} never reached its prompt; last screen:\n${this.tmux.screen()}`)
   }
 
+  diagnostics() {
+    return { "tmux-screen": () => this.tmux.screen() }
+  }
+
   async stop(keep: boolean) {
     this.tmux.kill()
     await sleep(500)

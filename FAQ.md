@@ -747,13 +747,14 @@ project root and the lander are not listed, since you don't talk to them. A stan
 as “app ultimate” and “web ultimate”. A subagent is named by the name the sidebar shows for it. A branch is named by a
 title you gave it in Ultimate, or a KeyScribe name; the titles Ultimate writes on its own are not names, but after
 “tell”, “ask” or “check on”, the title the sidebar shows works too. Every conversation is also called “ultimate” and
-the number Ultimate shows for it, so “tell ultimate 61 …” reaches #61, and a number can be said in full or in groups:
-“two hundred fifty” and “two fifty” both reach #250. The longest name wins, so while #61 is open, “tell ultimate 61
-tests are failing” goes to #61, not to @ultimate; say “tell ultimate there are 61 failing tests” instead. A number
-said as a word counts too: while #6 is open, “tell ultimate six more things are broken” goes to #6. A number that
-names no open conversation is never taken for another one: when it ends the name, as in “tell ultimate 68, reply
-ready”, nothing is sent; when the message goes on after it, as in “tell ultimate two things are broken”, it is the
-start of a message to @ultimate.
+the number Ultimate shows for it, so “tell ultimate 61 …” or “tell ultimate conversation 61 …” reaches #61, even after
+you give it a title, and a number can be said in full or in groups: “two hundred fifty” and “two fifty” both reach
+#250. Every number right after “ultimate” is read as a conversation number, with or without a comma after it: while
+#61 is open, “tell ultimate 61 tests are failing” goes to #61, and while no #68 is open, “tell ultimate 68, reply
+ready” and “tell ultimate 68 reply ready” both send nothing and say so. So does “tell ultimate two things are
+broken” while no #2 is open. To start a message to @ultimate with a number, put a word or a comma first: “tell
+ultimate there are 2 things broken” or “tell ultimate, 2 things are broken”. With Ultimate open in two projects,
+put the project first, as in “tell web ultimate 61 …”; without it, KeyScribe asks which one you meant.
 
 When you rename a branch in KeyScribe, by voice or in Settings, KeyScribe also sets that name as its Ultimate title.
 A standing agent keeps its handle in Ultimate, so a new name for it works only in KeyScribe. While KeyScribe is

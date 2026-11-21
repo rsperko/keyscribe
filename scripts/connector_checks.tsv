@@ -1,0 +1,7 @@
+tools	a-verification-tests	verification infrastructure tests	python3 -B scripts/test_verification.py	300	0
+claude-connector	a-connector-tests	connector tests	./scripts/test-claude-connector.sh	600	1
+pi-connector	a-pi-connector-tests	Pi connector tests	./scripts/test-extension-connector.sh pi	600	1
+omp-connector	a-omp-connector-tests	omp connector tests	./scripts/test-extension-connector.sh omp	600	1
+bb-plugin	a-bb-plugin-tests	bb plugin tests	./scripts/test-bb-plugin.sh	600	1
+codex-connector	a-codex-connector-tests	Codex connector tests	./scripts/test-codex-connector.sh	300	0
+ultimate-connector	a-ultimate-connector-tests	Ultimate connector tests	./scripts/test-ultimate-connector.sh	300	1

@@ -85,7 +85,7 @@ public enum AgentRecipient {
         case .none, .nearMiss: true
         case .open(let target): usesFocus(target)
         case .unbroken: true
-        case .name, .row, .unresolved, .ambiguous: false
+        case .name, .row, .unresolved, .ambiguous, .native: false
         }
     }
 
@@ -146,6 +146,12 @@ public enum AgentRecipient {
                 return .ask(body: body, reason: .ambiguousName(spoken, matches: matches))
             }
             return addressed(id, body: body)
+        case .native(let spoken, let handles, let body):
+            switch handles.count {
+            case 0: return .ask(body: body, reason: .unknownName(spoken))
+            case 1: return addressed(handles.keys.first!, body: body)
+            default: return .ask(body: body, reason: .ambiguousName(spoken, matches: handles.values.sorted()))
+            }
         case .nearMiss(let spoken, let name, let body, let unaddressed):
             if let focused, id(named: name, in: names) == focused {
                 guard let unaddressed else { return addressed(focused, body: body) }
@@ -167,7 +173,7 @@ public enum AgentRecipient {
         case .name(let name, _), .nearMiss(_, let name, _, _): name
         case .row(let row, _): "conversation \(row)"
         case .ambiguous(_, let matches, _): matches.sorted().first ?? ""
-        case .unresolved(let spoken, _): spoken
+        case .unresolved(let spoken, _), .native(let spoken, _, _): spoken
         case .open(let inner), .unbroken(let inner, _): said(inner)
         case .none: ""
         }

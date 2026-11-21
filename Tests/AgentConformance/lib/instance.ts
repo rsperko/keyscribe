@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { existsSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { markKept, scratchPrefixes } from "./scratch.ts"
 import { run, sleep, socketAnswers, until } from "./util.ts"
 
 export type TakeResult = {
@@ -28,7 +29,7 @@ export class Instance {
 
   constructor(binary: string) {
     this.binary = binary
-    this.folder = realpathSync(mkdtempSync("/tmp/ks-conf-"))
+    this.folder = realpathSync(mkdtempSync(`/tmp/${scratchPrefixes.instance}`))
   }
 
   static locate(): string {
@@ -95,6 +96,7 @@ export class Instance {
 
   async dispose(keep: boolean) {
     await this.quit()
-    if (!keep) rmSync(this.folder, { recursive: true, force: true })
+    if (keep) markKept(this.folder)
+    else rmSync(this.folder, { recursive: true, force: true })
   }
 }

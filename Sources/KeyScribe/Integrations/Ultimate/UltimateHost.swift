@@ -9,6 +9,7 @@ final class UltimateHost: AgentHost {
     nonisolated static let integration: AgentHostIntegration = {
         var integration = AgentHostIntegration(kind: kind, make: { UltimateHost() })
         integration.connector = { UltimateConnector(agentsDir: $0, pluginName: $1) }
+        integration.addresses = UltimateAddress.reader(for: kind)
         integration.withSetups = { setups in UltimateHost(enrolled: { setups.setups?.enrolled(agent: kind.id).map(\.folder) ?? [] }) }
         return integration
     }()
@@ -129,7 +130,7 @@ final class UltimateHost: AgentHost {
                 sessions.append(AgentSession(
                     agent: Self.kind.id, id: conversation.id, pid: nil, cwd: conversation.folder,
                     explicitName: "\(Self.kind.displayName) \(conversation.id)", state: .idle,
-                    startedAt: conversation.activeAt, host: location))
+                    startedAt: conversation.activeAt, host: location, alias: "\(Self.kind.displayName) \(conversation.id)"))
                 if let title = conversation.sidebarTitle { sidebarTitles[location.conversationKey] = title }
                 if let handle = conversation.handle { titles[location.conversationKey] = handle }
                 if let name = project.project?.name { workspaces[location.conversationKey] = name }

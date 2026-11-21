@@ -236,9 +236,15 @@ public struct AgentDirectory: Sendable {
             if !(placed[id].map { [.title, .pane, .agent].contains($0.place.level) } ?? false),
                let own = (nativeNames[id] ?? entry.explicitName).flatMap(usable) { owned[id] = own }
         }
-        for ids in Dictionary(grouping: owned.keys.sorted(), by: { AgentHandles.matchKey(owned[$0]!) }).values where ids.count > 1 {
-            let spaces = ids.map { workspace($0, apartFrom: owned[$0]!) }
-            guard spaces.allSatisfy({ $0 != nil }), Set(spaces.compactMap { $0.map(AgentHandles.matchKey) }).count == ids.count else { continue }
+        let aliased = Dictionary(grouping: entries.compactMap { entry in
+            entry.alias.flatMap(usable).map { (key: AgentHandles.matchKey($0), id: conversationId(entry)) }
+        }, by: \.key).mapValues { $0.map(\.id) }
+        for ids in Dictionary(grouping: owned.keys.sorted(), by: { AgentHandles.matchKey(owned[$0]!) }).values {
+            let base = owned[ids[0]]!
+            let rivals = (aliased[AgentHandles.matchKey(base)] ?? []).filter { !ids.contains($0) }
+            guard ids.count + rivals.count > 1 else { continue }
+            let spaces = (ids + rivals).map { workspace($0, apartFrom: base) }
+            guard spaces.allSatisfy({ $0 != nil }), Set(spaces.compactMap { $0.map(AgentHandles.matchKey) }).count == spaces.count else { continue }
             for (id, space) in zip(ids, spaces) { owned[id] = usable("\(space!) \(owned[id]!)") ?? owned[id] }
         }
         for entry in entries {
@@ -327,8 +333,8 @@ public struct AgentDirectory: Sendable {
         var found: [String: (word: String, ids: [String], kind: AgentRecipient.SharedName.Kind)] = [:]
         for entry in entries {
             let id = AgentSessionID.make(agent: entry.agent, native: entry.id)
-            guard let place = places[id], handleById[id] != nil else { continue }
-            let fromPlace: [(text: String, kind: AgentRecipient.SharedName.Kind)] = place.labels.compactMap { label in
+            guard handleById[id] != nil else { continue }
+            let fromPlace: [(text: String, kind: AgentRecipient.SharedName.Kind)] = places[id].map { place in place.labels.compactMap { label in
                 let seenAs = "\(label.surface ?? place.surface) \([.agent, .title].contains(label.level) || label.term != nil ? label.word : "\(label.word) label")"
                 if label.onlyAfterVerb { return (label.text, .afterVerb(seenAs)) }
                 switch label.level {
@@ -338,11 +344,10 @@ public struct AgentDirectory: Sendable {
                     let alone = ids.filter { places[$0]?.containers.contains(label.container) == true }.count == 1
                     return alone ? (label.text, .held(seenAs)) : nil
                 }
-            }
+            } } ?? []
             let own = outranked[id].map { [(text: $0, kind: AgentRecipient.SharedName.Kind.afterVerb("agent\u{2019}s own name"))] } ?? []
-            let fallback = entry.host.flatMap { Int($0.native) } == nil ? [] :
-                entry.explicitName.map { [(text: $0, kind: AgentRecipient.SharedName.Kind.also("agent\u{2019}s own name"))] } ?? []
-            for (text, kind) in fromPlace + own + fallback {
+            let alias = entry.alias.map { [(text: $0, kind: AgentRecipient.SharedName.Kind.also("agent\u{2019}s own name"))] } ?? []
+            for (text, kind) in fromPlace + own + alias {
                 guard let word = usable(text) else { continue }
                 let key = AgentHandles.matchKey(word)
                 guard !names.contains(key) else { continue }

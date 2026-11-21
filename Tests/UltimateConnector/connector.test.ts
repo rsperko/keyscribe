@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import { focusConnectionContract } from "../AgentConformance/lib/focus-contract.ts"
 import {
   joined, keyscribe, namedByUser, promptDigest, readAloudReply, readAloudToolName, waitingFor,
   type Host, type Image, type Summary, type Ultimate,
@@ -112,6 +113,23 @@ function harness(options: { conversations?: Summary[]; ready?: boolean; holdShow
     get now() { return now },
   }
 }
+
+focusConnectionContract("Ultimate", async () => {
+  const h = harness({ holdShown: true })
+  await h.flush()
+  return {
+    focus: async focused => { h.connector.page({ page: "p1", focused, conversation: 61, draft: false }); await h.flush() },
+    connect: h.connect,
+    drain: async () => {
+      for (let i = 0; i < 4; i++) {
+        for (const request of h.requests.filter(r => r.body.op === "shown" && !r.settled)) request.answer(200, "{}")
+        await h.flush()
+      }
+    },
+    reports: () => h.events("shown"),
+    stop: h.connector.stop,
+  }
+})
 
 test("each conversation Ultimate lists says hello under its project home, with only a name the user gave", async () => {
   const h = harness()

@@ -3,7 +3,12 @@ import type { Instance, TakeResult } from "./lib/instance.ts"
 import { sha256 } from "./lib/util.ts"
 
 export type Context = { instance: Instance; agent: AgentDriver; replyWait: number }
-export type Exercise = { id: string; title: string; run: (context: Context) => Promise<void> }
+export type Exercise = {
+  id: string
+  title: string
+  applies?: (agent: AgentDriver) => boolean
+  run: (context: Context) => Promise<void>
+}
 
 class Failed extends Error {}
 const check = (condition: unknown, why: string) => { if (!condition) throw new Failed(why) }
@@ -13,12 +18,14 @@ const show = (result: TakeResult) => JSON.stringify(result)
 
 async function deliverAndRead(context: Context, body: string) {
   const { instance, agent } = context
+  const since = (await agent.messages()).length
   const result = instance.take(`tell ${agent.name} ${body}`, { waitReply: context.replyWait })
   check(result.ok, `the take was not delivered: ${show(result)}`)
   check(result.receiptKind === "sent", `expected a sent receipt: ${show(result)}`)
   check(agent.owns(result.conversation), `delivered to ${result.conversation}, expected ${agent.conversation}`)
   await agent.idle(context.replyWait)
-  return { result, messages: await agent.messages() }
+  const messages = await agent.messages()
+  return { result, messages, since, fresh: messages.slice(since) }
 }
 export const exercises: Exercise[] = [
   {
@@ -26,8 +33,8 @@ export const exercises: Exercise[] = [
     title: "An idle conversation gets the take once, as the user's message",
     async run(context) {
       const body = "Reply with only the word kiwi."
-      const { messages } = await deliverAndRead(context, body)
-      const sent = users(messages, body)
+      const { fresh } = await deliverAndRead(context, body)
+      const sent = users(fresh, body)
       check(sent.length === 1, `the agent recorded ${sent.length} user messages "${body}"`)
     },
   },
@@ -36,11 +43,11 @@ export const exercises: Exercise[] = [
     title: "The reply read for a take is the reply the agent gave to that take",
     async run(context) {
       const body = "Reply with only the word mango."
-      const { result, messages } = await deliverAndRead(context, body)
+      const { result, fresh } = await deliverAndRead(context, body)
       check(result.reply, `no reply was reported: ${result.replyProblem ?? show(result)}`)
-      const asked = users(messages, body).at(-1)
+      const asked = users(fresh, body).at(-1)
       check(asked, "the agent has no record of the take")
-      const answer = messages.filter((message) => message.role === "agent" && message.turn === asked!.turn).at(-1)
+      const answer = fresh.filter((message) => message.role === "agent" && message.turn === asked!.turn).at(-1)
       check(answer, "the agent recorded no reply in that turn")
       check(result.reply!.kind === "answer", `the turn ended as ${result.reply!.kind}: ${result.reply!.ending ?? ""}`)
       check(result.reply!.sha256 === sha256(answer!.text),
@@ -52,8 +59,8 @@ export const exercises: Exercise[] = [
     title: "A take starting with a slash arrives as text, not as a command",
     async run(context) {
       const body = "/status"
-      const { messages } = await deliverAndRead(context, body)
-      check(users(messages, body).length === 1, `the agent has no user message "${body}"; it may have run as a command`)
+      const { fresh } = await deliverAndRead(context, body)
+      check(users(fresh, body).length === 1, `the agent has no user message "${body}"; it may have run as a command`)
     },
   },
   {
@@ -64,7 +71,8 @@ export const exercises: Exercise[] = [
       const first = await deliverAndRead(context, body)
       const second = await deliverAndRead(context, body)
       check(first.result.request !== second.result.request, "both takes report the same request")
-      check(users(second.messages, body).length === 2, `the agent recorded ${users(second.messages, body).length} messages "${body}"`)
+      const both = users(second.messages.slice(first.since), body).length
+      check(both === 2, `the agent recorded ${both} messages "${body}"`)
     },
   },
   {
@@ -76,6 +84,47 @@ export const exercises: Exercise[] = [
       check(!result.ok, `a take to an unknown name was delivered: ${show(result)}`)
       check(result.conversation === undefined, `a take to an unknown name went to ${result.conversation}`)
       check((await context.agent.messages()).length === before, "the agent recorded a new message")
+    },
+  },
+  {
+    id: "N5",
+    title: "A number right after a conversation's name, with no address of its own, is the start of the message",
+    async run(context) {
+      const body = "2 things are broken. Reply with only the word fig."
+      const { fresh } = await deliverAndRead(context, body)
+      check(users(fresh, body).length === 1, `the agent has no user message "${body}"`)
+    },
+  },
+  {
+    id: "N6",
+    title: "A conversation's own address in its app reaches it, said with or without a comma",
+    applies: (agent) => agent.addresses !== undefined,
+    async run(context) {
+      const { instance, agent } = context
+      for (const [said, body] of [
+        [`tell ${agent.addresses!.said} Reply with only the word lime.`, "Reply with only the word lime."],
+        [`tell ${agent.addresses!.said}, reply with only the word pear.`, "reply with only the word pear."],
+      ]) {
+        const since = (await agent.messages()).length
+        const result = instance.take(said, { waitReply: context.replyWait })
+        check(result.ok && agent.owns(result.conversation), `"${said}" went to ${result.conversation}: ${show(result)}`)
+        await agent.idle(context.replyWait)
+        check(users((await agent.messages()).slice(since), body).length === 1, `the agent has no user message "${body}"`)
+      }
+    },
+  },
+  {
+    id: "N7",
+    title: "An address in the app that names no conversation holds, never reaching a shorter name",
+    applies: (agent) => agent.addresses !== undefined,
+    async run(context) {
+      const { instance, agent } = context
+      const before = (await agent.messages()).length
+      for (const said of [`tell ${agent.addresses!.absent} reply with only the word nope`, `tell ${agent.addresses!.absent}, reply with only the word nope`]) {
+        const result = instance.take(said)
+        check(!result.ok && result.conversation === undefined, `"${said}" was delivered: ${show(result)}`)
+      }
+      check((await agent.messages()).length === before, "the agent recorded a new message")
     },
   },
 ]

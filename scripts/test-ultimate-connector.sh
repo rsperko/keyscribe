@@ -21,4 +21,9 @@ fi
 echo "test-ultimate-connector: node $VERSION"
 
 cd "$ROOT"
-timeout 300 "$NODE" --test Tests/UltimateConnector/*.test.ts Tests/AgentConformance/*-history.test.ts
+timeout 300 "$NODE" --test Tests/UltimateConnector/*.test.ts Tests/AgentConformance/*.test.ts
+
+CLONE="${ULTIMATE_CLONE:-}"
+if [ -n "$CLONE" ] && [ -x "$CLONE/node_modules/.bin/tsc" ] && [ -d "$CLONE/web/src/sdk" ]; then
+  "$ROOT/scripts/typecheck-ultimate-web.sh" "$CLONE"
+fi

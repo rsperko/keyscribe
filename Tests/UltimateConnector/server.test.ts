@@ -97,3 +97,42 @@ test("the installed server accepts homes reached through symlinked setups and re
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("bridge trace summaries keep protocol fields and omit user, reply, and problem text", () => {
+  const summary = server.summarizeBridgeBody("/event", JSON.stringify({
+    op: "turnComplete",
+    session: "61@/u/app",
+    turn: "t1",
+    reason: "answer",
+    answer: "SECRET REPLY CONTENT",
+    text: "SECRET USER PROMPT",
+    prompt: "sha256-digest",
+    prompts: 2,
+    on: true,
+    pageConversation: "53",
+    problem: "SECRET PAGE DIALOG TEXT",
+  }))
+  assert.equal(summary.op, "turnComplete")
+  assert.equal(summary.session, "61@/u/app")
+  assert.equal(summary.turn, "t1")
+  assert.equal(summary.prompts, 2)
+  assert.equal(summary.pageConversation, "53")
+  assert.equal(summary.hasProblem, true)
+  assert.equal("problem" in summary, false)
+  assert.equal("answer" in summary, false)
+  assert.equal("text" in summary, false)
+  assert.equal("prompt" in summary, false)
+  assert.equal(JSON.stringify(summary).includes("SECRET"), false)
+
+  const pageSummary = server.summarizeTraceRecord({
+    page: "p1",
+    seq: 7,
+    focused: true,
+    conversation: 61,
+    draft: false,
+    problem: "SECRET PAGE CONTENT",
+    extraField: "SECRET EXTRA",
+  })
+  assert.deepEqual(pageSummary, { page: "p1", seq: 7, focused: true, conversation: 61, draft: false, hasProblem: true })
+  assert.equal(JSON.stringify(pageSummary).includes("SECRET"), false)
+})

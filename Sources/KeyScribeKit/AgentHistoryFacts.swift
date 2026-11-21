@@ -110,6 +110,7 @@ public enum AgentHistoryFacts {
         case .row(let row, _): Spoken(said: "Conversation \(row)", how: "Its conversation number")
         case .unresolved(let spoken, _): Spoken(said: spoken)
         case .ambiguous(let spoken, let names, _): Spoken(said: spoken, how: "Its name", candidates: names)
+        case .native(let spoken, let handles, _): Spoken(said: spoken, how: "Its address in its app", candidates: handles.count > 1 ? handles.values.sorted() : nil)
         case .nearMiss(let spoken, let name, _, _): Spoken(said: spoken, how: "Sounded like its name", closest: name)
         case .none: Spoken()
         }

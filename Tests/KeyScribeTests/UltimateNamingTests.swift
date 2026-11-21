@@ -74,6 +74,24 @@ struct UltimateNamingTests {
         }.sorted()
     }
 
+    func integration(_ host: UltimateHost) -> AgentHostIntegration {
+        var integration = AgentHostIntegration(kind: UltimateHost.kind, make: { host })
+        integration.addresses = UltimateHost.integration.addresses
+        return integration
+    }
+
+    func resolve(_ text: String, through hub: AgentHub) -> AgentRecipient.Resolution {
+        let snapshot = AgentSnapshot(
+            names: hub.names, conversations: hub.recordingOrder, former: hub.formerNames, shared: hub.sharedNames, natives: hub.nativeRoster)
+        let address = AgentAddress.parse(text, names: snapshot.spokenNames, afterVerb: snapshot.afterVerbNames, natives: snapshot.natives)
+        return AgentRecipient.resolve(address, focused: nil, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
+    }
+
+    func id(_ native: String, in project: Projects = .one, at index: Int = 0) -> String {
+        AgentSessionID.make(agent: "ultimate", native: AgentHostLocation(
+            host: "ultimate", instance: Self.projects(project)[index].home, native: native).conversationKey)
+    }
+
     func hub(_ layout: Layout, _ company: Company, _ projects: Projects, _ order: Order = Order()) async -> (AgentHub, () async -> Void) {
         let listed = Self.projects(projects)
         let roots = Dictionary(uniqueKeysWithValues: listed.map { ($0.home, $0.project!.root) })
@@ -89,7 +107,7 @@ struct UltimateNamingTests {
         let hub = AgentHub(
             transport: transport, discovery: [AgentHubTests.FakeDiscovery(kind: .claude)], names: nil, focus: nil, front: nil,
             receiptTimeout: .milliseconds(50), handOffLimit: .seconds(30), scanDeadline: .seconds(30), places: nil,
-            hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { host })], hostAllowed: { _ in true }, hostDeadline: .milliseconds(200),
+            hosts: [integration(host)], hostAllowed: { _ in true }, hostDeadline: .milliseconds(200),
             hostConfirmDelay: .seconds(3), heldLimit: .milliseconds(100),
             processEnvironment: { _, _ in [:] }, processParent: { _ in nil }, now: Date.init,
             makeId: { "r1" }, accessibilityTrusted: { true })
@@ -144,16 +162,60 @@ struct UltimateNamingTests {
         hub.handle(.hello(hello))
         await hub.rescan()
         #expect(hub.directory.conversations.contains { $0.id == session && $0.handle == "release notes" })
-        let snapshot = AgentSnapshot(names: hub.names, conversations: hub.recordingOrder, former: hub.formerNames)
-        #expect(AgentAddress.parse("tell ultimate 61 run the tests", names: snapshot.spokenNames) == .name("ultimate 61", body: "run the tests"))
-        #expect(snapshot.addressable["ultimate 61"] == session)
+        for said in ["tell ultimate 61 run the tests", "tell ultimate sixty one run the tests", "tell ultimate conversation 61 run the tests"] {
+            #expect(resolve(said, through: hub) == .deliver(id: session, body: "run the tests", source: .spoken), "\(said)")
+        }
+        #expect(hub.directory.conversations.first { $0.id == session }?.otherNames == ["ultimate 61"])
     }
 
-    @Test func aMessageToTheStandingAgentThatStartsWithALiveBranchsNumberGoesToThatBranch() async {
+    @Test(arguments: [
+        ("tell ultimate 61 tests are failing", "61", "tests are failing"),
+        ("tell ultimate seventy, tests are failing", "70", "tests are failing"),
+        ("tell ultimate there are 99 failing tests", "53", "there are 99 failing tests"),
+        ("tell ultimate, 99 tests are failing", "53", "99 tests are failing"),
+        ("tell ultimate 99 tests are failing", nil, ""),
+        ("tell ultimate 99, tests are failing", nil, ""),
+        ("tell ultimate six eight, tests are failing", nil, ""),
+        ("ultimate 68 reply ready", nil, ""),
+    ])
+    func aNumberAfterTheStandingAgentsNameIsABranchNumberAndAnUnknownOneHolds(said: String, native: String?, body: String) async {
         let (hub, _) = await hub(.twoUntitled, .besideAnother, .one)
-        let names = hub.directory.conversations.map(\.handle)
-        #expect(AgentAddress.parse("tell ultimate 61 tests are failing", names: names) == .name("ultimate 61", body: "tests are failing"))
-        #expect(AgentAddress.parse("tell ultimate 99 tests are failing", names: names) == .name("ultimate", body: "99 tests are failing"))
-        #expect(AgentAddress.parse("tell ultimate 99, tests are failing", names: names) == .unresolved(spoken: "ultimate 99", body: "tests are failing"))
+        let resolution = resolve(said, through: hub)
+        if let native {
+            #expect(resolution == .deliver(id: id(native), body: body, source: .spoken))
+        } else if case .ask(_, .unknownName) = resolution {
+        } else {
+            Issue.record("expected a hold, got \(resolution)")
+        }
+    }
+
+    @Test func twoProjectsWithTheSameBranchNumberAskUnlessTheProjectIsSaid() async {
+        let (hub, _) = await hub(.oneUntitled, .alone, .twoNamedApart)
+        let offered: [String]? = switch resolve("tell ultimate 61 run the tests", through: hub) {
+        case .ask(_, .ambiguousName(_, let matches)), .ask(_, .sharedName(_, let matches, _)): matches.sorted()
+        default: nil
+        }
+        #expect(offered == ["app ultimate 61", "web ultimate 61"])
+        #expect(resolve("tell web ultimate sixty one run the tests", through: hub)
+                == .deliver(id: id("61", in: .twoNamedApart, at: 1), body: "run the tests", source: .spoken))
+        #expect(resolve("tell app ultimate 61 run the tests", through: hub)
+                == .deliver(id: id("61", in: .twoNamedApart, at: 0), body: "run the tests", source: .spoken))
+    }
+
+    @Test func anUntitledBranchSharingItsNumberWithATitledOneInAnotherProjectIsNamedByItsProject() async {
+        let (hub, _) = await hub(.oneUntitled, .alone, .twoNamedApart)
+        let titled = id("61", in: .twoNamedApart, at: 0)
+        let untitled = id("61", in: .twoNamedApart, at: 1)
+        var hello = AgentHostTests.hello(titled)
+        hello.agent = "ultimate"
+        hello.title = "release notes"
+        hub.handle(.hello(hello))
+        await hub.rescan()
+        #expect(hub.directory.conversations.first { $0.id == titled }?.handle == "release notes")
+        #expect(hub.directory.conversations.first { $0.id == untitled }?.handle == "web ultimate 61")
+        #expect(resolve("tell ultimate 61 run the tests", through: hub)
+                == .ask(body: "run the tests", reason: .ambiguousName("ultimate 61", matches: ["release notes", "web ultimate 61"])))
+        #expect(resolve("tell web ultimate 61 run the tests", through: hub) == .deliver(id: untitled, body: "run the tests", source: .spoken))
+        #expect(resolve("tell release notes run the tests", through: hub) == .deliver(id: titled, body: "run the tests", source: .spoken))
     }
 }

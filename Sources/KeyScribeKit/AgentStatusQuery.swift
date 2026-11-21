@@ -11,7 +11,8 @@ public enum AgentStatusQuery: Equatable, Sendable {
     private static let openers: Set<String> = ["please", "hey", "so", "okay", "ok"]
 
     public static func parse(
-        _ transcript: String, names: [String], namesKnown: Bool = true, read: ((String) -> String)? = nil, afterVerb: [String] = []
+        _ transcript: String, names: [String], namesKnown: Bool = true, read: ((String) -> String)? = nil, afterVerb: [String] = [],
+        natives: AgentNativeRoster = AgentNativeRoster()
     ) -> AgentStatusQuery? {
         let words = spoken(transcript)
         let said = words.joined(separator: " ")
@@ -20,10 +21,8 @@ public enum AgentStatusQuery: Equatable, Sendable {
         let subject = words.dropFirst(verb.count).joined(separator: " ")
         if thisConversation.contains(subject) { return .check(nil) }
         if allConversations.contains(subject) { return .all }
-        if AgentAddress.exactName(subject, among: names) == nil, let other = AgentAddress.exactName(subject, among: afterVerb) {
-            return .check(.name(other, body: ""))
-        }
-        switch AgentAddress.spokenName(subject, names: names, namesKnown: namesKnown, read: read) {
+        let title = AgentAddress.exactName(subject, among: names) == nil ? AgentAddress.exactName(subject, among: afterVerb) : nil
+        switch AgentAddress.spokenName(subject, names: names + [title].compactMap { $0 }, namesKnown: namesKnown, read: read, natives: natives) {
         case .none:
             let unresolved = AgentStatusQuery.check(.unresolved(spoken: subject, body: ""))
             if words.count - verb.count <= AgentRename.nameWords { return unresolved }

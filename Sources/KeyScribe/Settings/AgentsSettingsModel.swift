@@ -121,7 +121,9 @@ final class AgentsSettingsModel: ObservableObject {
         return connector.setups.contains(where: \.isEnrolled)
     }
 
-    func isTurnedOn(id: String) -> Bool { hosts.first { $0.id == id }.map(isTurnedOn) ?? false }
+    func isTurnedOn(id: String) -> Bool {
+        (hosts.first { $0.id == id } ?? connectors.first { $0.kind.id == id }?.kind).map(isTurnedOn) ?? false
+    }
 
     func problem(of host: AgentKind) -> String? { isTurnedOn(host) ? discoveryProblems[host.id] : nil }
 
@@ -138,6 +140,7 @@ final class AgentsSettingsModel: ObservableObject {
     var onRename: ((String, String) throws -> Void)?
     var onReloadNames: (() -> Void)?
     var renameCheck: ((String, String) -> AgentHandles.RenameError?)?
+    var nativeRoster: (() -> AgentNativeRoster)?
     var defaultName: ((String) -> AgentDirectory.DefaultName?)?
     var onUseDefaultName: ((String) throws -> Void)?
     var onRetire: ((String) -> Void)? {
@@ -546,7 +549,7 @@ final class AgentsSettingsModel: ObservableObject {
         let normalized = AgentHandles.normalize(name)
         let full = "Say \u{201C}\(normalized), run the unit tests.\u{201D}"
         let others = rows.filter { $0.id != id }.map(\.name)
-        guard let short = AgentAddress.shorterSpokenName(for: normalized, among: others + [normalized]) else { return full }
+        guard let short = AgentAddress.shorterSpokenName(for: normalized, among: others + [normalized], natives: nativeRoster?() ?? AgentNativeRoster()) else { return full }
         return "\(full) \u{201C}tell \(short), \u{2026}\u{201D} also works."
     }
 

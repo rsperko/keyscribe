@@ -4,11 +4,59 @@ Exercises that run the real KeyScribe app against a real agent, so a change to t
 an agent, is checked the way a user would meet it. Connector tests check each side against a stand-in; these check
 both sides together.
 
+## Supervised verification
+
+```sh
+make verify-agents-preflight                  # check tools, logins, Metal toolchain and env without running tests
+make verify-agents-unit                       # all Swift and connector suites, no live agents
+make verify-agents CHECKS=bb-plugin,swift      # selected checks, never a full-gate receipt
+make verify-agents                            # complete gate, including real agents and Ultimate's native window
+make verify-agents FORCE=1                    # fresh complete gate, including deterministic checks
+make check-diff                               # check diff for stray comments, AI attributions and leaked scratch dirs
+python3 -B scripts/verify_agents.py --list     # check IDs and exact commands
+```
+
+The complete gate builds an isolated app under `.verification/artifacts/`, runs each registered live driver,
+and runs Ultimate's headless and native-window checks. It needs the logins and tools listed below
+and Ultimate's environment variables. Set `KEYSCRIBE_SCREEN_NOTICE_CMD` if you use a screen-takeover
+notice script (`<cmd> on "<reason>" <minutes>` / `<cmd> off`). It moves foreground focus and uses the agents'
+models. Missing prerequisites fail the required check; they do not produce a passing gate.
+
+The runner limits concurrent jobs (`JOBS=2` by default), serializes SwiftPM/build work and screen use,
+and reports progress without another process polling its logs. It refuses a second verification run in
+the same checkout or a Swift build already active there. A silence deadline captures process diagnostics
+and stops that job; an absolute deadline bounds work even while it keeps printing. Only processes in the
+job's own process group are signalled. Live harnesses handle termination by cleaning up their own instances.
+
+Every run writes `.verification/runs/<run>/receipt.json`. It records the selected and required checks,
+source-content digest, tool versions, commands, result and log paths. Partial runs never set `full_gate`.
+The runner narrows only by `CHECKS`: it drops the harnesses' own filters (`ONLY`, `TARGETS`, `REPEAT`, `FAIL_FAST`)
+from every check's environment, so a run that passes covered every case.
+Changes during a run invalidate its result. Unchanged deterministic checks may reuse their recorded pass
+only with matching source contents, environment, tool versions and command; a build also requires matching
+app contents. Live checks always run again. Use `FORCE=1` for a fresh final gate after review.
+
+Failures retain a local bundle beside their result: the error and log tail, process diagnostics (sampling active hung descendants rather than a wrapper parent, plus structured Swift Testing failure/hang/slow triage), and,
+for live conformance, the test instance's recent History, discovery report, driver diagnostics (tmux screen, bb runtime, or Ultimate log and metadata-only bridge trace) and agent's own history. Native
+Ultimate failures also record window and visible-editor facts. Bundles copy no login files and are never
+uploaded. A generic failed run keeps the app instance's diagnostic folder; retaining the agent's scratch
+setup and copied login still requires `KEEP=1`. A failed native Ultimate run keeps its scratch setup as before.
+A folder kept on purpose carries a marker file, so `make check-diff` reports only folders a run failed to clean up.
+
+`REPEAT=N` runs each exercise again against the same conversation, so an exercise counts only the messages its
+own round added.
+
+Focus/connection races also run through one shared contract in the bb and Ultimate connector suites.
+`lib/event-orders.ts` generates every interleaving while preserving each event source's own order; an
+oversized grid fails instead of silently checking a subset. Add a discovered ordering to these deterministic
+contracts before relying on another live run to encounter it.
+
 ```sh
 make build
-make test-agents AGENT=codex            # every exercise
-make test-agents AGENT=codex ONLY=D1,R1 # some of them
-make test-agents AGENT=codex KEEP=1     # keep the scratch folders to look at afterwards
+make test-agents AGENT=codex                                    # every exercise
+make test-agents AGENT=codex ONLY=D1,R1 FAIL_FAST=1 REPEAT=3    # narrow flake reproduction
+make test-agents AGENT=codex KEEP=1                             # keep the scratch folders to look at afterwards
+make test-ultimate-page ONLY="first-run|Tab" TARGETS=main FAIL_FAST=1 REPEAT=5
 ```
 
 `AGENT=all` runs every agent that has a driver, one after another, and ends with a line per agent.
@@ -70,4 +118,6 @@ do should check that the user is told so, not be skipped.
 ## Adding an exercise
 
 Add it to `exercises.ts` with an id from its family (D delivery, I images, R replies, N names,
-P discovery, C connection, L install, S safety). Assert what the agent recorded.
+P discovery, C connection, L install, S safety). Assert what the agent recorded. An exercise for something only some
+agents' conversations have, such as an address of their own in their app (a driver's `addresses`), sets `applies`
+and reports N/A for the others; anything a user could ask of every agent still runs against every agent.

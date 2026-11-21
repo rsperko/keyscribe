@@ -121,6 +121,26 @@ struct DownstreamSeamTests {
         #expect(try await HostCLI.run(["/usr/bin/true"], subcommand: "true").status == 0)
     }
 
+    @Test func aDownstreamHostReadsItsOwnConversationIdsThroughThePublicSurfaceAlone() throws {
+        var integration = AgentHostIntegration(
+            kind: AgentKind(id: "downstream", displayName: "Downstream Host", connectorName: "Downstream plugin"), make: { Host() })
+        integration.addresses = AgentNativeAddress(agent: "downstream") { words in
+            guard let key = words.first, ["flex", "mfmo"].contains(key),
+                  let number = SpokenNumber.read(words.dropFirst(), forms: [.whole, .grouped, .digits])
+            else { return nil }
+            return .init(native: number.value.map { "\(key.uppercased())-\($0)" }, words: 1 + number.words)
+        }
+        let roster = AgentNativeRoster(
+            addresses: [try #require(integration.addresses)], members: [.init(agent: "downstream", native: "FLEX-240", id: "downstream:t1", handle: "login bug")])
+        let names = ["login bug": "downstream:t1"]
+        for said in ["tell flex two forty, reply ready", "tell flex two hundred forty reply ready", "tell flex two four zero reply ready"] {
+            let address = AgentAddress.parse(said, names: Array(names.keys), natives: roster)
+            #expect(AgentRecipient.resolve(address, focused: nil, rows: [], names: names) == .deliver(id: "downstream:t1", body: "reply ready", source: .spoken))
+        }
+        let missing = AgentAddress.parse("tell mfmo 12 reply ready", names: Array(names.keys), natives: roster)
+        #expect(AgentRecipient.resolve(missing, focused: nil, rows: [], names: names) == .ask(body: "reply ready", reason: .unknownName("mfmo 12")))
+    }
+
     @Test func aConflictingDownstreamRouteIsRejectedBeforeAnythingStarts() {
         var integrations = Self.integrations()
         integrations.surfaces.terminals.append(Self.term)

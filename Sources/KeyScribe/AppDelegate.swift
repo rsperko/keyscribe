@@ -868,7 +868,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 let runtime = try AgentRuntime(
                     supportDir: KeyScribePaths.supportDir, surfaces: surfaces, placeSources: agentIntegrations.placeSources.map { $0() },
                     discovery: agentIntegrations.discoveries(setups: setups, processes: processes), setups: setups,
-                    legacyAgent: AgentKind.claude.id, hosts: agentIntegrations.hosts,
+                    legacyAgent: AgentKind.claude.id, hosts: agentIntegrations.hosts, addresses: agentIntegrations.agentAddresses,
                     hostAllowed: { [weak agents = settingsController.agents] in agents?.isTurnedOn(id: $0) ?? false })
                 setups.onChange = { [weak hub = runtime.hub] in Task { @MainActor in await hub?.rescan(wantingHosts: true) } }
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1, conversation: $2) }
@@ -882,6 +882,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 settingsController.agents.onRename = { [weak hub = runtime.hub] in try hub?.rename($0, to: $1) }
                 settingsController.agents.onReloadNames = { [weak hub = runtime.hub] in hub?.reloadNames() }
                 settingsController.agents.renameCheck = { [weak hub = runtime.hub] in hub?.renameProblem($0, to: $1) }
+                settingsController.agents.nativeRoster = { [weak hub = runtime.hub] in hub?.nativeRoster ?? AgentNativeRoster() }
                 settingsController.agents.defaultName = { [weak hub = runtime.hub] in hub?.defaultName(for: $0) }
                 settingsController.agents.onUseDefaultName = { [weak hub = runtime.hub] in try hub?.useDefaultName($0) }
                 settingsController.agents.onRetire = { [weak runtime] in runtime?.retire(installation: $0) }
@@ -968,6 +969,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController.agents.onRename = nil
             settingsController.agents.onReloadNames = nil
             settingsController.agents.renameCheck = nil
+            settingsController.agents.nativeRoster = nil
             settingsController.agents.defaultName = nil
             settingsController.agents.onUseDefaultName = nil
             settingsController.agents.onRetire = nil

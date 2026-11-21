@@ -204,6 +204,10 @@ export class CodexDriver implements AgentDriver {
     return problems
   }
 
+  diagnostics() {
+    return { "tmux-screen": () => this.tmux.screen() }
+  }
+
   async stop(keep: boolean) {
     this.daemon?.close()
     this.tmux.kill()

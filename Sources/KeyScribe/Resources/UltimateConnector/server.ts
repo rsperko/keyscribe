@@ -3,7 +3,7 @@ import { defineExtension, defineTool } from '@earendil-works/pi-durable'
 import type { CommitPublication, ConversationId, EntryRecord } from '@earendil-works/pi-durable'
 import { obj } from '@earendil-works/pi-schema'
 import { randomBytes } from 'node:crypto'
-import { readFileSync, realpathSync } from 'node:fs'
+import { appendFileSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { request } from 'node:http'
 import { basename, dirname, join } from 'node:path'
@@ -51,8 +51,39 @@ type Host = {
   onClose(callback: () => Promise<void>): void
 }
 let current: ReturnType<typeof start> | null = null
+const traceTarget = process.env.KEYSCRIBE_ULTIMATE_TRACE || null
+const traceLimit = 4000
+let traced = 0
+const traceFields = [
+  'op', 'session', 'on', 'draft', 'newConversation', 'pageConversation',
+  'prompts', 'turn', 'reason', 'request', 'id', 'sent', 'withDraft', 'state', 'protocolVersion',
+  'page', 'seq', 'focused', 'conversation', 'parent',
+] as const
+
+export function summarizeTraceRecord(record: Record<string, unknown>, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...extra }
+  for (const key of traceFields) if (record[key] !== undefined) out[key] = record[key]
+  if (typeof record.problem === 'string' && record.problem.length > 0) out.hasProblem = true
+  return out
+}
+
+export function summarizeBridgeBody(path: string, body: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>
+    return summarizeTraceRecord(parsed, { path })
+  } catch {
+    return { path }
+  }
+}
+
+function trace(dir: string, entry: Record<string, unknown>) {
+  if (!traceTarget || traced >= traceLimit) return
+  traced += 1
+  try { appendFileSync(traceTarget, JSON.stringify({ at: Date.now(), dir, ...entry }) + '\n') } catch {}
+}
 
 function post(socketPath: string, path: string, body: string, token: string): Exchange {
+  if (traceTarget) trace('ext->hub', summarizeBridgeBody(path, body))
   let cancel = () => {}
   const response = new Promise<Response>((resolve, reject) => {
     const req = request(
@@ -77,6 +108,7 @@ function post(socketPath: string, path: string, body: string, token: string): Ex
         })
         res.on('end', () => {
           const status = res.statusCode || 0
+          if (traceTarget) trace('hub->ext', { path, status })
           resolve({ status, ok: status >= 200 && status < 300, text: Buffer.concat(chunks).toString('utf8') })
         })
         res.on('error', reject)
@@ -356,14 +388,16 @@ export const actions = {
   async page(value: unknown) {
     const { page, seq, focused, conversation, draft, newConversation, parent, pageConversation, problem } = args(value)
     if (typeof page !== 'string') throw new Error('Expected a page')
-    await current?.page({
+    const report: PageReport = {
       page, focused: focused === true, conversation: typeof conversation === 'number' ? conversation : null, draft: draft === true,
       ...(typeof seq === 'number' && Number.isFinite(seq) ? { seq } : {}),
       ...(newConversation === true ? { newConversation: true } : {}),
       ...(typeof parent === 'number' ? { parent } : {}),
       ...(typeof pageConversation === 'number' ? { pageConversation } : {}),
       ...(typeof problem === 'string' ? { problem: problem.slice(0, 300) } : {}),
-    } satisfies PageReport)
+    }
+    if (traceTarget) trace('page->ext', summarizeTraceRecord(report as unknown as Record<string, unknown>))
+    await current?.page(report)
     return {}
   },
   async next(value: unknown) {

@@ -160,6 +160,7 @@ public struct AgentHostIntegration: Sendable {
     var withSetups: (@MainActor @Sendable (ConnectorSetupRegistry) -> any AgentHost)?
     var withSurfaces: (@MainActor @Sendable (ConnectorSetupRegistry, ResolvedSurfaces) -> any AgentHost)?
     public var folderVariable: String?
+    public var addresses: AgentNativeAddress?
     var processRule: AgentProcesses.Rule?
     var report: (@Sendable (_ body: Data, _ folder: String) -> [AgentEvent]?)?
 

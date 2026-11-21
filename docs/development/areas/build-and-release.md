@@ -44,7 +44,11 @@ build, so an incremental build after a pin bump never keeps an earlier stamp; it
 lockfile has no FluidAudio pin. `./make-app.sh` builds the **dev** target with the
 stable self-signed cert (**`KeyScribe Local`**) for persistent TCC, else ad-hoc; it **ignores**
 `KEYSCRIBE_SIGN_ID` / `CODESIGN_IDENTITY` for dev (those are the release Developer ID identity, so an
-`.envrc` for `release.sh` never leaks into dev). `release.sh` archives and exports the public target;
+`.envrc` for `release.sh` never leaks into dev). When `TOOLCHAINS` is unset and `xcrun -sdk macosx metal`
+fails — which happens in background/launchd sessions that cannot query the GUI-session MobileAsset
+daemon — `make-app.sh` inspects the newest mounted MetalToolchain cryptex under
+`/private/var/run/com.apple.security.cryptexd/mnt/` and exports `TOOLCHAINS` so MLX's Metal shaders still
+compile. `release.sh` archives and exports the public target;
 Xcode signs Sparkle's helpers, the framework, the binary, and the bundle inside-out with hardened runtime
 itself, so there is no re-sign block. **A downstream distribution `include:`s the template and adds its
 own target** with its own identity, signing, entry file (`main.swift` that sets `delegate.updater`), and
@@ -53,7 +57,8 @@ export options — it never edits upstream source. A downstream that adds agent 
 `DevCLI.handleFlags(agentIntegrations:)` and `AppDelegate(agentIntegrations:)`; passing it to only one makes the dev
 probes and the app disagree about which terminals exist. An app that owns agent conversations itself is an
 `AgentHostIntegration` appended to `hosts`: its kind and a factory for an `AgentHost`, which makes no
-call until the user turns it on and answers unsupported for every capability its own API lacks. A host runs its
+call until the user turns it on and answers unsupported for every capability its own API lacks. A host whose
+conversations have ids people say sets `addresses` to an `AgentNativeAddress` (`voice-commands.md`). A host runs its
 command line through the public `HostCLI.run`. A route's `open`, `place`, `front`, and `check` only
 read: they run on every plan, every in-front read, and every probe, so anything that changes a terminal or
 multiplexer belongs in the `PaneCommand`s `open` returns. A surface only the agent's own process can select
@@ -132,6 +137,12 @@ if local `main` holds unpushed commits (they would ship with the feed), then swi
 A release's notes start at the release before it, so they cover its betas' changes.
 
 ## The release gate
+
+Agent development uses `make verify-agents-unit` for all unit and connector checks and `make verify-agents`
+for the complete live gate (`Tests/AgentConformance/README.md`). The runner owns deadlines, logs, failure
+bundles and exact-input receipts; it builds with `KEYSCRIBE_APP_OUTPUT` under `.verification/artifacts/`
+so the normal dev app bundle is left alone. `CHECKS=<ids>` selects a partial run and `FORCE=1` requests a
+fresh run. A partial run is never recorded as a passing full gate. This does not replace release preflight.
 
 **The release gate is mandatory and enforced: `make preflight` (→ `scripts/preflight.sh`) must pass
 before anything goes public.** `swift test` green is NOT sufficient — it runs on the dev build, but

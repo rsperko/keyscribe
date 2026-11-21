@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { markKept, scratchPrefixes } from "./scratch.ts"
 import { run, sleep } from "./util.ts"
 
 export type Message = { role: "user" | "agent"; text: string; turn?: string; mark?: string }
@@ -10,6 +11,7 @@ export interface AgentDriver {
   readonly folder: string
   readonly tool: string | undefined
   readonly conversation: string | undefined
+  readonly addresses?: { said: string; absent: string }
   owns(conversation: string | undefined): boolean
   setUp(): Promise<void>
   start(): Promise<void>
@@ -17,10 +19,11 @@ export interface AgentDriver {
   messages(): Promise<Message[]>
   stop(keep: boolean): Promise<void>
   untouched?(): string[]
+  diagnostics?(): Record<string, () => unknown | Promise<unknown>>
 }
 
 export function scratch(name: string) {
-  const root = realpathSync(mkdtempSync("/tmp/kc-"))
+  const root = realpathSync(mkdtempSync(`/tmp/${scratchPrefixes.agent}`))
   const project = join(root, name)
   mkdirSync(project)
   run("git", ["init", "-q", project])
@@ -51,5 +54,6 @@ export async function settled(read: () => Promise<Message[]>, seconds: number) {
 
 export function removeScratch(root: string, keep: boolean) {
   run("/usr/bin/pkill", ["-f", root])
-  if (!keep) rmSync(root, { recursive: true, force: true })
+  if (keep) markKept(root)
+  else rmSync(root, { recursive: true, force: true })
 }

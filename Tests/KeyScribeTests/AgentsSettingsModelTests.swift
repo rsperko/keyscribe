@@ -169,6 +169,7 @@ struct AgentsSettingsModelTests {
         await model.refresh()
         #expect(setup(model).state == .status(.notInstalled))
         #expect(!setup(model).isEnrolled)
+        #expect(!model.isTurnedOn(id: "claude"))
 
         await setup(model).install()
         let market = ClaudeConnectorInstaller.marketplaceDir(in: dir, setupFolder: URL(fileURLWithPath: defaultFolder(dir)))
@@ -176,6 +177,7 @@ struct AgentsSettingsModelTests {
         #expect(cli.calls.map { Array($0.dropFirst()) }.contains(["plugin", "install", "keyscribe-dev@keyscribe-dev-local", "--scope", "user"]))
         #expect(setup(model).state == .status(.ready))
         #expect(setup(model).isEnrolled)
+        #expect(model.isTurnedOn(id: "claude"))
     }
 
     @Test func theReloadHintShowsOnlyWhileAConversationIsUnconnectedOrOnThePreviousConnector() async {
@@ -799,6 +801,22 @@ struct AgentsSettingsModelTests {
         let short = try #require(AgentAddress.shorterSpokenName(for: "deploy the staging cluster", among: ["deploy the staging cluster", "backend", "fix authentication tests"]))
         #expect(model.renameExample("b", name: "deploy the staging cluster")
             == "Say \u{201C}deploy the staging cluster, run the unit tests.\u{201D} \u{201C}tell \(short), \u{2026}\u{201D} also works.")
+    }
+
+    @Test func theRenameExampleNeverOffersAShorterNameThatIsAnotherConversationsAddressInItsApp() {
+        let (model, _, _) = makeModel()
+        model.show([
+            .init(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true),
+            .init(id: "u68", agent: "ultimate", pid: 2, cwd: "/src/web", handle: "release notes", state: .idle, connectorLive: true),
+            .init(id: "u1", agent: "ultimate", pid: 3, cwd: "/src/web", handle: "ultimate", state: .idle, connectorLive: true),
+        ])
+        let kind = AgentKind(id: "ultimate", displayName: "Ultimate", connectorName: "Ultimate extension")
+        #expect(model.renameExample("a", name: "ultimate 68 plans").contains("tell ultimate 68,"))
+        model.nativeRoster = {
+            AgentNativeRoster(addresses: [UltimateAddress.reader(for: kind)],
+                              members: [.init(agent: "ultimate", native: "68", id: "u68", handle: "release notes")])
+        }
+        #expect(model.renameExample("a", name: "ultimate 68 plans") == "Say \u{201C}ultimate 68 plans, run the unit tests.\u{201D}")
     }
 
     @Test func aSaveFailureExplainsTheOutcomeAndKeepsTechnicalDetailsSeparate() {

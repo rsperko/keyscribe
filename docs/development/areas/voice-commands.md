@@ -121,6 +121,9 @@ every rule above applies to it, with these sharpenings:
   explicitly (the read-aloud tool and command): it waits for the app's answer within a bounded deadline, never for
   the turn or for speech, and a timeout promises nothing. They preserve downstream results,
   errors, cancellation, and other extensions' UI; connector failures must not interrupt agent work.
+  The Ultimate connector's `KEYSCRIBE_ULTIMATE_TRACE` file trace is strictly harness-only (it uses
+  synchronous `appendFileSync` inside Ultimate's server process, logs only allowlisted protocol
+  metadata without user/reply/problem text, and is never set in normal operation).
 - **Idle means asleep.** Background work runs only while something needs it. The bridge wakes for a parked
   poll's deadline or a command not yet settled, never on a fixed tick (`AgentBridgeServer.reschedule`). A parked
   poll keeps its connector live only while its connection is open: a connector whose process ends closes it, and
@@ -316,6 +319,29 @@ every rule above applies to it, with these sharpenings:
   tab or workspace label of one conversation (`.held`) holds with `AskReason.shownOn`. One another name two
   conversations have asks; one equal to a shown name is dropped. A herdr agent name is grouped only with
   other agent names when deciding whether it is shared.
+- **An integration owns its own conversation ids; shared code never reads one.** An integration whose
+  conversations have ids people say (a numbered branch, a ticket id) registers an `AgentNativeAddress` on its
+  descriptor (`AgentHostIntegration.addresses`, or `AgentIntegration`'s for a terminal agent): a pure, synchronous
+  function from the words after the verb to a native id and how many words it used, or to "mine, but no valid id".
+  It never sees the roster, the command or the message. Shared code freezes the take's `AgentNativeRoster` with
+  the names (`AgentHub.nativeRoster`: connected and disconnected conversations with their current name, every
+  other name that reaches them, and the same workspace the directory names them by; a workspace settled after the
+  press fills in a frozen conversation's, and no conversation joins after the press) and decides everything else in `AgentAddress.parse`: one conversation sends, several ask by their
+  current names, none holds and is never taken for a shorter name or the conversation in front. A reading competes
+  with the name match by words used: the longer wins. On a tie with an exact name, a reading that found no
+  conversation yields to the name; otherwise the name's conversation joins the reading's, so a default name equal to
+  another project's address asks instead of picking one. A tie with a partial name goes to the reading. Readings of
+  the same length from different integrations are pooled, so registration order never matters. A leading workspace
+  label narrows a reading to that workspace's conversations. A reading that ends inside a spoken word holds. The
+  reading also runs on the user's replacements and dictionary (the address reader), as names do, and word by word
+  only when they change the first words. A reader is active
+  while its integration is turned on or its agent has a listed conversation, so an address still holds while
+  discovery is empty or unreadable, and its words mean nothing to someone who never turned it on. Spoken numbers
+  come from `SpokenNumber`; each integration picks the forms it accepts, and an "and" continues a number only after
+  "hundred" or "thousand". Settings' shorter-name hint runs the same parse with the same roster. A conversation
+  whose own default name is another project's address (an untitled branch beside a titled one with the same number)
+  is named by its project, so the name it shows always reaches it.
+  `SourceInvariantsTests` keeps `Int(…native)` out of shared code.
 - **A title the agent generated never becomes a name.** An adapter reports what it knows to be generated as
   `AgentTitle.generatedTitle`, and a connector-reported name equal to it is ignored for naming
   (`AgentHub.isGenerated`).
@@ -441,12 +467,12 @@ every rule above applies to it, with these sharpenings:
   places; a placement and its entry can arrive in either order and before `submit` returns, so the extension matches
   them from whichever side comes last. A standing agent's handle (`@ultimate`) is its name; any other title is a name
   only when it differs from the title Ultimate's summaries generated. An untitled branch is named by the number
-  Ultimate shows for it (`ultimate 61`), given as the listing's explicit name so a title the user gives still wins.
+  Ultimate shows for it (`ultimate 61`), given as the listing's explicit name so a title the user gives still wins,
+  and as the session's `alias`, so it stays one of the conversation's other names once titled.
   The current sidebar title is also an explicit address after tell, open or check on, even when generated;
-  the numbered address remains stable. A number after a name is read as one run of number words
-  (`AgentAddress.numberedFamily`): when the name has numbered relatives, a run that names one addresses it, a run
-  that ends the address and names none holds, and any other run begins the message; a name with no numbered
-  relatives never takes a number as part of the address. The page reports the visible writable composer, including
+  the numbered address remains stable. `UltimateAddress` reads `ultimate`, an optional `conversation` or `session`,
+  and one run of number words, whole or grouped, as a conversation number; the whole run is the number or the
+  address is unreadable, so a number that names no listed conversation holds whatever follows it. The page reports the visible writable composer, including
   a side chat over its parent, Tab’s new-side-chat mode (`data-side-mode="side"`, delivered through `start` and
   `side-chat/open` so it never falls into `@ultimate`), and the page URL’s `?conversation=` id; a dialog or an editor
   that is not ready holds delivery with its reason. It reacts to

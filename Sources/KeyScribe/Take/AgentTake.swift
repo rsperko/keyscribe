@@ -10,6 +10,7 @@ struct AgentSnapshot {
     var shared: [String: AgentRecipient.SharedName] = [:]
     var late: [String: String] = [:]
     var lateShared: [String: AgentRecipient.SharedName] = [:]
+    var natives = AgentNativeRoster()
     var rows: [String] { conversations.map(\.id) }
     private var merged: (names: [String: String], shared: [String: AgentRecipient.SharedName]) {
         AgentRecipient.addingLate(late, sharing: lateShared, to: names.merging(disconnected) { kept, _ in kept }.merging(former) { kept, _ in kept }, sharing: shared)
@@ -126,7 +127,8 @@ final class AgentTake {
     private static func snapshot(of agents: AgentHub) -> AgentSnapshot {
         AgentSnapshot(
             names: agents.names, conversations: agents.recordingOrder,
-            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, former: agents.formerNames, shared: agents.sharedNames)
+            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, former: agents.formerNames, shared: agents.sharedNames,
+            natives: agents.nativeRoster)
     }
 
     private func settlePlaceNames(_ agents: AgentHub) async -> Bool {
@@ -273,6 +275,7 @@ final class AgentTake {
             if frozen.namesAvailable, agents.namesProblem == nil {
                 frozen.late = agents.names.merging(agents.disconnectedNames) { kept, _ in kept }.merging(agents.formerNames) { kept, _ in kept }
                 frozen.lateShared = agents.sharedNames
+                frozen.natives = frozen.natives.addingLate(agents.nativeRoster)
             }
             return frozen
         }()
@@ -283,13 +286,13 @@ final class AgentTake {
         let read = host.takePlan.agentAddressReader(for: routed.transcript, mode: mode)
         if let query = AgentStatusQuery.parse(
             routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
-            read: read, afterVerb: snapshot.afterVerbNames) {
+            read: read, afterVerb: snapshot.afterVerbNames, natives: snapshot.natives) {
             await answerStatus(query, focused: focused, through: agents, heard: heard, mode: mode, snapshot: snapshot)
             return
         }
         let address = AgentAddress.parse(
             routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
-            read: read, afterVerb: snapshot.afterVerbNames)
+            read: read, afterVerb: snapshot.afterVerbNames, natives: snapshot.natives)
         if AgentRecipient.usesFocus(address) {
             await settleAgentInFront()
             if Task.isCancelled { return }
@@ -406,6 +409,14 @@ final class AgentTake {
 
     static var unconfirmedLine: String {
         "\(unconfirmed) \(AgentOutput.nothingSent) Name a conversation in your instruction, or check that Accessibility is on for \(Branding.appName)."
+    }
+
+    static func unchecked(_ address: AgentAddress?) -> Bool {
+        switch address {
+        case .unresolved?: true
+        case .native(_, let handles, _)?: handles.isEmpty
+        default: false
+        }
     }
 
     static var unconfirmedCheckLine: String {
@@ -543,7 +554,7 @@ final class AgentTake {
         guard lease.keepActing() else { return stopQuietly() }
         guard let id = resolution.recipient else {
             if case .ask(_, let reason) = resolution, reason != .nothingFocused {
-                if !snapshot.namesAvailable, case .unresolved? = address {
+                if !snapshot.namesAvailable, Self.unchecked(address) {
                     return fail("Couldn\u{2019}t check conversation names yet. \(AgentOutput.nothingSent) Say it again, or say \u{201C}check on conversation\u{201D} and its number.",
                                 keepingWords: true)
                 }

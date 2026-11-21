@@ -41,6 +41,22 @@ BUILD_SYSTEM = $(shell ./scripts/swiftpm-build-system.sh test)
 test: ## Run the full test suite
 	swift test $(BUILD_SYSTEM)
 
+.PHONY: verify-agents verify-agents-unit verify-agents-preflight test-verification check-diff
+verify-agents: ## Complete agent gate: unit and connector suites, isolated app build, every live agent and Ultimate's native matrix (moves focus; uses models)
+	timeout --kill-after=45s 11400 python3 -B scripts/verify_agents.py $(if $(CHECKS),--only '$(CHECKS)') $(if $(FORCE),--force) $(if $(JOBS),--jobs '$(JOBS)')
+
+verify-agents-unit: ## Run all unit and connector suites with bounded jobs and failure bundles, without live agents
+	timeout --kill-after=45s 1200 python3 -B scripts/verify_agents.py --profile unit $(if $(CHECKS),--only '$(CHECKS)') $(if $(FORCE),--force) $(if $(JOBS),--jobs '$(JOBS)')
+
+verify-agents-preflight: ## Check tools, logins, Metal toolchain and env for agent verification without running tests or moving focus
+	timeout 60 python3 -B scripts/verify_agents.py --preflight $(if $(CHECKS),--only '$(CHECKS)')
+
+test-verification: ## Check verification scheduling, cache invalidation, deadlines and failure receipts
+	timeout 60 python3 -B scripts/test_verification.py
+
+check-diff: ## Check uncommitted diff for stray code comments, AI attributions and leaked scratch folders
+	timeout 30 python3 -B scripts/check_diff.py --check-scratch
+
 test-kit: ## Run only the KeyScribeKit tests, without building the engine stack (FILTER=<regex> narrows)
 	swift test --package-path "$$(./scripts/kit-package.sh)" $(BUILD_SYSTEM) $(if $(FILTER),--filter '$(FILTER)')
 
@@ -65,12 +81,12 @@ test-ultimate-connector: ## Run the Ultimate connector's behavior tests (needs N
 test-ultimate-live: ## Drive a real headless Ultimate through the connector (ULTIMATE_CLONE=<clone>, ULTIMATE_NODE=<node 26>; spends a few cents of the model ULTIMATE_MODEL names)
 	timeout 600 "$${ULTIMATE_NODE:-node}" Tests/UltimateConnector/e2e/live.ts
 
-test-agents: ## Run the agent conformance exercises against a real agent: make test-agents AGENT=codex|all [ONLY=D1,R1] [KEEP=1] (needs a dev build and the agents installed and logged in; spends a little of each agent's model)
-	timeout 5400 node Tests/AgentConformance/run.ts --agent '$(AGENT)' $(if $(ONLY),--only '$(ONLY)') $(if $(KEEP),--keep)
+test-agents: ## Run the agent conformance exercises against a real agent: make test-agents AGENT=codex|all [ONLY=D1,R1] [FAIL_FAST=1] [REPEAT=N] [KEEP=1]
+	timeout 5400 node Tests/AgentConformance/run.ts --agent '$(AGENT)' $(if $(ONLY),--only '$(ONLY)') $(if $(FAIL_FAST),--fail-fast) $(if $(REPEAT),--repeat '$(REPEAT)') $(if $(KEEP),--keep)
 
 .PHONY: test-ultimate-page
-test-ultimate-page: ## Run Ultimate's native-window conformance matrix (ULTIMATE_CLONE and ULTIMATE_BIN required; uses Chrome and a logged-in model)
-	timeout 1800 "$${ULTIMATE_NODE:-node}" Tests/AgentConformance/ultimate-page.ts $(if $(KEEP),--keep)
+test-ultimate-page: ## Run Ultimate's native-window conformance matrix ([ONLY=<regex>] [TARGETS=main,side] [FAIL_FAST=1] [REPEAT=N] [KEEP=1])
+	timeout 1800 "$${ULTIMATE_NODE:-node}" Tests/AgentConformance/ultimate-page.ts $(if $(ONLY),--only '$(ONLY)') $(if $(TARGETS),--targets '$(TARGETS)') $(if $(FAIL_FAST),--fail-fast) $(if $(REPEAT),--repeat '$(REPEAT)') $(if $(KEEP),--keep)
 
 voice-kit: ## Build the voice kit to hand out: make voice-kit [STUDY=accents] [APP=Name] → voice-kit/dist/
 	zsh voice-kit/package.sh $(if $(APP),--app '$(APP)') $(STUDY)

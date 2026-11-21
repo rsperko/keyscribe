@@ -20,6 +20,11 @@ case "$VARIANT" in
 esac
 DERIVED=".build/xcode"
 PRODUCTS="$DERIVED/Build/Products/Release"
+OUTPUT="${KEYSCRIBE_APP_OUTPUT:-$APP}"
+case "$OUTPUT" in
+  *.app) ;;
+  *) echo "error: app output path must end in .app" >&2; exit 1 ;;
+esac
 
 PREPARED="$(./scripts/prepare-xcode-project.sh)"
 VERSION_SETTINGS=()
@@ -59,6 +64,17 @@ case "$VARIANT" in
     fi ;;
 esac
 
+if [ -z "${TOOLCHAINS:-}" ] && ! xcrun -sdk macosx metal --version >/dev/null 2>&1; then
+  while IFS= read -r plist; do
+    [ -f "$plist" ] || continue
+    metal_id="$(/usr/libexec/PlistBuddy -c 'Print :Identifier' "$plist" 2>/dev/null || true)"
+    if [ -n "$metal_id" ]; then
+      export TOOLCHAINS="$metal_id com.apple.dt.toolchain.XcodeDefault"
+      break
+    fi
+  done < <(ls -dt /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-*/Metal.xctoolchain/ToolchainInfo.plist 2>/dev/null || true)
+fi
+
 echo "== building $SCHEME (Release) =="
 xcodebuild build \
   -project App/KeyScribe.xcodeproj -scheme "$SCHEME" -configuration Release \
@@ -72,9 +88,10 @@ xcodebuild build \
 # built product before replacing the app.
 "$PRODUCTS/$APP/Contents/MacOS/KeyScribe" --mlx-smoke
 
-rm -rf "$APP"
-cp -R "$PRODUCTS/$APP" "$APP"
+mkdir -p "$(dirname "$OUTPUT")"
+rm -rf "$OUTPUT"
+cp -R "$PRODUCTS/$APP" "$OUTPUT"
 echo
-echo "Done: $APP"
-echo "Run:  open ./$APP"
+echo "Done: $OUTPUT"
+echo "Run:  open $OUTPUT"
 echo "Logs: log stream --predicate 'process == \"KeyScribe\"' --level debug"
