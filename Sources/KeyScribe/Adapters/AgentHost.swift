@@ -54,6 +54,27 @@ public enum AgentHostChange: Equatable, Sendable {
     case delivered(request: String, at: AgentHostLocation, turn: String, position: Int? = nil)
 }
 
+public struct AgentHostFocus: Equatable, Sendable {
+    public var app: AgentHostApp?
+    public var copy: AgentHostCopy?
+    public var problem: String?
+    public var conversation: AgentHostLocation?
+    public var resolvesConversation: Bool
+    public var allowsNewConversation: Bool
+
+    public init(
+        app: AgentHostApp? = nil, copy: AgentHostCopy? = nil, problem: String? = nil,
+        conversation: AgentHostLocation? = nil, resolvesConversation: Bool = false, allowsNewConversation: Bool = true
+    ) {
+        self.app = app
+        self.copy = copy
+        self.problem = problem
+        self.conversation = conversation
+        self.resolvesConversation = resolvesConversation
+        self.allowsNewConversation = allowsNewConversation
+    }
+}
+
 public enum AgentHostFront: Equatable, Sendable {
     case shown(AgentHostLocation, in: AgentHostApp)
     case unknown
@@ -82,7 +103,9 @@ public protocol AgentHost: AnyObject {
     func scan() async -> AgentHostScan
     func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen
     func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront
+    func focusInFront(requireClaim: Bool) async -> AgentHostFocus?
     func focusedWindow() -> AgentHostApp?
+    func focusProblem() -> String?
     func copyInFront() -> AgentHostCopy?
     func deliveryRoute(at location: AgentHostLocation) -> AgentHostDeliveryRoute
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery
@@ -105,7 +128,15 @@ extension AgentHost {
     public func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront {
         .unsupported
     }
+    public func focusInFront(requireClaim: Bool) async -> AgentHostFocus? {
+        let app = focusedWindow()
+        let copy = copyInFront()
+        let problem = focusProblem()
+        guard app != nil || copy != nil || problem != nil else { return nil }
+        return AgentHostFocus(app: app, copy: copy, problem: problem)
+    }
     public func focusedWindow() -> AgentHostApp? { nil }
+    public func focusProblem() -> String? { nil }
     public func copyInFront() -> AgentHostCopy? { nil }
     public func deliveryRoute(at location: AgentHostLocation) -> AgentHostDeliveryRoute { .host }
     public func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
@@ -164,6 +195,7 @@ final class HostDiscovery: AgentDiscovery {
     private var answeredSinceList: Set<String> = []
     private var observed: [String: (state: AgentLiveState, at: Date, byHost: Bool)] = [:]
     private var reportsTurns: Set<String> = []
+    private(set) var listings = 0
 
     init(_ integration: AgentHostIntegration, allowed: @escaping @MainActor () -> Bool, now: @escaping () -> Date = Date.init) {
         kind = integration.kind
@@ -254,6 +286,7 @@ final class HostDiscovery: AgentDiscovery {
         wanted = false
         let started = now()
         let scan = await fresh()
+        listings += 1
         last = (started, scan)
         if case .found(let sessions, _) = scan {
             answeredSinceList = []

@@ -12,9 +12,19 @@ struct UltimateProjectsTests {
          {"id":72,"title":"@scribe","label":"agent","cwd":"/w/app"}]
         """#
 
-    @Test func aProjectListsItsStandingAgentsAndBranchesButNotItsRootLanderOrSideChats() {
+    @Test func aProjectListsItsWritableConversationsButNotItsRootOrLander() {
         let conversations = UltimateProjects.conversations(Data(Self.listing.utf8))
-        #expect(conversations?.map(\.id) == ["53", "61", "72"])
+        #expect(conversations?.map(\.id) == ["53", "61", "70", "72"])
+    }
+
+    @Test func everyWritableKindOfSidebarConversationIsListed() throws {
+        let listing = Data(#"""
+            [{"id":1}, {"id":2,"label":"lander"}, {"id":3,"label":"agent","title":"@ultimate"},
+             {"id":4,"label":"coordinator","title":"Discussing plum orchards"},
+             {"id":5,"title":"My conversation"}, {"id":6,"label":"side-chat","title":"Side chat"},
+             {"id":7,"label":"researcher","parentConversationId":4,"ownerTaskId":8}]
+            """#.utf8)
+        #expect(try #require(UltimateProjects.conversations(listing)).map(\.id) == ["3", "4", "5", "6", "7"])
     }
 
     @Test func aStandingAgentsHandleIsItsTitleAndABranchTitleIsNever() {
@@ -29,6 +39,32 @@ struct UltimateProjectsTests {
         let conversations = UltimateProjects.conversations(Data(Self.listing.utf8)) ?? []
         #expect(conversations.first { $0.id == "53" }?.activeAt == 1_795_105_970)
         #expect(conversations.first { $0.id == "72" }?.activeAt == nil)
+    }
+
+    @Test func theConnectorsListIsTakenAsItGivesEachConversation() throws {
+        let answer = Data(#"""
+            {"result":[{"id":53,"handle":"@ultimate","title":"@ultimate","cwd":"/w","activeAt":9},
+                       {"id":61,"title":"Discussing plum orchards","cwd":"/w/wt/61"},
+                       {"id":70,"handle":"feather","cwd":"/w/wt/61"}]}
+            """#.utf8)
+        #expect(UltimateProjects.listed(answer) == [
+            .init(id: "53", handle: "@ultimate", sidebarTitle: "@ultimate", folder: "/w", activeAt: 9),
+            .init(id: "61", sidebarTitle: "Discussing plum orchards", folder: "/w/wt/61"),
+            .init(id: "70", handle: "feather", folder: "/w/wt/61"),
+        ])
+        #expect(UltimateProjects.listed(Data(#"{"result":[]}"#.utf8)) == [])
+        #expect(UltimateProjects.listed(Data(#"{"ok":false}"#.utf8)) == nil)
+        #expect(UltimateProjects.listed(Data(#"[{"id":53,"cwd":"/w"}]"#.utf8)) == nil)
+    }
+
+    @Test func theFileGivesOnlyStandingAgentsAHandle() throws {
+        let listing = Data(#"""
+            [{"id":4,"label":"coordinator","title":"Discussing plum orchards","cwd":"/w"},
+             {"id":6,"label":"side-chat","title":"Side chat","cwd":"/w"}]
+            """#.utf8)
+        let conversations = try #require(UltimateProjects.conversations(listing))
+        #expect(conversations.map(\.handle) == [nil, nil])
+        #expect(conversations.map(\.sidebarTitle) == ["Discussing plum orchards", "Side chat"])
     }
 
     @Test func aListingThatIsNotAnArrayOfConversationsIsUnreadableNotEmpty() {

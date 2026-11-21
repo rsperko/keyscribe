@@ -1,8 +1,41 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { mkdirSync, openSync, realpathSync } from "node:fs"
+import { mkdirSync, openSync, realpathSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { type AgentDriver, type Message, command, removeScratch, scratch, settled } from "./driver.ts"
-import { freePort, sleep, texts, until } from "./util.ts"
+import { freePort, sleep, until } from "./util.ts"
+
+type HistoryPage = { entries: any[]; before?: number }
+
+export async function ultimateMessages(read: (before: number) => Promise<HistoryPage>): Promise<Message[]> {
+  function textOf(value: any): string {
+    if (typeof value === "string") return value
+    if (Array.isArray(value)) return value.map(textOf).filter(Boolean).join("\n")
+    if (value?.type === "text" && typeof value.text === "string") return value.text
+    return value?.content === undefined ? "" : textOf(value.content)
+  }
+  let before = Number.MAX_SAFE_INTEGER
+  const entries: any[] = []
+  for (;;) {
+    const page = await read(before)
+    entries.push(...page.entries)
+    if (page.before === undefined) break
+    if (!Number.isSafeInteger(page.before) || page.before >= before || page.before < 1) throw new Error("invalid Ultimate history cursor")
+    before = page.before
+  }
+  const messages: Message[] = []
+  let turn: string | undefined
+  for (const entry of entries.sort((a, b) => Number(a.id) - Number(b.id))) {
+    const kind = String(entry.kind ?? "")
+    const text = textOf(entry.model)
+    if (/user/i.test(kind) && entry.input) {
+      turn = String(entry.id)
+      messages.push({ role: "user", text, turn })
+    } else if (/assistant/i.test(kind) && text) {
+      messages.push({ role: "agent", text, turn })
+    }
+  }
+  return messages
+}
 
 export class UltimateDriver implements AgentDriver {
   readonly kind = "ultimate"
@@ -33,10 +66,15 @@ export class UltimateDriver implements AgentDriver {
     return this.id !== undefined && !!conversation && conversation.startsWith(`ultimate:${this.id}@`)
   }
 
-  private api(path: string, payload?: object) {
+  get url() { return this.origin }
+  get projectHome() { return this.home }
+  get conversationId() { return this.id }
+
+  api(path: string, payload?: object) {
     return fetch(this.origin + path, {
       method: payload ? "POST" : "GET",
-      headers: { origin: this.origin, "content-type": "application/json" },
+      headers: { origin: this.origin, "content-type": "application/json", connection: "close" },
+      signal: AbortSignal.timeout(30_000),
       ...(payload ? { body: JSON.stringify(payload) } : {}),
     })
   }
@@ -44,6 +82,8 @@ export class UltimateDriver implements AgentDriver {
   async setUp() {
     mkdirSync(join(this.folder, "extensions"), { recursive: true })
     mkdirSync(this.home, { recursive: true })
+    writeFileSync(join(this.folder, "onboarding.json"), JSON.stringify({ firstRunDone: true }))
+    writeFileSync(join(this.folder, "settings.json"), JSON.stringify({ onboarding: false }))
   }
 
   async start() {
@@ -66,22 +106,12 @@ export class UltimateDriver implements AgentDriver {
     await settled(() => this.messages(), seconds)
   }
 
-  async messages(): Promise<Message[]> {
-    const answer = await this.api(`/api/conversations/${this.id}/history?before=${Number.MAX_SAFE_INTEGER}`)
-    const { entries } = (await answer.json()) as { entries: any[] }
-    const messages: Message[] = []
-    let turn: string | undefined
-    for (const entry of [...entries].sort((a, b) => Number(a.id ?? 0) - Number(b.id ?? 0))) {
-      const kind = String(entry.kind ?? "")
-      const text = texts(entry.model).join("\n")
-      if (/user/i.test(kind) && entry.input) {
-        turn = String(entry.id)
-        messages.push({ role: "user", text, turn })
-      } else if (/assistant/i.test(kind) && text) {
-        messages.push({ role: "agent", text, turn })
-      }
-    }
-    return messages
+  async messages(id = this.id): Promise<Message[]> {
+    return ultimateMessages(async before => {
+      const answer = await this.api(`/api/conversations/${id}/history?before=${before}`)
+      if (!answer.ok) throw new Error(`Ultimate history answered ${answer.status}`)
+      return await answer.json() as HistoryPage
+    })
   }
 
   async stop(keep: boolean) {

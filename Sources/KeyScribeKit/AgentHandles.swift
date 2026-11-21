@@ -242,7 +242,14 @@ public enum AgentAddress: Equatable, Sendable {
         let literal = SpokenNameMatch.leading(
             Array(bare[...]), names: normalized, limit: span, fold: assumeTold ? AgentHandles.singular : { $0 },
             minimumWords: { assumeTold || $0 == .exact ? 1 : explicit ? 2 : .max })
-        let found = readName().flatMap { read in literal.map { read.length > $0.length } ?? true ? read : nil } ?? literal
+        var found = readName().flatMap { read in literal.map { read.length > $0.length } ?? true ? read : nil } ?? literal
+        if let match = found, match.names.count == 1 {
+            switch numberedFamily(after: match.names[0], in: Array(bare[..<span]), names: normalized) {
+            case .name(let length, let name)?: found = .init(length: length, names: [name])
+            case .unknown(let length)?: return unresolved(length)
+            case nil: break
+            }
+        }
         if rowNouns.contains(bare[0]), span > 1, found.map({ $0.length == 1 }) ?? true {
             let named = parse(
                 body(after: 1), names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: assumeTold)
@@ -259,9 +266,7 @@ public enum AgentAddress: Equatable, Sendable {
         guard assumeTold || found != nil else { return .none(body: text) }
         if let found {
             let next = found.length
-            if next < tokens.count, next < span, AgentHandles.distinguishingWords.contains(bare[next]) {
-                return unresolved(found.length + 1)
-            }
+            if next < tokens.count, next < span, AgentHandles.distinguishingWords.contains(bare[next]) { return unresolved(next + 1) }
             guard found.names.count == 1 else {
                 return .ambiguous(spoken: spoken(found.length), names: found.names, body: body(after: next))
             }
@@ -272,6 +277,50 @@ public enum AgentAddress: Equatable, Sendable {
         let beforeTo = candidates.first { $0 < tokens.count && bare[$0] == "to" }
         let marked = candidates.first { endsAddress(String(text[tokens[$0 - 1]])) }
         return unresolved([beforeTo, marked].compactMap { $0 }.min() ?? 1)
+    }
+
+    private enum NumberedFamily {
+        case name(length: Int, name: String)
+        case unknown(length: Int)
+    }
+
+    private static func numberedFamily(after name: String, in address: [String], names: [String]) -> NumberedFamily? {
+        let parts = name.split(separator: " ").map(String.init)
+        let prefixes = [parts] + (parts.count > 1 && parts.last.flatMap(addressNumber) != nil ? [Array(parts.dropLast())] : [])
+        for prefix in prefixes where address.starts(with: prefix) {
+            let members = names.compactMap { candidate -> (name: String, number: Int)? in
+                let words = candidate.split(separator: " ").map(String.init)
+                guard words.count == prefix.count + 1, Array(words.dropLast()) == prefix, let number = words.last.flatMap(addressNumber) else { return nil }
+                return (candidate, number)
+            }
+            guard !members.isEmpty else { continue }
+            var end = prefix.count
+            while end < address.count, addressNumber(address[end]) != nil || (end > prefix.count && ["hundred", "thousand", "and"].contains(address[end])) {
+                end += 1
+            }
+            while end > prefix.count, address[end - 1] == "and" { end -= 1 }
+            guard end > prefix.count else { return nil }
+            if let number = addressNumber(address[prefix.count..<end].joined(separator: " ")),
+               let member = members.first(where: { $0.number == number }) {
+                return .name(length: end, name: member.name)
+            }
+            let base = prefix.joined(separator: " ")
+            if end == address.count || !names.contains(base) { return .unknown(length: end) }
+            return .name(length: prefix.count, name: base)
+        }
+        return nil
+    }
+
+    private static func addressNumber(_ said: String) -> Int? {
+        func value(_ word: String) -> Int? {
+            if word == "zero" { return 0 }
+            return Int(word) ?? Int(InverseTextNormalizer.apply(word)) ?? rowWords.firstIndex(of: word).map { $0 + 1 }
+        }
+        let values = InverseTextNormalizer.apply(said).split(separator: " ").map(String.init)
+        if values.count == 1 { return value(values[0]) }
+        guard values.count == 2, let hundreds = value(values[0]), (1...9).contains(hundreds),
+              let rest = value(values[1]), (10...99).contains(rest) else { return nil }
+        return hundreds * 100 + rest
     }
 
     public static func spokenName(

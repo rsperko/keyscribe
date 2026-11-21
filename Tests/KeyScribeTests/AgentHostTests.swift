@@ -146,8 +146,11 @@ struct AgentHostTests {
 
         var record: [String: [String]] = [:]
         var recordStalls = false
+        let recordCancelled = Signal("stalled turn record cancelled")
         func taken(in turn: String, at location: AgentHostLocation) async -> [String]? {
-            if recordStalls { try? await Task.sleep(for: .seconds(30)) }
+            if recordStalls {
+                do { try await Task.sleep(for: .seconds(30)) } catch { recordCancelled.fire() }
+            }
             return record[turn]
         }
 
@@ -227,6 +230,23 @@ struct AgentHostTests {
         }
         #expect(hub.directory.conversations.map(\.id).contains(Self.id("t1")))
         #expect(!hub.placesUnread(hub.directory.conversations.map(\.id)))
+    }
+
+    @Test func aHostedTerminalConversationCanUseThePlaceOfItsOwnProcess() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1", pid: 99)]
+        host.titles = ["t1": "release notes"]
+        let reader = AgentPlaceTrackerTests.Reader()
+        reader.answers = [Self.id("t1"): .found(AgentPlace(surface: "Terminal", labels: [
+            .init(text: "launcher", level: .pane, container: "pane1"),
+        ], containers: ["pane1"]))]
+        let hub = makeHub(host, places: reader)
+        await hub.rescan()
+        while let reading = hub.placeTracker?.reading { await reading.value }
+        #expect(reader.asked.flatMap { $0 }.contains(Self.id("t1")))
+        #expect(hub.names == ["launcher": Self.id("t1")])
+        #expect(!hub.placesUnread([Self.id("t1")]))
+        hub.stop()
     }
 
     @Test func aHostedConversationNeverKeepsPlacesBeingReadAgain() async {
@@ -1048,8 +1068,13 @@ struct AgentHostTests {
         #expect(results.all.isEmpty)
     }
 
-    @Test func aRecordThatDoesNotAnswerHoldsTheReplyNoLongerThanItsBudget() async {
+    @Test func aStalledTurnRecordIsCancelledAndItsKnownReplyStillArrives() async {
         let (host, hub, results) = await namingHost()
+        let received = Signal("reply after a stalled turn record")
+        hub.onResult = { _, _, answer, _, origin, _ in
+            results.all.append((origin, answer))
+            received.fire()
+        }
         host.recordStalls = true
         host.whileDelivering = { host.watcher?(.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1")) }
         _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
@@ -1057,11 +1082,10 @@ struct AgentHostTests {
         host.delivery = .uncertain
         _ = await hub.deliver("second", to: Self.id("t1"), request: "q1")
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
-        let ended = Date()
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "First done.", after: nil, turn: "turn-1"))
-        await settled(results)
+        await received.wait()
+        await host.recordCancelled.wait()
         #expect(results.all.map(\.0) == ["q0"])
-        #expect(Date().timeIntervalSince(ended) < 2.9)
     }
 
     @Test(arguments: [true, false])
@@ -1452,6 +1476,22 @@ struct AgentHostTests {
         return await delivery.value
     }
 
+    @Test func aStartedConversationWhoseTurnCompletesBeforeTurnStartedStillDeliversItsReply() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await startReady(host, transport: transport)
+        var replies: [(String, String?)] = []
+        hub.onResult = { _, _, answer, _, origin, _ in replies.append((answer, origin)) }
+        let receipt = await startAnswering(hub, transport, text: "Reply with only tabside.") { .submitted(request: $0, turn: "") }
+        #expect(receipt == .sent("a new Example conversation"))
+        let fresh = Self.id("t238")
+        hub.handle(.turnComplete(
+            session: fresh, reason: "complete", answer: "tabside",
+            after: AgentTurnInput(from: nil, prompt: AgentPromptDigest.of("Reply with only tabside."))))
+        #expect(replies.map(\.0) == ["tabside"])
+        #expect(replies.map(\.1) == ["q1"])
+    }
+
     @Test func aHostsNewConversationBoxIsInFrontOnlyWhileItsPluginSaysSoAndTheHostsWindowIsFocused() async {
         let host = FakeHost()
         let transport = FakeTransport()
@@ -1502,7 +1542,7 @@ struct AgentHostTests {
         let host = FakeHost()
         host.copy = AgentHostCopy(name: "Example Work", instance: Self.instance, enrolled: false)
         let hub = makeHub(host, allowed: { _ in false })
-        #expect(hub.hostCopyNotReadyInFront() == .missing("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .missing("Example Work"))
     }
 
     @Test func aNewConversationPageOneCopyReportedIsNeverInFrontWhileAnotherCopyIs() async {
@@ -1547,16 +1587,16 @@ struct AgentHostTests {
         let transport = FakeTransport()
         let hub = makeHub(host, transport: transport)
         await hub.rescan()
-        #expect(hub.hostCopyNotReadyInFront() == nil)
+        #expect(await hub.hostCopyNotReadyInFront() == nil)
         host.copy = AgentHostCopy(name: "Example Work", instance: Self.instance, enrolled: false)
-        #expect(hub.hostCopyNotReadyInFront() == .missing("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .missing("Example Work"))
         host.copy?.enrolled = true
-        #expect(hub.hostCopyNotReadyInFront() == .notConnected("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .notConnected("Example Work"))
         host.copy?.setUp = false
-        #expect(hub.hostCopyNotReadyInFront() == .notSetUp("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .notSetUp("Example Work"))
         host.copy?.setUp = true
         transport.live.insert(Self.id("new conversation"))
-        #expect(hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
         transport.live = []
         host.conversations = [Self.thread("t1")]
         transport.live.insert(Self.id("t1"))
@@ -1564,7 +1604,7 @@ struct AgentHostTests {
         hello.agent = "example"
         hub.handle(.hello(hello))
         await hub.rescan()
-        #expect(hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
     }
 
     @Test func aHostThatSaysItsListChangedIsScannedAgainAtOnce() async {
@@ -1764,18 +1804,18 @@ struct AgentHostTests {
         let hub = await pluginJoined(host, transport: transport, draft: false)
         host.copy = AgentHostCopy(name: "Example Work", instance: Self.instance, enrolled: true)
         host.window = nil
-        #expect(hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
         host.window = Self.window
-        #expect(hub.hostCopyNotReadyInFront() == .nothingShown("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .nothingShown("Example Work"))
         transport.live.insert(Self.id("t9"))
         hub.handle(.shown(session: Self.id("t9"), on: true))
-        #expect(hub.hostCopyNotReadyInFront() == .notListed("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .notListed("Example Work"))
         transport.live.remove(Self.id("t9"))
-        #expect(hub.hostCopyNotReadyInFront() == .nothingShown("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .nothingShown("Example Work"))
         hub.handle(.shown(session: Self.id("t1"), on: true))
-        #expect(hub.hostCopyNotReadyInFront() == nil)
+        #expect(await hub.hostCopyNotReadyInFront() == nil)
         hub.handle(.shown(session: Self.id("t1"), on: false, newConversation: true))
-        #expect(hub.hostCopyNotReadyInFront() == .cannotStart("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .cannotStart("Example Work"))
     }
 
     @Test func aCopyWhoseWindowCannotBeReadForLackOfAccessibilitySaysSo() async {
@@ -1790,16 +1830,16 @@ struct AgentHostTests {
         transport.live.insert(Self.id("t1"))
         hub.handle(.hello(hello))
         host.copy = AgentHostCopy(name: "Example Work", instance: Self.instance, enrolled: true)
-        #expect(hub.hostCopyNotReadyInFront() == .needsAccessibility("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .needsAccessibility("Example Work"))
         trusted = true
-        #expect(hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
+        #expect(await hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
     }
 
     @Test func aConnectedCopyThatCanStartAConversationOnItsNewConversationPageIsReady() async {
         let host = FakeHost()
         let hub = await startReady(host, transport: FakeTransport())
         host.copy = AgentHostCopy(name: "Example Work", instance: Self.instance, enrolled: true)
-        #expect(hub.hostCopyNotReadyInFront() == nil)
+        #expect(await hub.hostCopyNotReadyInFront() == nil)
     }
 
     @Test func aPluginThatCannotStartConversationsNeverPutsANewConversationInFront() async {

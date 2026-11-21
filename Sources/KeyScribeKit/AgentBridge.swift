@@ -139,7 +139,7 @@ public enum AgentEvent: Equatable, Sendable {
     case title(session: String, text: String)
     case waiting(session: String, prompt: AgentPrompt?)
     case notify(session: String, turn: String, on: Bool)
-    case shown(session: String, on: Bool, draft: Bool = false, newConversation: Bool = false)
+    case shown(session: String, on: Bool, draft: Bool = false, newConversation: Bool = false, problem: String? = nil, pageConversation: String? = nil)
 }
 
 extension AgentEvent {
@@ -147,7 +147,7 @@ extension AgentEvent {
         switch self {
         case .hello(let hello): hello.session
         case .typed(let session, _), .turnStarted(let session, _, _), .absorbed(let session, _, _, _), .turnComplete(let session, _, _, _, _),
-             .title(let session, _), .waiting(let session, _), .notify(let session, _, _), .shown(let session, _, _, _): session
+             .title(let session, _), .waiting(let session, _), .notify(let session, _, _), .shown(let session, _, _, _, _, _): session
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: nil
         }
     }
@@ -165,8 +165,8 @@ extension AgentEvent {
         case .title(let session, let text): return .title(session: rename(session), text: text)
         case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
         case .notify(let session, let turn, let on): return .notify(session: rename(session), turn: turn, on: on)
-        case .shown(let session, let on, let draft, let newConversation):
-            return .shown(session: rename(session), on: on, draft: draft, newConversation: newConversation)
+        case .shown(let session, let on, let draft, let newConversation, let problem, let pageConversation):
+            return .shown(session: rename(session), on: on, draft: draft, newConversation: newConversation, problem: problem, pageConversation: pageConversation)
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: return self
         }
     }
@@ -303,6 +303,8 @@ public enum AgentBridgeCodec {
         var withDraft: Bool?
         var draft: Bool?
         var newConversation: Bool?
+        var problem: String?
+        var pageConversation: String?
         var state: String?
         var check: String?
         var handedAt: Double?
@@ -371,7 +373,9 @@ public enum AgentBridgeCodec {
             return .notify(session: try required(w.session), turn: w.turn ?? "", on: on)
         case "shown":
             guard let on = w.on else { throw CodecError.malformed }
-            return .shown(session: try required(w.session), on: on, draft: w.draft ?? false, newConversation: w.newConversation ?? false)
+            return .shown(session: try required(w.session), on: on, draft: w.draft ?? false, newConversation: w.newConversation ?? false,
+                          problem: w.problem.map { String($0.prefix(300)) },
+                          pageConversation: w.pageConversation.map { String($0.prefix(64)) })
         case "turnComplete":
             let from = w.from.flatMap(AgentTurnInput.Sender.init(rawValue:))
             let accepted = w.accepted.map {
@@ -619,7 +623,7 @@ public struct AgentCommandQueue: Sendable {
     public var isSettled: Bool { pending.isEmpty && inFlight.isEmpty }
 
     public func isLive(session: String, at now: Date) -> Bool {
-        !activeInstances(session: session, at: now).isEmpty
+        registrations.values.contains { $0.session == session && now.timeIntervalSince($0.lastSeen) <= window }
     }
 
     public func isLive(instance: String, at now: Date) -> Bool {

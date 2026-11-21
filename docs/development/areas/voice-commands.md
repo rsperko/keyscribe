@@ -59,8 +59,9 @@ review keeps finding the same few of them.
 - **A status check is an explicit command, never a question.** Only a whole take starting with `check on`
   (or exactly `who needs me`) checks status (`AgentStatusQuery.parse`); every question is a message, because
   questions are what people say to agents. Focus never decides whether a take is a check or a message. An
-  unknown target after `check on` holds like any unknown name unless it is longer than a name can be
-  (`AgentRename.nameWords`), which makes it a message.
+  unknown target after `check on` holds like any unknown name when it is no longer than a name can be
+  (`AgentRename.nameWords`), or when, longer, it begins a known name or a title shown only after a verb, such as an
+  Ultimate sidebar title (`AgentStatusQuery.begins`); any other longer target is a message.
 - **Local controls are whole utterances.** `cancel`/`never mind`, `go back`, and `repeat that` act only as the
   whole take, with an optional `please` around them (`VoiceCommandGrammar.parse`); inside a longer take they
   are text. A closing `please` is part of the words a text-taking script receives, and is dropped everywhere
@@ -95,6 +96,18 @@ every rule above applies to it, with these sharpenings:
   in bounds. Find each fact from what is already observable (processes, sockets, the tools' own
   read-only commands). A route that only works for one startup style is a bug for every other style;
   where nothing observable identifies a session, say unknown.
+- **A host server is not its conversations' terminal process.** Ultimate keeps its server PID for
+  project liveness, but its browser conversations have no terminal PID. Reading terminal places for
+  that server borrows the launcher's names and delays new conversations. Codex threads can carry their
+  actual command-line process, so they still take terminal places.
+- **Ultimate's file index is partial.** It omits owned subagents. While the installed connector answers, its `list`
+  action is the roster and the one listing rule (`server.ts` `unlistedReason`, `listing`): the app takes each row as
+  given, with its handle, sidebar title, folder and last activity, and keeps no rule of its own. The same rule gives
+  the reason a page showing an unlisted conversation cannot take a take. When the connector is not installed, is
+  turned off in Ultimate, or has not opened yet, the app lists from the file with only the root and the lander left
+  out, so the project stays listed. Once the connector has listed a project, a list call that fails keeps that list
+  and says the project did not list, rather than swapping to the file's names for a scan. A conversation the page shows before the file has it is listed by the connector
+  (`fresh`, bounded and expiring); its hello makes the app rescan, so the app keeps no copy of it.
 - **Confirm the intended session has focus, not a particular view of it.** A session visible in
   several places counts as focused when every view that could be in front shows it; when the front
   view could belong to another session, the answer is unknown, never a guess.
@@ -414,8 +427,8 @@ every rule above applies to it, with these sharpenings:
   read aloud.
 - **Ultimate is a host whose extension delivers.** One Ultimate process serves one project and many conversations, so
   `UltimateHost` lists them from the project's own files (`UltimateProjects`: the lock names the live process and
-  port, `conversations.json` the top-level conversations; the root, the lander, side chats and subagents are never
-  listed), names each conversation's project as its workspace (`AgentHostScan.found`'s `workspaces`, carried as
+  port, `conversations.json` the writable conversations, including coordinator branches, side chats and subagents;
+  the root context and lander are excluded), names each conversation's project as its workspace (`AgentHostScan.found`'s `workspaces`, carried as
   `AgentPlace.workspace`: a qualifier that tells two `@ultimate`s apart by project, never a label that names a
   conversation or answers on its own), and declares its extension the delivery route (`.connector`), so every
   dictation takes the bridge `submit` path with its receipts, steering and checks. The extension
@@ -429,9 +442,35 @@ every rule above applies to it, with these sharpenings:
   them from whichever side comes last. A standing agent's handle (`@ultimate`) is its name; any other title is a name
   only when it differs from the title Ultimate's summaries generated. An untitled branch is named by the number
   Ultimate shows for it (`ultimate 61`), given as the listing's explicit name so a title the user gives still wins.
-  The conversation in front is the latest focused page's report, trusted only while the app process that was frontmost
-  at that report still is (`UltimateHost.focusedWindow`); “open” switches Ultimate's shared UI state through its
-  loopback `/api/ui` and activates that process. A rename in KeyScribe retitles a branch through the conversations
+  The current sidebar title is also an explicit address after tell, open or check on, even when generated;
+  the numbered address remains stable. A number after a name is read as one run of number words
+  (`AgentAddress.numberedFamily`): when the name has numbered relatives, a run that names one addresses it, a run
+  that ends the address and names none holds, and any other run begins the message; a name with no numbered
+  relatives never takes a number as part of the address. The page reports the visible writable composer, including
+  a side chat over its parent, Tab’s new-side-chat mode (`data-side-mode="side"`, delivered through `start` and
+  `side-chat/open` so it never falls into `@ultimate`), and the page URL’s `?conversation=` id; a dialog or an editor
+  that is not ready holds delivery with its reason. It reacts to
+  focus, typing and composer or dialog elements appearing, and re-reads the composer at each heartbeat, so a dialog
+  shown by a style change alone is reported within one heartbeat.
+  The host keeps only what the connector reported (conversation, page conversation, whether a page is focused or in
+  new-side-chat mode, the hold reason) and pairs it with a window at use time through one async `focusInFront` path:
+  it reads the front window's document address off the main actor, revalidates the front window afterward, and matches
+  both the project's loopback port and the URL's `?conversation=` parameter against the report (no cached URL across
+  reads). The window matched last is the one “open” raises, remembered asynchronously when a page comes to the front so
+  it is known before any press. Reply checks read no window while no page claims focus; press checks still read the
+  front window so a delayed first focus report arriving after refresh finishes is waited for within the grace window.
+  Chromium browsers expose the
+  address on the window and Safari a few levels inside it; Firefox exposes none, so a Firefox page is never in front
+  (measured 2026-11-20, Chrome, Brave, Safari and Firefox 155). A take checks what is in front through one host focus
+  check, including a host's
+  new-conversation page, before it waits for anything. It then waits, rather than polling, for a report from the copy
+  whose page is in front, a listing that changed a host's conversations, or the press's own host refresh
+  (`AgentHub.nextHostReport`, snapshotting report counts before the async check so mid-read reports wake it), until the
+  release cutoff, or one front-reading grace after the press while the user
+  still speaks; a slow or hung host listing never holds it longer, and a stopped hub ends the wait. Reports about
+  other agents and other copies do not wake it.
+  Instance paths use the filesystem's canonical path on both sides.
+  “Open” switches Ultimate's shared UI state through its loopback `/api/ui` and raises the window last matched. A rename in KeyScribe retitles a branch through the conversations
   extension's `rename` action on the same loopback API (`UltimateHost.rename`); a standing agent's `@name` title is
   fixed in Ultimate, so its rename stays in KeyScribe. The extension takes `label` and shows the name to say in
   `composer.status`, read through its `label` action while the page is visible. Measured against Ultimate `1c5d0565`

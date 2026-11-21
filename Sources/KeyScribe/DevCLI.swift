@@ -188,8 +188,9 @@ public enum DevCLI {
               --config-dir <path>     Use <path> for config/modes/history instead of Application Support
                                       (downloaded models stay shared). Pair with --first-run to test
                                       onboarding without touching your real configuration.
-              --no-input              Launch without listening for hotkeys, modifier keys or mouse buttons, so a second
+              --no-input              Launch without registering hotkeys or mouse triggers, so a second
                                       instance (with --config-dir) runs beside your own without taking your presses.
+                                      Passively observes input to confirm a take's foreground conversation.
                                       Drive it with --agent-take.
               --first-run             Replay the full onboarding wizard, ignoring the completion flag.
               --setup-permissions     Present the permissions-only setup flow.

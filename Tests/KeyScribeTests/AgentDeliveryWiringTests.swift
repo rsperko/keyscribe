@@ -142,7 +142,9 @@ struct AgentDeliveryWiringTests {
 
     private final class Front: AgentFronting, @unchecked Sendable {
         var answer: FrontSession?
+        var pane: String?
         private(set) var asked = 0
+        func focusProblem() async -> String? { pane }
         init(_ id: String? = nil, window: String? = "cg:3") {
             answer = id.map { FrontSession(id: $0, app: FrontApp(bundle: "com.mitchellh.ghostty", pid: 9, name: "Ghostty", window: window)) }
         }
@@ -1370,6 +1372,15 @@ struct AgentDeliveryWiringTests {
         #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The conversation in front")
     }
 
+    @Test func aLocalAgentStatusAnswerRecordsACommandRatherThanAMessageDelivery() async {
+        let rig = await rig("check on keyscribe")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.controller.lastRecord?.outcome == .command)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hud.states.contains { if case .advisory(let text) = $0 { text.hasPrefix("Status for keyscribe:") } else { false } })
+    }
+
     @Test func anExplicitAddressAffectsOnlyItsOwnRecordingAndTheNextUnnamedOneUsesItsOwnFocus() async {
         let front = Front("claude:s1")
         let rig = await rig("", glance: front, engine: ScriptedEngine(["Tell keyscribe blue to run the tests.", "Run the build."]))
@@ -1512,6 +1523,20 @@ struct AgentDeliveryWiringTests {
         #expect(rig.captured.insertedText == nil)
         #expect(saidNothingFocused(rig))
         #expect(AgentRecipient.nothingFocusedLine == "No conversation focused. Open one, or name a conversation in your instruction.")
+    }
+
+    @Test func withAPaneRunningSomethingElseInFrontTheHoldNamesItAndStillSaysWhatToDo() async {
+        let glance = Front()
+        glance.pane = "The focused pane runs dashboard."
+        let rig = await rig("Run the tests.", glance: glance)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig, readingTheFront: true)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hud.states.contains { state in
+            guard case .error(let shown, _, _) = state else { return false }
+            return shown.hasPrefix("No conversation focused. The focused pane runs dashboard. Nothing sent. Open one, or name a conversation in your instruction.")
+        })
+        #expect(fact(await lastHistoryEntry(rig), "Conversation in front") == "The focused pane runs dashboard.")
     }
 
     @Test(arguments: ["Tell frontend to run the tests.", "Tell session five to run the build."])
@@ -2049,6 +2074,92 @@ struct AgentDeliveryWiringTests {
 
     nonisolated private static let hostApp = TargetSnapshot(bundleId: "dev.example.app", pid: 50, focusedWindowId: "cg:7")
 
+    @Test func aConversationCreatedInThePageBeforePressTakesDictationOnItsFirstDiscovery() async throws {
+        let host = AgentHostTests.FakeHost()
+        let app = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:7", instance: AgentHostTests.instance)
+        host.window = app
+        let rig = await rig("Plan the release.", front: FrontWindow(Self.hostApp), frontGrace: .seconds(10),
+                            hosts: [AgentHostIntegration(kind: AgentHostTests.kind, make: { host })])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        host.conversations = [AgentHostTests.thread("fresh")]
+        host.front = .shown(AgentHostTests.location("fresh"), in: app)
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        rig.hub.handle(.hello(.init(protocolVersion: 3, agent: "example", agentVersion: "", instance: "fresh-instance",
+                                   session: AgentHostTests.id("fresh"), pid: 0, features: ["shown"])))
+        rig.hub.handle(.shown(session: AgentHostTests.id("fresh"), on: true))
+        await rig.controller.captureBringUpTask?.value
+        await rig.controller.agentFrontTask?.value
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(host.delivered.map(\.0) == ["Plan the release."])
+        #expect(host.delivered.map(\.2) == [AgentHostTests.location("fresh")])
+        #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The conversation in front")
+        #expect(rosters(rig).compactMap { $0 }.first?.rows.map(\.name) == ["keyscribe", "keyscribe blue"])
+    }
+
+    @Test func aPageReportArrivingWithinTheFrontReadingBudgetIsUsed() async {
+        let host = AgentHostTests.FakeHost()
+        let app = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:7", instance: AgentHostTests.instance)
+        host.window = app
+        host.copy = AgentHostCopy(name: "Example", instance: AgentHostTests.instance, enrolled: true)
+        host.conversations = [AgentHostTests.thread("t1")]
+        let rig = await rig("Plan the release.", front: FrontWindow(Self.hostApp), frontGrace: .seconds(10),
+                            hosts: [AgentHostIntegration(kind: AgentHostTests.kind, make: { host })])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.hub.handle(.hello(.init(protocolVersion: 3, agent: "example", agentVersion: "", instance: "i9",
+                                   session: AgentHostTests.id("t1"), pid: 0, features: ["shown"])))
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        let report = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            host.front = .shown(AgentHostTests.location("t1"), in: app)
+            rig.hub.handle(.shown(session: AgentHostTests.id("t1"), on: true))
+        }
+        await rig.controller.captureBringUpTask?.value
+        await rig.controller.agentFrontTask?.value
+        await report.value
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(host.delivered.map(\.0) == ["Plan the release."])
+        #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The conversation in front")
+    }
+
+    private func waitUntilParkedOnHostReport(_ hub: AgentHub) async {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !hub.parkedOnHostReport, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    @Test func waitingForALatePageReportReadsTheFrontWindowOnlyWhenSomethingArrives() async {
+        let host = AgentHostTests.FakeHost()
+        let app = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:7", instance: AgentHostTests.instance)
+        host.window = app
+        host.copy = AgentHostCopy(name: "Example", instance: AgentHostTests.instance, enrolled: true)
+        host.conversations = [AgentHostTests.thread("t1")]
+        let rig = await rig("Plan the release.", front: FrontWindow(Self.hostApp), frontGrace: .seconds(10),
+                            hosts: [AgentHostIntegration(kind: AgentHostTests.kind, make: { host })])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.hub.handle(.hello(.init(protocolVersion: 3, agent: "example", agentVersion: "", instance: "i9",
+                                   session: AgentHostTests.id("t1"), pid: 0, features: ["shown"])))
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        await waitUntilParkedOnHostReport(rig.hub)
+        #expect(rig.hub.parkedOnHostReport)
+        let readsWhileWaiting = host.windowReads
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(host.windowReads == readsWhileWaiting)
+        host.front = .shown(AgentHostTests.location("t1"), in: app)
+        rig.hub.handle(.shown(session: AgentHostTests.id("t1"), on: true))
+        await rig.controller.agentFrontTask?.value
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(host.delivered.map(\.0) == ["Plan the release."])
+        #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The conversation in front")
+    }
+
     private func newConversationRig(_ said: String = "Plan the release.", window: String = "cg:7") async -> (Rig, AgentHostTests.FakeHost) {
         let host = AgentHostTests.FakeHost()
         host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: window, instance: AgentHostTests.instance)
@@ -2058,6 +2169,198 @@ struct AgentDeliveryWiringTests {
             protocolVersion: 3, agent: "example", agentVersion: "", instance: "i9", session: carrier, pid: 0, features: ["promptDigest", "start"])))
         rig.hub.handle(.shown(session: carrier, on: false, newConversation: true))
         return (rig, host)
+    }
+
+    @Test func aHostWhoseListingHangsDoesNotDelayStartingTheNewConversationInFront() async {
+        let (rig, host) = await newConversationRig()
+        defer {
+            host.scanGate.open()
+            try? FileManager.default.removeItem(at: rig.supportDir)
+        }
+        host.scanGate.closed = true
+        let release = Task.detached {
+            try? await Task.sleep(for: .seconds(30))
+            await MainActor.run { host.scanGate.open() }
+        }
+        defer { release.cancel() }
+        await take(rig, readingTheFront: true)
+        #expect(host.scanGate.closed)
+        #expect(starts(rig) == ["Plan the release."])
+    }
+
+    private func hostPageShowingNothing() async -> (Rig, AgentHostTests.FakeHost) {
+        let host = AgentHostTests.FakeHost()
+        host.copy = AgentHostCopy(name: "Example Work", instance: AgentHostTests.instance, enrolled: true)
+        host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:7", instance: AgentHostTests.instance)
+        host.conversations = [AgentHostTests.thread("t1")]
+        let rig = await rig("Plan the release.", front: FrontWindow(Self.hostApp), frontGrace: .seconds(10),
+                            hosts: [AgentHostIntegration(kind: AgentHostTests.kind, make: { host })])
+        rig.hub.handle(.hello(.init(protocolVersion: 3, agent: "example", agentVersion: "", instance: "i9",
+                                   session: AgentHostTests.id("t1"), pid: 0, features: ["shown"])))
+        return (rig, host)
+    }
+
+    @Test func aHostWhoseListingHangsHoldsAnUnreadyPageWithinTheFrontReadingGrace() async {
+        let (rig, host) = await hostPageShowingNothing()
+        defer {
+            host.scanGate.open()
+            try? FileManager.default.removeItem(at: rig.supportDir)
+        }
+        rig.controller.frontReadingGrace = .milliseconds(300)
+        host.scanGate.closed = true
+        let release = Task.detached {
+            try? await Task.sleep(for: .seconds(30))
+            await MainActor.run { host.scanGate.open() }
+        }
+        defer { release.cancel() }
+        await take(rig, readingTheFront: true)
+        #expect(host.scanGate.closed)
+        let line = "Example Work hasn\u{2019}t shown \(Branding.appName) a conversation. Nothing sent."
+        #expect(rig.hud.states.contains { if case .error(let message, nil, _) = $0 { message.hasPrefix(line) } else { false } })
+    }
+
+    @Test func stoppingTheHubWhileAPressWaitsForItsPageEndsTheWaitInsteadOfRereadingTheFront() async {
+        let (rig, host) = await hostPageShowingNothing()
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        await waitUntilParkedOnHostReport(rig.hub)
+        rig.hub.stop()
+        let reads = host.windowReads
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(host.windowReads - reads <= 2)
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+    }
+
+    @Test func reportsAboutOtherAgentsAndOtherCopiesDoNotWakeAPressWaitingForItsPage() async {
+        let (rig, host) = await hostPageShowingNothing()
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        await waitUntilParkedOnHostReport(rig.hub)
+        #expect(rig.hub.parkedOnHostReport)
+        let reads = host.windowReads
+        let scans = host.scans
+        for n in 0..<30 {
+            rig.hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "c\(n)", session: "claude:s\(n)", pid: 10, features: [])))
+            rig.hub.handle(.shown(session: "claude:s\(n)", on: false))
+            rig.hub.handle(.shown(session: AgentHostTests.id("t\(n)", instance: "http://127.0.0.1:10"), on: false))
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        let wokenByScans = (host.scans - scans) * 3
+        #expect(host.windowReads - reads <= wokenByScans, "\(host.windowReads - reads) reads, \(host.scans - scans) scans")
+        host.front = .shown(AgentHostTests.location("t1"), in: host.window!)
+        rig.hub.handle(.shown(session: AgentHostTests.id("t1"), on: true))
+        await rig.controller.agentFrontTask?.value
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(host.delivered.map(\.0) == ["Plan the release."])
+    }
+
+    @Test(arguments: ["beforePress", "duringDocumentRead", "afterRefresh", "afterWindowSwitch", "never"])
+    func ultimateFocusReportOrderingsResolveTheRightConversationOrHoldCleanly(timing: String) async {
+        let home = "/u/.ultimate/projects/app-1234"
+        let browser = AgentHostApp(bundle: "com.google.Chrome.app.x", pid: 40, name: "Ultimate", window: "cg:400")
+        let project = UltimateHost.Running(home: home, project: .init(root: "/w/app", name: "app"), lock: .init(pid: 9, port: 4747))
+        let id53 = AgentSessionID.make(agent: "ultimate", native: AgentHostLocation(host: "ultimate", instance: home, native: "53").conversationKey)
+        let id61 = AgentSessionID.make(agent: "ultimate", native: AgentHostLocation(host: "ultimate", instance: home, native: "61").conversationKey)
+        @MainActor final class State {
+            var url = "http://ultimate.localhost:4747/?conversation=61"
+            var onRead: (@MainActor () -> Void)?
+        }
+        let state = State()
+        let ultimate = UltimateHost(
+            home: "/u", enrolled: { [UltimateNamingTests.setup] }, readProjects: { _ in [project] },
+            readConversations: { _, _ in .connector([.init(id: "53", handle: "@ultimate", folder: "/w/app"), .init(id: "61", folder: "/w/61")]) },
+            show: { _, _ in false }, retitle: { _, _, _ in false },
+            frontApp: { browser },
+            documentURL: { _ in
+                await MainActor.run {
+                    state.onRead?()
+                    state.onRead = nil
+                    return URL(string: state.url)
+                }
+            },
+            activate: { _, _ in false })
+        let snapshot = TargetSnapshot(bundleId: browser.bundle, pid: Int32(browser.pid), focusedWindowId: browser.window)
+        let rig = await rig("Plan the release.", front: FrontWindow(snapshot), frontGrace: timing == "never" ? .milliseconds(250) : .seconds(5),
+                            hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        for id in [id53, id61] {
+            var hello = AgentHostTests.hello(id)
+            hello.agent = "ultimate"
+            hello.features = ["shown", "readiness"]
+            rig.hub.handle(.hello(hello))
+        }
+        if timing == "beforePress" {
+            rig.hub.handle(.shown(session: id61, on: true, pageConversation: "61"))
+        } else if timing == "afterWindowSwitch" {
+            rig.hub.handle(.shown(session: id61, on: true, pageConversation: "61"))
+            state.url = "http://ultimate.localhost:4747/?conversation=53"
+        } else if timing == "duringDocumentRead" {
+            state.onRead = { rig.hub.handle(.shown(session: id61, on: true, pageConversation: "61")) }
+        }
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        if timing == "afterRefresh" {
+            await waitUntilParkedOnHostReport(rig.hub)
+            rig.hub.handle(.shown(session: id61, on: true, pageConversation: "61"))
+        } else if timing == "afterWindowSwitch" {
+            await waitUntilParkedOnHostReport(rig.hub)
+            rig.hub.handle(.shown(session: id53, on: true, pageConversation: "53"))
+        }
+        await rig.controller.agentFrontTask?.value
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        let submitted = rig.sent.compactMap { if case .submit(_, let session, let text, _, _, _, _, _) = $0.0 { (session, text) } else { nil } }
+        switch timing {
+        case "beforePress", "duringDocumentRead", "afterRefresh":
+            #expect(submitted.map(\.0) == [id61])
+            #expect(submitted.map(\.1) == ["Plan the release."])
+        case "afterWindowSwitch":
+            #expect(submitted.map(\.0) == [id53])
+            #expect(submitted.map(\.1) == ["Plan the release."])
+        default:
+            #expect(submitted.isEmpty)
+            #expect(rig.hud.states.contains { if case .error(let message, nil, _) = $0 { message.contains("Ultimate for app") } else { false } })
+        }
+    }
+
+    @Test func aDelayedFirstUltimatePageReportArrivingAfterRefreshStillDelivers() async {
+        let home = "/u/.ultimate/projects/app-1234"
+        let browser = AgentHostApp(bundle: "com.google.Chrome.app.x", pid: 40, name: "Ultimate", window: "cg:400")
+        let project = UltimateHost.Running(home: home, project: .init(root: "/w/app", name: "app"), lock: .init(pid: 9, port: 4747))
+        let ultimate = UltimateHost(
+            home: "/u", enrolled: { [UltimateNamingTests.setup] }, readProjects: { _ in [project] },
+            readConversations: { _, _ in .connector([.init(id: "53", handle: "@ultimate", folder: "/w/app"), .init(id: "61", folder: "/w/61")]) },
+            show: { _, _ in false }, retitle: { _, _, _ in false },
+            frontApp: { browser },
+            documentURL: { _ in URL(string: "http://ultimate.localhost:4747/?conversation=61") },
+            activate: { _, _ in false })
+        let snapshot = TargetSnapshot(bundleId: browser.bundle, pid: Int32(browser.pid), focusedWindowId: browser.window)
+        let rig = await rig("Plan the release.", front: FrontWindow(snapshot), frontGrace: .seconds(5),
+                            hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let id61 = AgentSessionID.make(agent: "ultimate", native: AgentHostLocation(host: "ultimate", instance: home, native: "61").conversationKey)
+        var hello = AgentHostTests.hello(id61)
+        hello.agent = "ultimate"
+        hello.features = ["shown", "readiness"]
+        rig.hub.handle(.hello(hello))
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        try? await Task.sleep(for: .milliseconds(150))
+        rig.hub.handle(.shown(session: id61, on: true))
+        await rig.controller.agentFrontTask?.value
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        let submitted = rig.sent.compactMap { if case .submit(_, let session, let text, _, _, _, _, _) = $0.0 { (session, text) } else { nil } }
+        #expect(submitted.map(\.0) == [id61])
+        #expect(submitted.map(\.1) == ["Plan the release."])
     }
 
     private func starts(_ rig: Rig) -> [String] {

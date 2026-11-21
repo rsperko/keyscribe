@@ -9,7 +9,7 @@ type Request = { path: string; body: any; answer: (status: number, text?: string
 const home = "/u/.ultimate/projects/app-1234"
 const session = (id: number) => `${id}@${home}`
 
-function harness(options: { conversations?: Summary[]; ready?: boolean; submit?: (id: number, text: string, images: Image[], requestId: string) => Promise<number> } = {}) {
+function harness(options: { conversations?: Summary[]; ready?: boolean; holdShown?: boolean; submit?: (id: number, text: string, images: Image[], requestId: string) => Promise<number> } = {}) {
   const requests: Request[] = []
   const timers: Array<{ at: number; fn: () => void; id: number }> = []
   const logs: string[] = []
@@ -74,7 +74,7 @@ function harness(options: { conversations?: Summary[]; ready?: boolean; submit?:
         },
       }
       requests.push(request)
-      if (path === "/event" && request.body.op !== "hello" && request.body.op !== "notify") request.answer(200, "{}")
+      if (path === "/event" && request.body.op !== "hello" && request.body.op !== "notify" && !(options.holdShown && request.body.op === "shown")) request.answer(200, "{}")
       return { response, cancel: () => request.answer(0) }
     },
     random: () => "rnd",
@@ -538,4 +538,245 @@ test("a dictation queued before the user typed there is refused rather than sent
   await h.command({ op: "submit", id: "fresh", expectedSession: session(61), text: "y", expectedPrompts: 1, expiresAt: h.now + 10_000 })
   assert.equal(h.events("refused").find((r) => r.request === "stale")?.reason, "typedSince")
   assert.deepEqual(h.submitted.map((s) => s.requestId), ["fresh"])
+})
+
+test("a focused page that keeps reporting the same thing is told once", async () => {
+  const h = harness()
+  await h.connect()
+  const page = { page: "p1", focused: true, conversation: 61, draft: false }
+  h.connector.page(page)
+  await h.flush()
+  const before = h.events("shown").length
+  await h.advance(5000)
+  h.connector.page(page)
+  await h.flush()
+  assert.equal(h.events("shown").length, before)
+})
+
+test("a new reason the page cannot take a take is told, also while the previous report is in flight", async () => {
+  const h = harness({ holdShown: true })
+  await h.connect()
+  for (const request of h.requests.filter(r => r.body.op === "shown" && !r.settled)) request.answer(200, "{}")
+  await h.flush()
+  h.connector.page({ page: "p1", focused: true, conversation: null, draft: false, problem: "A dialog covers Ultimate’s composer." })
+  const inFlight = h.requests.filter(r => r.body.op === "shown" && !r.settled).at(-1)!
+  h.connector.page({ page: "p1", focused: true, conversation: null, draft: false, problem: "Ultimate’s composer is not ready." })
+  inFlight.answer(200, "{}")
+  await h.flush()
+  for (const request of h.requests.filter(r => r.body.op === "shown" && !r.settled)) request.answer(200, "{}")
+  await h.flush()
+  assert.deepEqual(h.events("shown").slice(-2).map(e => e.problem), ["A dialog covers Ultimate’s composer.", "Ultimate’s composer is not ready."])
+})
+
+test("typing follows the visible writable composer, including a side chat over its parent", async () => {
+  const { typingConversation } = await import("../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts")
+  assert.equal(typeof typingConversation, "function")
+  assert.equal(typingConversation([{ id: 53, active: true }], false), 53)
+  assert.equal(typingConversation([{ id: 70, active: true }], false), 70)
+  assert.equal(typingConversation([{ id: 70, active: false }], false), 70)
+  assert.equal(typingConversation([{ id: 53, active: false }, { id: 70, active: true }], false), 70)
+  assert.equal(typingConversation([{ id: 53, active: false }, { id: 70, active: false }], false), null)
+  assert.equal(typingConversation([{ id: 53, active: true }], true), null)
+  assert.equal(typingConversation([], false), null)
+})
+
+test("an unlisted page reports what it shows rather than assigning its take to another conversation", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.page({ page: "p1", focused: true, conversation: 999, draft: false })
+  await h.flush()
+  assert.equal(h.events("shown").at(-1).on, false)
+  assert.equal(h.events("shown").at(-1).problem, "Ultimate shows conversation 999, but it is not listed.")
+  h.connector.page({ page: "p1", focused: true, conversation: null, draft: false, problem: "A dialog covers Ultimate’s composer." })
+  await h.flush()
+  assert.equal(h.events("shown").at(-1).problem, "A dialog covers Ultimate’s composer.")
+  assert.deepEqual(h.submitted, [])
+})
+
+test("a listed conversation with an unavailable composer never claims focus", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.page({ page: "p1", focused: true, conversation: 53, draft: false, problem: "Ultimate’s composer is not ready." })
+  await h.flush()
+  assert.equal(h.events("shown").at(-1).on, false)
+  assert.equal(h.events("shown").at(-1).problem, "Ultimate’s composer is not ready.")
+})
+
+test("a page showing a new conversation greets it before the deferred listing refresh", async () => {
+  const h = harness()
+  await h.connect()
+  h.state.conversations.push({ id: 70, named: false, cwd: "/w", busy: false })
+  h.connector.page({ page: "p1", focused: true, conversation: 70, draft: false })
+  await h.connect()
+  assert.ok(h.events("hello").some(e => e.session === session(70)))
+  assert.equal(h.events("shown").at(-1).session, session(70))
+  assert.equal(h.events("shown").at(-1).on, true)
+})
+
+for (const order of [["page", "listed", "hello"], ["listed", "page", "hello"], ["listed", "hello", "page"]]) {
+  test(`a new page becomes reachable as soon as its hello settles: ${order.join(", ")}`, async () => {
+    const h = harness()
+    await h.connect()
+    for (const event of order) {
+      if (event === "page") h.connector.page({ page: "new", focused: true, conversation: 71, draft: false })
+      else if (event === "listed") {
+        h.state.conversations.push({ id: 71, named: false, cwd: "/w/app", busy: false })
+        h.connector.changed()
+      } else await h.connect()
+      await h.flush()
+    }
+    assert.equal(h.events("shown").at(-1).on, true)
+    assert.equal(h.events("shown").at(-1).session, session(71))
+  })
+}
+
+test("Tab new side-chat mode targets a new side chat and never routes to @ultimate", async () => {
+  const { typingTarget } = await import("../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts") as any
+  assert.equal(typeof typingTarget, "function")
+  assert.deepEqual(typingTarget([{ id: 53, active: true, sideMode: true }], false), { kind: "newSideChat", parent: 53 })
+  assert.deepEqual(typingTarget([{ id: 53, active: false, sideMode: true }], false), { kind: "newSideChat", parent: 53 })
+  assert.deepEqual(typingTarget([{ id: 53, active: true, sideMode: false }], false), { kind: "conversation", id: 53 })
+  assert.deepEqual(typingTarget([{ id: 53, active: true, sideMode: true }], true), { kind: "none" })
+})
+
+test("a page in Tab new side-chat mode reports newConversation with its pageConversation and handles start", async () => {
+  const h = harness()
+  await h.connect()
+  assert.ok(h.events("hello")[0].features.includes("start"))
+  h.connector.page({ page: "p1", focused: true, conversation: null, newConversation: true, parent: 53, pageConversation: 53, draft: false } as any)
+  await h.flush()
+  const shown = h.events("shown").at(-1)
+  assert.equal(shown.on, false)
+  assert.equal(shown.newConversation, true)
+  assert.equal(shown.pageConversation, "53")
+  const next = h.connector.nextCompose("p1")
+  await h.command({ op: "start", id: "s1", expectedSession: session(53), text: "Reply only ready.", expiresAt: h.now + 10_000 })
+  const ask = await next
+  assert.deepEqual(ask, { id: "s1", kind: "start", conversation: 53, text: "Reply only ready." })
+  await (h.connector as any).started("s1", "p1", { sent: true, withDraft: false })
+  await h.flush()
+  assert.deepEqual(h.submitted, [])
+  assert.equal(h.events("submitted").at(-1).request, "s1")
+})
+
+test("a start command refuses cleanly when the page leaves side-chat mode or the open action declines", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.page({ page: "p1", focused: true, conversation: 53, pageConversation: 53, draft: false } as any)
+  await h.flush()
+  await h.command({ op: "start", id: "s-gone", expectedSession: session(53), text: "nope", expiresAt: h.now + 10_000 })
+  await h.flush()
+  assert.equal(h.events("refused").at(-1).request, "s-gone")
+  assert.equal(h.events("refused").at(-1).reason, "gone")
+  h.connector.page({ page: "p1", focused: true, conversation: null, newConversation: true, parent: 53, pageConversation: 53, draft: false } as any)
+  await h.flush()
+  const next = h.connector.nextCompose("p1")
+  await h.command({ op: "start", id: "s-fail", expectedSession: session(53), text: "hi", expiresAt: h.now + 10_000 })
+  await next
+  await (h.connector as any).started("s-fail", "p1", { sent: false, reason: "failed", detail: "@ultimate has no finished turn to fork yet" })
+  await h.flush()
+  assert.equal(h.events("refused").at(-1).request, "s-fail")
+  assert.equal(h.events("refused").at(-1).detail, "@ultimate has no finished turn to fork yet")
+})
+
+test("a side chat carries its parent pageConversation on shown and a new side chat turn carries its prompt digest on turnStarted", async () => {
+  const { promptDigest } = await import("../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts")
+  const h = harness()
+  h.state.conversations.push({ id: 147, named: false, cwd: "/w/app", busy: false })
+  h.connector.changed()
+  await h.connect()
+  h.connector.page({ page: "p1", focused: true, conversation: 147, pageConversation: 53, draft: false })
+  await h.flush()
+  const shown = h.events("shown").at(-1)
+  assert.equal(shown.session, session(147))
+  assert.equal(shown.on, true)
+  assert.equal(shown.pageConversation, "53")
+  h.connector.input(147, 9001, "pi.user", "Reply only tabside.")
+  await h.flush()
+  const started = h.events("turnStarted").at(-1)
+  assert.equal(started.session, session(147))
+  assert.equal(started.prompt, promptDigest("Reply only tabside."))
+})
+
+test("a brand-new conversation whose first input arrives before its hello settles still reports turnStarted with its prompt digest", async () => {
+  const { promptDigest } = await import("../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts")
+  const h = harness()
+  await h.connect()
+  h.state.conversations.push({ id: 238, named: false, cwd: "/w/app", busy: false })
+  h.connector.input(238, 9100, "pi.user", "Reply with only tabside.")
+  await h.connect()
+  await h.flush()
+  const started = h.events("turnStarted").find(e => e.session === session(238))
+  assert.ok(started, "turnStarted must be emitted once hello settles")
+  assert.equal(started.prompt, promptDigest("Reply with only tabside."))
+})
+
+test("an out-of-order page report never overwrites a newer dialog or side-chat state", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.page({ page: "p1", seq: 2, focused: true, conversation: null, pageConversation: 53, draft: false, problem: "A dialog covers Ultimate’s composer." } as any)
+  h.connector.page({ page: "p1", seq: 1, focused: true, conversation: 53, pageConversation: 53, draft: false } as any)
+  await h.flush()
+  assert.equal(h.events("shown").at(-1).on, false)
+  assert.equal(h.events("shown").at(-1).problem, "A dialog covers Ultimate’s composer.")
+  h.connector.page({ page: "p1", seq: 4, focused: true, conversation: null, newConversation: true, parent: 53, pageConversation: 53, draft: false } as any)
+  h.connector.page({ page: "p1", seq: 3, focused: true, conversation: 53, pageConversation: 53, draft: false } as any)
+  await h.flush()
+  assert.equal(h.events("shown").at(-1).on, false)
+  assert.equal(h.events("shown").at(-1).newConversation, true)
+  h.connector.page({ page: "p1", seq: 5, focused: true, conversation: 53, pageConversation: 53, draft: false } as any)
+  await h.flush()
+  assert.equal(h.events("shown").at(-1).on, true)
+  assert.equal(h.events("shown").at(-1).session, session(53))
+})
+
+test("input, title, and waiting arriving while hello is in flight are reported once hello settles", async () => {
+  const h = harness()
+  await h.connect()
+  h.state.conversations.push({ id: 140, named: false, cwd: "/w/app", busy: false })
+  h.connector.changed()
+  await h.flush()
+  assert.equal(h.events("hello").filter(e => e.session === session(140)).length, 1)
+  assert.equal(h.events("hello").find(e => e.session === session(140))?.prompts, 0)
+  h.connector.input(140, 1001, "pi.user", "Reply only ready.")
+  h.state.conversations.find(c => c.id === 140)!.title = "Side"
+  h.state.conversations.find(c => c.id === 140)!.named = true
+  h.connector.changed()
+  h.connector.waiting(new Map([[140, { kind: "question", title: "Confirm" }]]))
+  await h.connect()
+  await h.flush()
+  const typed = h.events("typed").find(e => e.session === session(140))
+  assert.equal(typed?.prompts, 1)
+  const title = h.events("title").find(e => e.session === session(140))
+  assert.equal(title?.text, "Side")
+  const waiting = h.events("waiting").find(e => e.session === session(140))
+  assert.equal(waiting?.waiting?.title, "Confirm")
+  await h.command({ op: "submit", id: "r-sync", expectedSession: session(140), text: "hello", expectedPrompts: 1, expiresAt: h.now + 10_000 })
+  await h.flush()
+  assert.equal(h.submitted.at(-1)?.id, 140)
+})
+
+test("a live page state change overrides a ghost page from before a reload", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.page({ page: "new", seq: 1, focused: true, conversation: 53, pageConversation: 53, draft: false })
+  h.connector.page({ page: "old", seq: 9, focused: true, conversation: 53, pageConversation: 53, draft: false })
+  await h.flush()
+  h.connector.page({ page: "new", seq: 2, focused: true, conversation: null, pageConversation: 53, draft: false, problem: "A dialog covers Ultimate’s composer." })
+  await h.flush()
+  assert.equal(h.events("shown").at(-1).on, false)
+  assert.equal(h.events("shown").at(-1).problem, "A dialog covers Ultimate’s composer.")
+})
+
+test("a page dialog reported before any member finishes hello is still sent once a member is reachable", async () => {
+  const h = harness({ conversations: [] })
+  await h.connect()
+  h.connector.page({ page: "p1", seq: 1, focused: true, conversation: null, pageConversation: 53, draft: false, problem: "A dialog covers Ultimate’s composer." })
+  await h.flush()
+  h.state.conversations.push({ id: 53, title: "@ultimate", named: true, cwd: "/w/app", busy: false })
+  h.connector.changed()
+  await h.connect()
+  await h.flush()
+  assert.equal(h.events("shown").at(-1)?.on, false)
+  assert.equal(h.events("shown").at(-1)?.problem, "A dialog covers Ultimate’s composer.")
 })

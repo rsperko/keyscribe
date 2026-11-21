@@ -21,4 +21,4 @@ fi
 echo "test-ultimate-connector: node $VERSION"
 
 cd "$ROOT"
-timeout 300 "$NODE" --test Tests/UltimateConnector/*.test.ts
+timeout 300 "$NODE" --test Tests/UltimateConnector/*.test.ts Tests/AgentConformance/*-history.test.ts

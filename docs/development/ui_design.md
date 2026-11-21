@@ -373,7 +373,8 @@ the user named (only while tmux shows its status line, and a window name only wh
 programs rename windows), a Zellij tab the user renamed (a Zellij pane title follows the program's own
 title, so it is not a name), a bb thread's title as bb shows it, a Codex conversation's title, an Ultimate
 standing agent's handle or a title the user gave an Ultimate conversation (never one Ultimate generated; an untitled
-Ultimate branch is called `ultimate` and the number Ultimate shows, `ultimate 61` for #61), a Ghostty
+Ultimate branch is called `ultimate` and the number Ultimate shows, `ultimate 61` for #61; its current sidebar title
+is also an explicit address after “tell”, “open” or “check on”, including generated titles), a Ghostty
 terminal or tab name the user set (a tab only in a window without splits, since Ghostty does not say which
 split belongs to which tab), and an iTerm tab title the user set. A title a program writes into its
 terminal is never a name, and a terminal app is read only when it already allows the app to script it,
@@ -643,9 +644,10 @@ the one other phrase, the same as checking on all conversations. Capitals, closi
 check or a message; it only decides which conversation “this conversation” means. “Check on” inside a longer take
 (“before you change anything, check on docs”) and after “tell” or “ask” and a name (“tell docs check on
 the build”) is message text. After “check on”, words that name no conversation are held like any unknown
-name when they are no longer than a conversation name can be, with the reason and the words kept for Paste last dictation
-(“No conversation named “frontend”. Nothing sent.”), and never checked on the conversation in front instead; longer words
-(“check on the deploy before we merge today”) are a message. A conversation named with an everyday word makes
+name when they are no longer than a conversation name can be, or when they begin a name or a title the sidebar
+shows, with the reason and the words kept for Paste last dictation (“No conversation named “frontend”. Nothing
+sent.”), and never checked on the conversation in front instead; other longer words (“check on the deploy before we
+merge today”) are a message. A conversation named with an everyday word makes
 “check on” that word a status check, so “tell” is how to say it to the agent. With no conversation in front,
 “check on this conversation” says “No conversation focused. Nothing sent. Say “check on” and a conversation’s
 name.”

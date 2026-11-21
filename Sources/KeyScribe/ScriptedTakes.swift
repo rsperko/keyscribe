@@ -277,7 +277,7 @@ final class ScriptedTakeRunner {
         let receipt = after.receipts > before.receipts ? after.receipt : nil
         let recipient = receipt == nil ? nil : after.recipient
         let succeeded = record?.outcome.map(Self.succeeded) ?? false
-        let sent = receipt.map(Self.sent) ?? !mode.sendsToAgents
+        let sent = receipt.map(Self.sent) ?? (!mode.sendsToAgents || record?.outcome == .command)
         let ok = problem == nil && succeeded && sent
         let why = problem ?? (record == nil ? "The take finished without a result." : ok ? nil : "The take did not deliver.")
         return ScriptedTakeResult(
@@ -461,12 +461,24 @@ enum ScriptedTakeCLI {
         return 1
     }
 
-    private static func speak(_ text: String, into url: URL) -> Bool {
-        let say = Process()
-        say.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-        say.arguments = ["-o", url.path, "--data-format=LEI16@16000", "--", text]
-        guard (try? say.run()) != nil else { return false }
-        say.waitUntilExit()
-        return say.terminationStatus == 0 && FileManager.default.fileExists(atPath: url.path)
+    static func speak(
+        _ text: String, into url: URL, using tool: URL = URL(fileURLWithPath: "/usr/bin/say"), within limit: TimeInterval = 20
+    ) -> Bool {
+        for _ in 0..<2 {
+            try? FileManager.default.removeItem(at: url)
+            let say = Process()
+            say.executableURL = tool
+            say.arguments = ["-o", url.path, "--data-format=LEI16@16000", "--", text]
+            let exited = DispatchSemaphore(value: 0)
+            say.terminationHandler = { _ in exited.signal() }
+            guard (try? say.run()) != nil else { return false }
+            guard exited.wait(timeout: .now() + limit) == .timedOut else {
+                return say.terminationStatus == 0 && FileManager.default.fileExists(atPath: url.path)
+            }
+            say.terminate()
+            if exited.wait(timeout: .now() + 2) == .timedOut { kill(say.processIdentifier, SIGKILL) }
+        }
+        try? FileManager.default.removeItem(at: url)
+        return false
     }
 }

@@ -11,6 +11,77 @@ struct AgentAddressingTests {
         AgentRecipient.resolve(AgentAddress.parse(text, names: Array(names.keys)), focused: focused, rows: rows, names: names)
     }
 
+    enum NumberedCell: Equatable, CustomStringConvertible {
+        case to(String, body: String)
+        case held
+
+        var description: String {
+            switch self {
+            case .to(let name, let body): "to \(name): \(body)"
+            case .held: "held"
+            }
+        }
+    }
+
+    @Test func aNumberAfterANameIsReadByOneRuleInEveryCellOfTheGrid() {
+        let families: [(name: String, names: [String], siblings: [Int])] = [
+            ("ultimate", ["ultimate", "ultimate 6", "ultimate 61", "ultimate 250", "backend"], [6, 61, 250]),
+            ("pi", ["pi", "backend"], []),
+        ]
+        let numbers: [(said: String, value: Int)] = [
+            ("61", 61), ("68", 68), ("3", 3),
+            ("six", 6), ("two", 2),
+            ("two fifty", 250), ("sixty one", 61), ("sixty eight", 68), ("six eight", -1),
+        ]
+        let follows: [(said: String, ordinary: Bool, body: String)] = [
+            (", reply ready", false, "reply ready"),
+            ("", false, ""),
+            (" tests are failing", true, "tests are failing"),
+        ]
+        var wrong: [String] = []
+        for family in families {
+            for number in numbers {
+                for follow in follows {
+                    for verb in ["tell ", ""] {
+                        let text = "\(verb)\(family.name) \(number.said)\(follow.said)"
+                        let expected: NumberedCell
+                        if family.siblings.contains(number.value) {
+                            expected = .to(AgentHandles.normalize("\(family.name) \(number.value)"), body: follow.body)
+                        } else if !family.siblings.isEmpty, !follow.ordinary {
+                            expected = .held
+                        } else {
+                            expected = .to(family.name, body: "\(number.said)\(follow.said)".trimmingCharacters(in: .whitespaces))
+                        }
+                        let actual: NumberedCell
+                        switch AgentAddress.parse(text, names: family.names, read: InverseTextNormalizer.apply) {
+                        case .name(let name, let body): actual = .to(name, body: body)
+                        case .unresolved: actual = .held
+                        case let other: actual = .to("unexpected \(other)", body: "")
+                        }
+                        if actual != expected { wrong.append("\(text) → \(actual), expected \(expected)") }
+                    }
+                }
+            }
+        }
+        #expect(wrong.isEmpty, "\(wrong.count) cells:\n\(wrong.joined(separator: "\n"))")
+    }
+
+    @Test(arguments: ["tell ultimate 68, reply ready", "tell ultimate sixty eight, reply ready", "tell ultimate six eight, reply ready"])
+    func anUnknownNumberNeverDeliversToTheShorterName(text: String) {
+        let names = ["ultimate": "standing", "ultimate 250": "branch"]
+        let address = AgentAddress.parse(text, names: Array(names.keys), read: InverseTextNormalizer.apply)
+        guard case .ask = AgentRecipient.resolve(address, focused: "standing", rows: Array(names.values), names: names) else {
+            Issue.record("an unknown numbered address must hold: \(address)")
+            return
+        }
+    }
+
+    @Test(arguments: ["tell ultimate 250, reply ready", "tell ultimate two hundred fifty, reply ready", "tell ultimate two fifty, reply ready"])
+    func aNumberedNameAcceptsBothFullAndGroupedSpeech(text: String) {
+        #expect(AgentAddress.parse(text, names: ["ultimate", "ultimate 250"], read: InverseTextNormalizer.apply)
+                == .name("ultimate 250", body: "reply ready"))
+    }
+
     @Test(arguments: [
         "select backend", "Select backend.", "choose backend", "Choose the backend", "please select backend",
         "select backend please", "Select conversation three", "choose session 3", "Select conversation 3.",

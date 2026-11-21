@@ -286,12 +286,16 @@ public struct AgentDirectory: Sendable {
                 names: shared.members.compactMap { handleById[$0] }.sorted(),
                 tellApartIn: Set(agents).count < agents.count ? shared.surface : nil))
         }, uniquingKeysWith: { first, _ in first })
+        var sharedByKey = Dictionary(grouping: sharedPlaceNames.keys, by: AgentHandles.matchKey)
         for (word, other) in otherNames(entries: entries, places: known, outranked: outranked, usable: usable) {
+            let key = AgentHandles.matchKey(word)
             if case .also = other.kind, other.names.count == 1 {
-                sharedPlaceNames = sharedPlaceNames.filter { AgentHandles.matchKey($0.key) != AgentHandles.matchKey(word) }
+                for shared in sharedByKey[key] ?? [] { sharedPlaceNames[shared] = nil }
                 sharedPlaceNames[word] = other
-            } else if !sharedPlaceNames.keys.contains(where: { AgentHandles.matchKey($0) == AgentHandles.matchKey(word) }) {
+                sharedByKey[key] = [word]
+            } else if sharedByKey[key] == nil {
                 sharedPlaceNames[word] = other
+                sharedByKey[key] = [word]
             }
         }
 
@@ -321,7 +325,8 @@ public struct AgentDirectory: Sendable {
         let names = Set(handleById.values.map(AgentHandles.matchKey))
         let ids = entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }
         var found: [String: (word: String, ids: [String], kind: AgentRecipient.SharedName.Kind)] = [:]
-        for id in ids {
+        for entry in entries {
+            let id = AgentSessionID.make(agent: entry.agent, native: entry.id)
             guard let place = places[id], handleById[id] != nil else { continue }
             let fromPlace: [(text: String, kind: AgentRecipient.SharedName.Kind)] = place.labels.compactMap { label in
                 let seenAs = "\(label.surface ?? place.surface) \([.agent, .title].contains(label.level) || label.term != nil ? label.word : "\(label.word) label")"
@@ -335,7 +340,9 @@ public struct AgentDirectory: Sendable {
                 }
             }
             let own = outranked[id].map { [(text: $0, kind: AgentRecipient.SharedName.Kind.afterVerb("agent\u{2019}s own name"))] } ?? []
-            for (text, kind) in fromPlace + own {
+            let fallback = entry.host.flatMap { Int($0.native) } == nil ? [] :
+                entry.explicitName.map { [(text: $0, kind: AgentRecipient.SharedName.Kind.also("agent\u{2019}s own name"))] } ?? []
+            for (text, kind) in fromPlace + own + fallback {
                 guard let word = usable(text) else { continue }
                 let key = AgentHandles.matchKey(word)
                 guard !names.contains(key) else { continue }

@@ -40,6 +40,7 @@ final class AgentBridgeServer: @unchecked Sendable {
     private let onReport: @Sendable (_ agent: String, _ installation: String, _ body: Data) -> Report
     private let queue = DispatchQueue(label: "com.keyscribe.agent-bridge")
     private let activeWindow: TimeInterval
+    private var parkedTouchedAt: Date?
     private var hangUpObserver: (@Sendable () -> Void)?
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
@@ -278,7 +279,7 @@ final class AgentBridgeServer: @unchecked Sendable {
     func isLive(session: String) -> Bool {
         queue.sync {
             let now = Date()
-            touchParked(at: now)
+            touchParkedForQuery(at: now)
             return commands.isLive(session: session, at: now)
         }
     }
@@ -286,14 +287,20 @@ final class AgentBridgeServer: @unchecked Sendable {
     func isLive(instance: String) -> Bool {
         queue.sync {
             let now = Date()
-            touchParked(at: now)
+            touchParkedForQuery(at: now)
             return commands.isLive(instance: instance, at: now)
         }
+    }
+
+    private func touchParkedForQuery(at now: Date) {
+        if let touched = parkedTouchedAt, now >= touched, now.timeIntervalSince(touched) < activeWindow / 20 { return }
+        touchParked(at: now)
     }
 
     var nextWake: Date? { queue.sync { wake } }
 
     private func touchParked(at now: Date) {
+        parkedTouchedAt = now
         for p in parked {
             for member in p.members { commands.touch(instance: member.instance, connection: p.connection, at: min(now, p.deadline)) }
         }

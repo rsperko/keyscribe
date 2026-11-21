@@ -198,6 +198,15 @@ final class AgentHub {
     private var hostStarts: [String: CheckedContinuation<HostStart, Never>] = [:]
     private var startFollows: [String: [HostFollow]] = [:]
     private var newConversationShown: [String: String] = [:]
+    private struct HostReportWaiter {
+        let copies: Set<String>
+        let continuation: CheckedContinuation<Bool, Never>
+        let timer: Task<Void, Never>
+    }
+    private var hostReportWaiters: [Int: HostReportWaiter] = [:]
+    private var nextHostReportWaiter = 0
+    private var hostReportsHeard: [String: Int] = [:]
+    private var hostScanRounds = (started: 0, finished: 0)
     var promptBoxCheckWait: Duration = .seconds(1)
     private var connectorNames: [String: String?] = [:]
     private var registryNames: [String: String?] = [:]
@@ -444,9 +453,14 @@ final class AgentHub {
     }
 
     func sessionInFrontWithoutAsking() async -> FrontSession? {
-        let candidates = frontCandidates
-        if let glance, !candidates.isEmpty, let shown = await glance.shown(among: candidates, asking: { _ in }) { return shown }
+        if let shown = await terminalSessionInFrontWithoutAsking() { return shown }
         return await hostInFront()
+    }
+
+    func terminalSessionInFrontWithoutAsking() async -> FrontSession? {
+        let candidates = frontCandidates
+        guard let glance, !candidates.isEmpty else { return nil }
+        return await glance.shown(among: candidates, asking: { _ in })
     }
 
     static func newConversation(in host: String) -> String {
@@ -473,34 +487,131 @@ final class AgentHub {
         case nothingShown(String)
         case notListed(String)
         case cannotStart(String)
+        case unavailable(String)
     }
 
-    func hostCopyNotReadyInFront() -> HostCopyNotReady? {
+    struct HostFrontCheck {
+        var shown: FrontSession?
+        var starts = false
+        var notReady: HostCopyNotReady?
+        var copySlot: String?
+    }
+
+    func checkHostFront() async -> HostFrontCheck {
+        var fallback = HostFrontCheck()
         for source in hosts {
-            guard let copy = source.host.copyInFront() else { continue }
-            guard copy.setUp else { return .notSetUp(copy.name) }
-            guard copy.enrolled else { return .missing(copy.name) }
-            let carrier = AgentSessionID.make(
-                agent: source.kind.id,
-                native: AgentHostLocation(host: source.kind.id, instance: copy.instance, native: Self.newConversationNative).conversationKey)
-            let heard = transport.isLive(session: carrier) || directory.conversations.contains {
-                $0.connectorLive && $0.host?.host == source.kind.id && $0.host?.instance == copy.instance
+            let focus = await Self.within(hostDeadline, otherwise: nil) { await source.host.focusInFront(requireClaim: false) }
+            if source.isEnabled {
+                if let shown = await inFront(of: source, focus: focus) { return HostFrontCheck(shown: shown) }
+                if let focus, focus.allowsNewConversation, let app = focus.app, startCarrier(source, instance: app.instance) != nil {
+                    return HostFrontCheck(
+                        shown: FrontSession(
+                            id: Self.newConversation(in: source.kind.id),
+                            app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name, window: app.window)),
+                        starts: true)
+                }
             }
-            guard heard else { return .notConnected(copy.name) }
-            guard accessibilityTrusted() else { return .needsAccessibility(copy.name) }
-            guard let window = source.host.focusedWindow(), window.window != nil, window.instance == copy.instance else {
-                return .windowUnknown(copy.name)
+            if let focus, fallback.notReady == nil, let notReady = notReady(in: source, focus: focus) {
+                fallback = HostFrontCheck(notReady: notReady, copySlot: focus.copy.map { Self.slot(source.kind.id, $0.instance) })
             }
-            let slot = Self.slot(source.kind.id, copy.instance)
-            if let thread = shownByHost[slot], transport.isLive(session: thread) {
-                return (directory.conversations + disconnected).contains { $0.id == thread } ? nil : .notListed(copy.name)
-            }
-            if let page = newConversationShown[slot], transport.isLive(session: page) {
-                return features(of: page).contains("start") ? nil : .cannotStart(copy.name)
-            }
-            return .nothingShown(copy.name)
+        }
+        return fallback
+    }
+
+    func hostCopyNotReadyInFront() async -> HostCopyNotReady? {
+        for source in hosts {
+            guard let focus = await Self.within(hostDeadline, otherwise: nil, { await source.host.focusInFront(requireClaim: false) }),
+                  let notReady = notReady(in: source, focus: focus)
+            else { continue }
+            return notReady
         }
         return nil
+    }
+
+    private func notReady(in source: HostDiscovery, focus: AgentHostFocus) -> HostCopyNotReady? {
+        if let problem = focus.problem { return .unavailable(problem) }
+        guard let copy = focus.copy else { return nil }
+        guard copy.setUp else { return .notSetUp(copy.name) }
+        guard copy.enrolled else { return .missing(copy.name) }
+        let carrier = AgentSessionID.make(
+            agent: source.kind.id,
+            native: AgentHostLocation(host: source.kind.id, instance: copy.instance, native: Self.newConversationNative).conversationKey)
+        let heard = transport.isLive(session: carrier) || directory.conversations.contains {
+            $0.connectorLive && $0.host?.host == source.kind.id && $0.host?.instance == copy.instance
+        }
+        guard heard else { return .notConnected(copy.name) }
+        guard accessibilityTrusted() else { return .needsAccessibility(copy.name) }
+        guard let window = focus.app, window.window != nil, window.instance == copy.instance else {
+            return .windowUnknown(copy.name)
+        }
+        let slot = Self.slot(source.kind.id, copy.instance)
+        if let thread = shownByHost[slot], transport.isLive(session: thread),
+           focus.conversation.map({ AgentSessionID.make(agent: source.kind.id, native: $0.conversationKey) == thread }) ?? !focus.resolvesConversation {
+            return (directory.conversations + disconnected).contains { $0.id == thread } ? nil : .notListed(copy.name)
+        }
+        if focus.allowsNewConversation, let page = newConversationShown[slot], transport.isLive(session: page) {
+            return features(of: page).contains("start") ? nil : .cannotStart(copy.name)
+        }
+        return .nothingShown(copy.name)
+    }
+
+    struct HostReportMark { fileprivate let heard: [String: Int] }
+
+    private static let hostsListed = ""
+    private static let scanRound = "\n"
+
+    private var hostListings: Int { hosts.reduce(0) { $0 + $1.listings } }
+
+    func hostReportMark() -> HostReportMark {
+        HostReportMark(heard: hostReportsHeard)
+    }
+
+    var parkedOnHostReport: Bool {
+        hostReportWaiters.values.contains { !$0.copies.contains(Self.scanRound) }
+    }
+
+    func nextHostReport(
+        since mark: HostReportMark, watching copySlot: String? = nil, awaitingRefresh: Bool = false, before deadline: ContinuousClock.Instant
+    ) async -> Bool {
+        let id = nextHostReportWaiter
+        nextHostReportWaiter += 1
+        var copies: Set<String> = [Self.hostsListed]
+        if awaitingRefresh { copies.insert(Self.scanRound) }
+        if let copySlot { copies.insert(copySlot) }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled, !stopped, ContinuousClock.now < deadline else { return continuation.resume(returning: false) }
+                if copies.contains(where: { hostReportsHeard[$0, default: 0] != mark.heard[$0, default: 0] }) {
+                    return continuation.resume(returning: true)
+                }
+                let timer = Task { @MainActor [weak self] in
+                    try? await Task.sleep(until: deadline)
+                    self?.resumeHostReportWaiter(id, false)
+                }
+                hostReportWaiters[id] = HostReportWaiter(copies: copies, continuation: continuation, timer: timer)
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.resumeHostReportWaiter(id, false) }
+        }
+    }
+
+    private func heardHostReport(from copy: String) {
+        hostReportsHeard[copy, default: 0] += 1
+        for (id, waiter) in hostReportWaiters where waiter.copies.contains(copy) { resumeHostReportWaiter(id, true) }
+    }
+
+    private func resumeHostReportWaiter(_ id: Int, _ answer: Bool) {
+        guard let waiter = hostReportWaiters.removeValue(forKey: id) else { return }
+        waiter.timer.cancel()
+        waiter.continuation.resume(returning: answer)
+    }
+
+    func hostSessionInFront() async -> FrontSession? {
+        await hostInFront()
+    }
+
+    func paneProblemWithoutAsking() async -> String? {
+        await glance?.focusProblem()
     }
 
     private func startingHost(_ id: String) -> HostDiscovery? {
@@ -537,8 +648,10 @@ final class AgentHub {
     }
 
     func newConversationInFront() async -> FrontSession? {
-        for source in hosts {
-            guard let app = source.host.focusedWindow(), startCarrier(source, instance: app.instance) != nil else { continue }
+        for source in hosts where source.isEnabled {
+            guard let focus = await Self.within(hostDeadline, otherwise: nil, { await source.host.focusInFront(requireClaim: true) }),
+                  focus.allowsNewConversation, let app = focus.app, startCarrier(source, instance: app.instance) != nil
+            else { continue }
             return FrontSession(id: Self.newConversation(in: source.kind.id), app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name, window: app.window))
         }
         return nil
@@ -549,7 +662,11 @@ final class AgentHub {
         remember(asked: text, for: request, in: request)
         let name = Self.newConversationName(of: source.kind)
         let notInFront = AgentReceipt.notSent(nil, reason: .newConversationNotInFront(source.kind.displayName))
-        guard inFront, let carrier = startCarrier(source, instance: source.host.focusedWindow()?.instance) else { return notInFront }
+        guard inFront,
+              let focus = await Self.within(hostDeadline, otherwise: nil, { await source.host.focusInFront(requireClaim: true) }),
+              focus.allowsNewConversation,
+              let carrier = startCarrier(source, instance: focus.app?.instance)
+        else { return notInFront }
         let known = Set((directory.conversations + disconnected).filter { $0.host?.host == host }.map(\.id))
         let at = now()
         let copy = Self.slot(host, Self.instance(of: carrier))
@@ -610,11 +727,19 @@ final class AgentHub {
         return await front.shown(among: frontCandidates, asking: { _ in })?.id == id
     }
 
-    private func inFront(of source: HostDiscovery) async -> FrontSession? {
+    private func inFront(of source: HostDiscovery, focus: AgentHostFocus? = nil) async -> FrontSession? {
         let mine = (directory.conversations + disconnected).filter { $0.host?.host == source.kind.id }
         guard !mine.isEmpty else { return nil }
         let locations = mine.compactMap(\.host)
-        let app = source.host.focusedWindow()
+        let focus = if let focus { focus } else { await Self.within(hostDeadline, otherwise: nil) { await source.host.focusInFront(requireClaim: true) } }
+        if let focus, focus.resolvesConversation {
+            guard let location = focus.conversation, let app = focus.app else { return nil }
+            let reported = shown(in: shownByHost, by: source, instance: app.instance)
+                .flatMap { id in transport.isLive(session: id) ? mine.first { $0.id == id }?.host : nil }
+            guard reported == location, locations.contains(location), let shown = mine.first(where: { $0.host == location }) else { return nil }
+            return FrontSession(id: shown.id, app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name, window: app.window))
+        }
+        let app = focus?.app
         let reported = shown(in: shownByHost, by: source, instance: app?.instance)
             .flatMap { id in transport.isLive(session: id) ? mine.first { $0.id == id }?.host : nil }
         guard case .shown(let location, let app) = await Self.within(
@@ -827,6 +952,19 @@ final class AgentHub {
         await rescan(rereadingTitles: false, wantingHosts: true)
     }
 
+    struct HostRefresh { fileprivate let after: Int }
+
+    func startHostRefreshForPress() -> HostRefresh? {
+        guard hosts.contains(where: \.isEnabled) else { return nil }
+        let refresh = HostRefresh(after: hostScanRounds.started)
+        Task { await refreshHostsForPress() }
+        return refresh
+    }
+
+    func hostsRefreshed(_ refresh: HostRefresh?) -> Bool {
+        refresh.map { hostScanRounds.finished > $0.after } ?? true
+    }
+
     func rescan(rereadingTitles: Bool = true, wantingHosts: Bool = false) async {
         if wantingHosts { hosts.forEach { $0.want() } }
         if let scanTask {
@@ -841,7 +979,12 @@ final class AgentHub {
                 rereading = rereading || self?.rereadWanted == true
                 self?.rescanWanted = false
                 self?.rereadWanted = false
+                self?.hostScanRounds.started += 1
+                let listed = self?.hostListings
                 await self?.scanOnce(rereadingTitles: rereading)
+                self?.hostScanRounds.finished += 1
+                if self?.hostListings != listed { self?.heardHostReport(from: Self.hostsListed) }
+                self?.heardHostReport(from: Self.scanRound)
                 rereading = self?.rereadWanted ?? false
             } while self?.rescanWanted == true
             self?.scanTask = nil
@@ -905,6 +1048,7 @@ final class AgentHub {
 
     func stop() {
         stopped = true
+        for id in Array(hostReportWaiters.keys) { resumeHostReportWaiter(id, false) }
         for source in hosts { source.host.unwatch() }
         scanTask?.cancel()
         scanTask = nil
@@ -1379,6 +1523,16 @@ final class AgentHub {
 
     func handle(_ event: AgentEvent) {
         guard !stopped, let event = local(event) else { return }
+        defer {
+            switch event {
+            case .shown, .hello:
+                if let session = event.session, let agent = AgentSessionID.agent(of: session),
+                   hosts.contains(where: { $0.kind.id == agent }), let instance = Self.instance(of: session) {
+                    heardHostReport(from: Self.slot(agent, instance))
+                }
+            default: break
+            }
+        }
         if case .turnComplete(let session, _, _, _, let turn?) = event, lastEndedTurn[session] == turn {
             Log.agents.info("ignored a second end of one turn in \(self.handle(of: session) ?? "a conversation", privacy: .private)")
             return
@@ -1427,7 +1581,7 @@ final class AgentHub {
             Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         case .notify(let session, let turn, let on):
             _ = notify(session: session, turn: turn, on: on)
-        case .shown(let session, let on, let draft, let newConversation):
+        case .shown(let session, let on, let draft, let newConversation, _, _):
             guard let host = AgentSessionID.split(session)?.agent, hosts.contains(where: { $0.kind.id == host }) else { break }
             let slot = Self.slot(host, Self.instance(of: session))
             Log.agents.debug(
@@ -1577,6 +1731,10 @@ final class AgentHub {
                 let origin = awaitedRequests[session]
                 stopAwaiting(session)
                 report(reason: reason, answer: answer, after: after, of: session, origin: origin, wasRequested: wasRequested)
+            } else if hosted, let prompt = after?.prompt, followHosted(ended ?? "", of: session, prompt: prompt) {
+                let origin = awaitedRequests[session]
+                stopAwaiting(session)
+                report(reason: reason, answer: answer, after: after, of: session, origin: origin, wasRequested: false)
             }
             if reason == "aborted" { outbox.noteInterrupted(conversation: session) }
             refresh()

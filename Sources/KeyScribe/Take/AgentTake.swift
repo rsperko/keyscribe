@@ -48,6 +48,7 @@ protocol AgentTakeHost: AnyObject {
     var agentNewConversation: CapturedFocus? { get set }
     var agentFocusUnconfirmed: Bool { get set }
     var agentHostCopyNotReady: AgentHub.HostCopyNotReady? { get set }
+    var agentPaneProblem: String? { get set }
     var takePressedAt: DispatchTime? { get }
     var agentFrontTask: Task<Void, Never>? { get set }
     var agentFrontCutoff: ContinuousClock.Instant? { get }
@@ -115,11 +116,11 @@ final class AgentTake {
         else { return }
         agents.refresh()
         agents.readPlaces()
-        Task { await agents.refreshHostsForPress() }
+        let refresh = agents.startHostRefreshForPress()
         let snapshot = Self.snapshot(of: agents)
         host.agentSnapshot = snapshot
         guard host.takeMode?.output == .agent else { return }
-        captureFocus(snapshot: snapshot, through: agents)
+        captureFocus(snapshot: snapshot, through: agents, refresh: refresh)
     }
 
     private static func snapshot(of agents: AgentHub) -> AgentSnapshot {
@@ -136,25 +137,50 @@ final class AgentTake {
         return agents.placeTracker?.reading == nil && !agents.placesUnread(ids)
     }
 
-    private func captureFocus(snapshot: AgentSnapshot, through agents: AgentHub) {
+    private func captureFocus(snapshot: AgentSnapshot, through agents: AgentHub, refresh: AgentHub.HostRefresh?) {
         guard let host, let identity = host.takeIdentity else { return }
+        let pressDeadline = ContinuousClock.now + frontReadingGrace
         host.agentFrontTask?.cancel()
         host.agentFrontTask = Task { @MainActor [weak self, weak host, weak agents] in
-            var shown = await agents?.sessionInFrontWithoutAsking()
+            guard var mark = agents?.hostReportMark() else { return }
+            var shown = await agents?.terminalSessionInFrontWithoutAsking()
             var starts = false
-            if shown == nil, !Task.isCancelled, let fresh = await agents?.newConversationInFront() {
-                shown = fresh
-                starts = true
+            var notReady: AgentHub.HostCopyNotReady?
+            var copySlot: String?
+            if shown == nil, !Task.isCancelled, let check = await agents?.checkHostFront() {
+                shown = check.shown
+                starts = check.starts
+                notReady = check.notReady
+                copySlot = check.copySlot
             }
-            if shown == nil, !Task.isCancelled, let notReady = agents?.hostCopyNotReadyInFront(),
-               let host, !Task.isCancelled, host.takeIdentity === identity {
-                host.agentHostCopyNotReady = notReady
+            while shown == nil, !Task.isCancelled, let host, host.takeIdentity === identity, let agents,
+                  ContinuousClock.now < host.agentFrontCutoff ?? pressDeadline {
+                let refreshing = !agents.hostsRefreshed(refresh)
+                guard notReady != nil || refreshing else { break }
+                if let notReady { host.agentHostCopyNotReady = notReady }
+                guard await agents.nextHostReport(since: mark, watching: copySlot, awaitingRefresh: refreshing, before: host.agentFrontCutoff ?? pressDeadline)
+                else { break }
+                mark = agents.hostReportMark()
+                let check = await agents.checkHostFront()
+                shown = check.shown
+                starts = check.starts
+                notReady = check.notReady
+                copySlot = check.copySlot
+                if shown != nil { host.agentHostCopyNotReady = nil }
+            }
+            if shown == nil, !Task.isCancelled, let host, host.takeIdentity === identity {
+                if let notReady {
+                    host.agentHostCopyNotReady = notReady
+                } else if let pane = await agents?.paneProblemWithoutAsking(), !Task.isCancelled, host.takeIdentity === identity {
+                    host.agentPaneProblem = pane
+                }
                 return
             }
             guard let shown, let self, let host, !Task.isCancelled,
                   host.takeIdentity === identity,
                   host.agentFrontCutoff.map({ ContinuousClock.now <= $0 }) ?? true,
-                  starts || snapshot.rows.contains(shown.id) || snapshot.disconnected.values.contains(shown.id),
+                  starts || snapshot.rows.contains(shown.id) || snapshot.disconnected.values.contains(shown.id)
+                    || agents?.directory.conversations.contains(where: { $0.id == shown.id && $0.host != nil }) == true,
                   host.captureOrigin?.leaving(shown).session == shown.id,
                   let pressed = host.takePressedAt?.uptimeNanoseconds
             else { return }
@@ -297,7 +323,15 @@ final class AgentTake {
             let line = AgentOutput.notReadyLine(notReady)
             let action = Self.action(for: notReady, mode: mode.id)
             finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: action, heard: HeardExcerpt(heard: body)),
-                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line,
+                        facts: facts + [.init(label: "Conversation in front", value: line)])
+            return
+        }
+        if case .ask(let body, .nothingFocused) = resolution, let pane = host.agentPaneProblem {
+            let line = "\(AgentRecipient.nothingFocused). \(pane) \(AgentOutput.nothingSent) \(AgentRecipient.nothingFocusedAdvice)"
+            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: nil, heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line,
+                        facts: facts + [.init(label: "Conversation in front", value: pane)])
             return
         }
         if let (id, front, body) = Self.target(of: resolution), snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
@@ -366,7 +400,7 @@ final class AgentTake {
         switch notReady {
         case .missing, .notConnected, .cannotStart: .openAgents(mode)
         case .needsAccessibility: .openAccessibilitySettings
-        case .notSetUp, .windowUnknown, .nothingShown, .notListed: nil
+        case .notSetUp, .windowUnknown, .nothingShown, .notListed, .unavailable: nil
         }
     }
 
@@ -516,7 +550,9 @@ final class AgentTake {
                 return fail(AgentOutput.askLine(reason), action: .openAgents(mode.id), keepingWords: true)
             }
             if host.agentFocusUnconfirmed { return fail(Self.unconfirmedCheckLine, action: .openAccessibilitySettings) }
-            return fail("\(AgentRecipient.nothingFocused). \(AgentOutput.nothingSent) Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.")
+            if let notReady = host.agentHostCopyNotReady { return fail(AgentOutput.notReadyLine(notReady), action: Self.action(for: notReady, mode: mode.id)) }
+            let pane = host.agentPaneProblem.map { " \($0)" } ?? ""
+            return fail("\(AgentRecipient.nothingFocused).\(pane) \(AgentOutput.nothingSent) Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.")
         }
         let name = agents.handle(of: id) ?? snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
         if snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {

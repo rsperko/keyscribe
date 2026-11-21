@@ -24,6 +24,8 @@ const project = join(root, "project")
 const bridge = join(root, "bridge")
 const extension = join(setup, "extensions", "keyscribe")
 for (const folder of [extension, project, bridge]) mkdirSync(folder, { recursive: true })
+writeFileSync(join(setup, "onboarding.json"), JSON.stringify({ firstRunDone: true }))
+writeFileSync(join(setup, "settings.json"), JSON.stringify({ onboarding: false }))
 execFileSync("git", ["init", "-q", project])
 writeFileSync(join(project, "README.md"), "A scratch project.\n")
 

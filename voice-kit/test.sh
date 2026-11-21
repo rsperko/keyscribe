@@ -21,7 +21,7 @@ t02	numbers	Postgres	Say it slowly.	Second, with 42 numbers.
 ff01	freeform	FREEFORM		Tell us anything.
 TSV
 
-say -o "$WORK/take.wav" --data-format=LEF32@16000 "test take" || fail "say could not make a test take"
+perl -e 'alarm 30; exec @ARGV' say -o "$WORK/take.wav" --data-format=LEF32@16000 "test take" || fail "say could not make a test take"
 
 mkfifo "$WORK/in"
 HOME="$HOME_DIR" TERM=xterm zsh "$KIT/record.sh" "$WORK/short.tsv" --out "$OUT" --simulate < "$WORK/in" > "$WORK/log.txt" 2>&1 &

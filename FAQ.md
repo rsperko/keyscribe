@@ -740,17 +740,20 @@ extension. KeyScribe writes a small extension into Ultimate's user folder (`~/.u
 once into every project it runs on your Mac; nothing restarts. If you turn it off in Ultimate's Extensions panel,
 Settings says so.
 
-KeyScribe lists @ultimate, your other standing agents and your branches in every project whose Ultimate is
-running. The project root, the lander, side chats and subagents are not listed, since you don't talk to them
-directly. A standing agent is named by its handle, so “tell ultimate …” reaches @ultimate; with Ultimate running in
-two projects, each is called by its project too, such as “app ultimate” and “web ultimate”. A branch is named by a
-title you gave it in Ultimate, or a KeyScribe name; the titles Ultimate writes for branches on its own are never
-used as names. A branch you haven't named is called “ultimate” and the number Ultimate shows for it, so “tell
-ultimate 61 …” reaches #61. The longest name wins, so while #61 is open, “tell ultimate 61 tests are failing” goes to
-#61, not to @ultimate; say “tell ultimate there are 61 failing tests” instead. A number said as a word counts too:
-while #6 is open, “tell ultimate six more things are broken” goes to #6. Ultimate gives its own conversations the
-first numbers in a project, so the branches you start are usually numbered above twenty; naming a branch ends the
-overlap.
+KeyScribe lists every conversation you can type into from Ultimate's sidebar, in every project whose Ultimate is
+running: @ultimate and your other standing agents, branches, conversations you start, side chats and subagents. The
+project root and the lander are not listed, since you don't talk to them. A standing agent is named by its handle, so
+“tell ultimate …” reaches @ultimate; with Ultimate running in two projects, each is called by its project too, such
+as “app ultimate” and “web ultimate”. A subagent is named by the name the sidebar shows for it. A branch is named by a
+title you gave it in Ultimate, or a KeyScribe name; the titles Ultimate writes on its own are not names, but after
+“tell”, “ask” or “check on”, the title the sidebar shows works too. Every conversation is also called “ultimate” and
+the number Ultimate shows for it, so “tell ultimate 61 …” reaches #61, and a number can be said in full or in groups:
+“two hundred fifty” and “two fifty” both reach #250. The longest name wins, so while #61 is open, “tell ultimate 61
+tests are failing” goes to #61, not to @ultimate; say “tell ultimate there are 61 failing tests” instead. A number
+said as a word counts too: while #6 is open, “tell ultimate six more things are broken” goes to #6. A number that
+names no open conversation is never taken for another one: when it ends the name, as in “tell ultimate 68, reply
+ready”, nothing is sent; when the message goes on after it, as in “tell ultimate two things are broken”, it is the
+start of a message to @ultimate.
 
 When you rename a branch in KeyScribe, by voice or in Settings, KeyScribe also sets that name as its Ultimate title.
 A standing agent keeps its handle in Ultimate, so a new name for it works only in KeyScribe. While KeyScribe is
@@ -758,8 +761,11 @@ running, the line under Ultimate's message box shows the name to say for the con
 
 What you dictate is sent as your own message, with any image you pasted. A conversation that is working takes it
 into the running turn, the way typing there does. While an Ultimate page is the window in front, dictation without
-a name goes to the conversation it shows, and if its message box already has text, what you say is added after it
-and both are sent together. When a conversation asks you a question, you hear it, and what you dictate to that
+a name goes to the conversation whose message box takes your typing, which is the side chat when one covers the
+main message box (or opens a new side chat when you switched `@ultimate`'s box to side-chat mode with Tab). If its message box already has text, what you say is added after it and both are sent together.
+When the page can't take it, such as when a dialog covers the message box or the page shows the lander, nothing is
+sent and the panel says why. KeyScribe tells which page is in front from the address the browser reports for its
+window, which Chrome, other Chromium browsers and Safari do and Firefox does not; in Firefox, name the conversation. When a conversation asks you a question, you hear it, and what you dictate to that
 conversation waits until you answer the question in Ultimate. “Open” switches Ultimate's open pages to the
 conversation and brings forward the window KeyScribe last saw it in.
 

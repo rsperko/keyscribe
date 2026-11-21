@@ -11,20 +11,32 @@ struct UltimateHostTests {
         var shown: [(Int, Int)] = []
         var retitled: [(Int, Int, String)] = []
         var showWorks = true
+        var now = Date()
+        var pages: [String: String] = ["cg:400": "http://ultimate.localhost:4747/?conversation=61"]
+        var frontReads = 0
+        var pageReads = 0
+    }
+
+    final class Box: @unchecked Sendable {
+        var value: String
+        init(_ value: String) { self.value = value }
     }
 
     static let home = "/u/.ultimate/projects/app-1234"
-    static let browser = AgentHostApp(bundle: "com.google.Chrome.app.x", pid: 40, name: "Ultimate")
-    static let terminal = AgentHostApp(bundle: "com.apple.Terminal", pid: 41, name: "Terminal")
+    static let browser = AgentHostApp(bundle: "com.google.Chrome.app.x", pid: 40, name: "Ultimate", window: "cg:400")
+    static let terminal = AgentHostApp(bundle: "com.apple.Terminal", pid: 41, name: "Terminal", window: "cg:410")
 
     private func host(
         _ front: Front, projects: [UltimateHost.Running] = [UltimateHost.Running(home: home, project: .init(root: "/w/app", name: "app"), lock: .init(pid: 9, port: 4747))],
         conversations: @escaping @Sendable (String) -> [UltimateProjects.Conversation]? = { _ in
             [.init(id: "53", handle: "@ultimate", folder: "/w/app"), .init(id: "61", folder: "/h/wt/61")]
-        }
+        },
+        listing: (@Sendable (String) -> UltimateHost.Listing)? = nil,
+        documentURL: (@Sendable (AgentHostApp) async -> URL?)? = nil
     ) -> UltimateHost {
         UltimateHost(
-            home: "/u", enrolled: { ["/u/.ultimate"] }, readProjects: { _ in projects }, readConversations: { conversations($0) },
+            home: "/u", enrolled: { [UltimateNamingTests.setup] }, readProjects: { _ in projects },
+            readConversations: { home, _ in listing?(home) ?? conversations(home).map { .connector($0) } ?? .file(nil, connectorFailed: false) },
             show: { [front] port, id in
                 await MainActor.run { front.shown.append((port, id)) }
                 return await MainActor.run { front.showWorks }
@@ -33,7 +45,19 @@ struct UltimateHostTests {
                 await MainActor.run { front.retitled.append((port, id, title)) }
                 return await MainActor.run { front.showWorks }
             },
-            frontApp: { front.app }, activate: { front.activated.append($0); return true })
+            frontApp: {
+                front.frontReads += 1
+                return front.app
+            }, documentURL: documentURL ?? { [front] app in
+                await MainActor.run {
+                    front.pageReads += 1
+                    return app.window.flatMap { front.pages[$0] }.flatMap(URL.init(string:))
+                }
+            }, activate: { app, stillWanted in
+                guard stillWanted() else { return false }
+                front.activated.append(app.pid)
+                return true
+            })
     }
 
     private func session(_ id: String, _ home: String = home) -> String {
@@ -42,6 +66,79 @@ struct UltimateHostTests {
 
     private func location(_ id: String) -> AgentHostLocation { AgentHostLocation(host: "ultimate", instance: Self.home, native: id) }
 
+    @Test func aSymlinkedSetupListsTheSameInstancePathTheConnectorReports() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-ultimate-path-\(UUID().uuidString)")
+        let project = root.appendingPathComponent("actual/projects/kestrel")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("{\"pid\":\(getpid()),\"port\":4747}".utf8).write(to: project.appendingPathComponent("ultimate.lock"))
+        let link = root.appendingPathComponent("linked")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: root.appendingPathComponent("actual"))
+        let canonical = try #require(realpath(project.path, nil))
+        defer { free(canonical) }
+        for setup in [root.appendingPathComponent("actual").path, link.path] {
+            #expect(await UltimateHost.readProjects([setup]).map(\.home) == [String(cString: canonical)])
+        }
+    }
+
+    private func projectFolder(_ file: String) throws -> (root: URL, project: URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-ultimate-roster-\(UUID().uuidString)")
+        let project = root.appendingPathComponent(".ultimate/projects/example")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try Data(file.utf8).write(to: project.appendingPathComponent("conversations.json"))
+        try Data("{\"pid\":\(getpid()),\"port\":4747}".utf8).write(to: project.appendingPathComponent("ultimate.lock"))
+        let plugin = root.appendingPathComponent(".ultimate/extensions/\(KeyScribePaths.variant.connectorSlug)")
+        try FileManager.default.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: plugin.appendingPathComponent("keyscribe.json"))
+        return (root, project)
+    }
+
+    @Test func theConnectorsListIsTheListWhileItAnswers() async throws {
+        let (root, project) = try projectFolder("[]")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let found = await UltimateHost.readConversations(project.path, port: 5151, list: { port in
+            #expect(port == 5151)
+            return Data(#"{"result":[{"id":70,"handle":"feather","cwd":"/w/child"}]}"#.utf8)
+        })
+        #expect(found == .connector([.init(id: "70", handle: "feather", folder: "/w/child")]))
+    }
+
+    @Test(arguments: [Optional<String>.none, "{}", #"{"ok":false,"error":"The Ultimate connector is not ready."}"#])
+    func aConnectorThatIsOffOrNotOpenYetLeavesTheProjectListedFromItsFile(answer: String?) async throws {
+        let (root, project) = try projectFolder(#"[{"id":53,"label":"agent","title":"@ultimate","cwd":"/w"}]"#)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let found = await UltimateHost.readConversations(project.path, port: 4747, list: { _ in answer.map { Data($0.utf8) } })
+        #expect(found == .file([.init(id: "53", handle: "@ultimate", sidebarTitle: "@ultimate", folder: "/w")], connectorFailed: true))
+    }
+
+    @Test func withoutTheConnectorTheFileIsReadAndTheConnectorIsNotAsked() async throws {
+        let (root, project) = try projectFolder(#"[{"id":53,"label":"agent","title":"@ultimate","cwd":"/w"}]"#)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.removeItem(at: root.appendingPathComponent(".ultimate/extensions"))
+        let asked = Flag()
+        let found = await UltimateHost.readConversations(project.path, port: 4747, list: { _ in asked.on = true; return nil })
+        #expect(found == .file([.init(id: "53", handle: "@ultimate", sidebarTitle: "@ultimate", folder: "/w")], connectorFailed: false))
+        #expect(!asked.on)
+    }
+
+    @Test func projectsAreListedAtTheSameTimeNotOneAfterAnother() async {
+        let reading = Counter()
+        let ultimate = UltimateHost(
+            home: "/u", enrolled: { [UltimateNamingTests.setup] },
+            readProjects: { _ in [
+                UltimateHost.Running(home: "/u/.ultimate/projects/a", project: nil, lock: .init(pid: 9, port: 4747)),
+                UltimateHost.Running(home: "/u/.ultimate/projects/b", project: nil, lock: .init(pid: 10, port: 4748)),
+            ] },
+            readConversations: { _, _ in
+                reading.enter()
+                try? await Task.sleep(for: .milliseconds(100))
+                reading.leave()
+                return .connector([])
+            })
+        _ = await ultimate.scan()
+        #expect(reading.most == 2)
+    }
+
     @Test func aRunningProjectListsItsConversationsUnderItsHomeWithStandingHandlesAsTitles() async {
         let ultimate = host(Front())
         guard case .found(let sessions, let titles, _, _, _, _) = await ultimate.scan() else {
@@ -49,8 +146,47 @@ struct UltimateHostTests {
             return
         }
         #expect(sessions.map(\.id) == ["53", "61"])
-        #expect(sessions.allSatisfy { $0.host?.instance == Self.home && $0.pid == 9 })
+        #expect(sessions.allSatisfy { $0.host?.instance == Self.home && $0.pid == nil })
         #expect(titles == [location("53").conversationKey: "@ultimate"])
+    }
+
+    @Test func aBrowserConversationNeverReadsNamesFromTheServersLaunchingTerminal() async {
+        let ultimate = host(Front())
+        let reader = AgentPlaceTrackerTests.Reader()
+        let hub = AgentHub(transport: AgentHubTests.FakeTransport(), discovery: [], names: nil, focus: nil, front: nil,
+                           receiptTimeout: .milliseconds(50), scanDeadline: .seconds(3), places: reader,
+                           hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })], hostAllowed: { _ in true })
+        await hub.rescan()
+        while let reading = hub.placeTracker?.reading { await reading.value }
+        #expect(reader.asked.flatMap { $0 }.isEmpty)
+        #expect(hub.directory.conversations.allSatisfy { $0.pid == nil })
+        #expect(!hub.placesUnread(hub.directory.conversations.map(\.id)))
+        hub.stop()
+    }
+
+    @Test func aNewConversationTheConnectorGreetsIsInFrontAsSoonAsItsListHasIt() async {
+        let front = Front()
+        front.app = Self.browser
+        front.pages["cg:400"] = "http://ultimate.localhost:4747/?conversation=70"
+        let greeted = Flag()
+        let ultimate = host(front, conversations: { _ in greeted.on ? [.init(id: "70", folder: "/w/app")] : [] })
+        let transport = AgentHubTests.FakeTransport()
+        let hub = AgentHub(transport: transport, discovery: [], names: nil, focus: nil, front: nil,
+                           receiptTimeout: .milliseconds(50), scanDeadline: .seconds(3), places: nil,
+                           hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })], hostAllowed: { _ in true })
+        await hub.rescan()
+        let id = session("70")
+        transport.live.insert(id)
+        var hello = AgentHostTests.hello(id)
+        hello.agent = "ultimate"
+        hello.cwd = "/w/app"
+        greeted.on = true
+        hub.handle(.hello(hello))
+        hub.handle(.shown(session: id, on: true))
+        await hub.refreshHostsForPress()
+        #expect(await hub.sessionInFrontWithoutAsking()?.id == id)
+        #expect(await hub.hostShows(id) == true)
+        hub.stop()
     }
 
     @Test func everyConversationsDictationIsDeliveredByTheExtension() async {
@@ -118,23 +254,290 @@ struct UltimateHostTests {
         #expect(problem != nil)
     }
 
-    @Test func theConnectorsSessionKeyNamesTheSameConversationTheScanLists() {
-        #expect(UltimateHost.location(of: session("53")) == location("53"))
-        #expect(UltimateHost.location(of: AgentSessionID.make(agent: "bb", native: "53@x")) == nil)
+    @Test func aConnectorListThatFailsKeepsTheLastConnectorListUntilTheConnectorAnswersOrIsTurnedOff() async {
+        let state = Box("connector")
+        let ultimate = host(Front(), listing: { _ in
+            switch state.value {
+            case "connector": .connector([.init(id: "53", handle: "@ultimate", folder: "/w/app"), .init(id: "61", handle: "feather", folder: "/w")])
+            case "failed": .file([.init(id: "53", handle: "@ultimate", folder: "/w/app"), .init(id: "61", folder: "/w")], connectorFailed: true)
+            default: .file([.init(id: "53", handle: "@ultimate", folder: "/w/app"), .init(id: "61", folder: "/w")], connectorFailed: false)
+            }
+        })
+        _ = await ultimate.scan()
+        state.value = "failed"
+        guard case .found(let sessions, let titles, _, let carried, let problem, _) = await ultimate.scan() else {
+            Issue.record("a failed connector list must not empty the list")
+            return
+        }
+        #expect(sessions.map(\.id) == ["53", "61"])
+        #expect(titles[location("61").conversationKey] == "feather")
+        #expect(carried == [location("53"), location("61")])
+        #expect(problem != nil)
+        state.value = "off"
+        guard case .found(_, let fileTitles, _, let fileCarried, let fileProblem, _) = await ultimate.scan() else {
+            Issue.record("a project without its connector lists from its file")
+            return
+        }
+        #expect(fileTitles == [location("53").conversationKey: "@ultimate"])
+        #expect(fileCarried.isEmpty)
+        #expect(fileProblem == nil)
     }
 
-    @Test func aConversationIsInFrontOnlyWhileTheAppItsPageReportedFromIsStillFrontmost() async {
+    @Test func beforeAnyConnectorListAFailedOneListsFromTheFile() async {
+        let ultimate = host(Front(), listing: { _ in .file([.init(id: "53", handle: "@ultimate", folder: "/w/app")], connectorFailed: true) })
+        guard case .found(let sessions, _, _, let carried, let problem, _) = await ultimate.scan() else {
+            Issue.record("a connector that has not opened yet leaves the project listed from its file")
+            return
+        }
+        #expect(sessions.map(\.id) == ["53"])
+        #expect(carried.isEmpty)
+        #expect(problem == nil)
+    }
+
+    @Test func theConnectorsSessionKeyNamesTheSameConversationTheScanLists() {
+        #expect(UltimateHost.location(of: AgentSessionID.native(session("53"))) == location("53"))
+        #expect(UltimateHost.location(of: session("53")) == nil)
+        #expect(UltimateHost.location(of: "x@" + Self.home) == nil)
+    }
+
+    @Test func aConversationIsInFrontOnlyWhileAWindowShowingItsProjectsPageIsFrontmost() async {
         let front = Front()
         let ultimate = host(front)
         _ = await ultimate.scan()
         front.app = Self.browser
-        ultimate.observe(.shown(session: session("61"), on: true))
-        let app = ultimate.focusedWindow()
-        #expect(app?.instance == Self.home)
-        #expect(await ultimate.front(among: [location("53"), location("61")], reported: location("61"), in: app) == .shown(location("61"), in: app!))
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        let focus = await ultimate.focusInFront(requireClaim: true)
+        #expect(focus?.app?.instance == Self.home)
+        #expect(focus?.app?.window == "cg:400")
+        #expect(focus?.conversation == location("61"))
+        #expect(await ultimate.front(among: [location("53"), location("61")], reported: location("61"), in: focus?.app) == .shown(location("61"), in: focus!.app!))
         front.app = Self.terminal
-        #expect(ultimate.focusedWindow() == nil)
+        #expect(await ultimate.focusInFront(requireClaim: true) == nil)
         #expect(await ultimate.front(among: [location("61")], reported: location("61"), in: Self.terminal) == .unknown)
+    }
+
+    @Test func replyChecksReadNoWindowUntilAPageClaimsFocusWhilePressChecksStillRecognizeTheProjectWindow() async {
+        let front = Front()
+        front.app = Self.browser
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        #expect(await ultimate.focusInFront(requireClaim: true) == nil)
+        #expect(front.frontReads == 0)
+        #expect(front.pageReads == 0)
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: false))
+        #expect(await ultimate.focusInFront(requireClaim: true) == nil)
+        #expect(front.frontReads == 0)
+        #expect(front.pageReads == 0)
+        let press = await ultimate.focusInFront(requireClaim: false)
+        #expect(press?.copy?.instance == Self.home)
+        #expect(press?.conversation == nil)
+        #expect(press?.allowsNewConversation == false)
+    }
+
+    @Test func aPageComingToTheFrontIsRememberedSoOpenCanRaiseItWithoutAnyPress() async {
+        let front = Front()
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        front.app = Self.browser
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        #expect(await ultimate.open(location("53"), stillWanted: { true }) == .opened)
+        #expect(front.activated == [40])
+    }
+
+    @Test func aSideChatAndTabSideModeMatchTheirParentsPageAddress() async {
+        let front = Front()
+        front.app = Self.browser
+        front.pages["cg:400"] = "http://ultimate.localhost:4747/?conversation=53"
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        ultimate.observe(.shown(session: "147@\(Self.home)", on: true, pageConversation: "53"))
+        let side = await ultimate.focusInFront(requireClaim: true)
+        #expect(side?.conversation == location("147"))
+        #expect(side?.allowsNewConversation == false)
+        ultimate.observe(.shown(session: "53@\(Self.home)", on: false, newConversation: true, pageConversation: "53"))
+        let tab = await ultimate.focusInFront(requireClaim: true)
+        #expect(tab?.conversation == nil)
+        #expect(tab?.allowsNewConversation == true)
+        front.pages["cg:400"] = "http://ultimate.localhost:4747/?conversation=61"
+        let other = await ultimate.focusInFront(requireClaim: false)
+        #expect(other?.copy?.instance == Self.home)
+        #expect(other?.conversation == nil)
+        #expect(other?.allowsNewConversation == false)
+    }
+
+    @Test func readingThePageAddressRevalidatesTheWindowWhenFocusChangesMidRead() async {
+        let front = Front()
+        front.app = Self.browser
+        let ultimate = host(front, documentURL: { [front] _ in
+            await MainActor.run { front.app = Self.terminal }
+            return URL(string: "http://ultimate.localhost:4747/?conversation=61")
+        })
+        _ = await ultimate.scan()
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        #expect(await ultimate.focusInFront(requireClaim: false) == nil)
+        #expect(await ultimate.open(location("61"), stillWanted: { true }) == .requested)
+        #expect(front.activated.isEmpty)
+    }
+
+    @Test func theLiveDocumentURLWalkDoesNotBlockTheMainActor() async {
+        let front = Front()
+        front.app = Self.browser
+        let release = AgentHostTests.Gate()
+        release.closed = true
+        let entered = Flag()
+        let ultimate = host(front, documentURL: { _ in
+            entered.on = true
+            await release.pass()
+            return URL(string: "http://ultimate.localhost:4747/?conversation=61")
+        })
+        _ = await ultimate.scan()
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        let reading = Task { @MainActor in await ultimate.focusInFront(requireClaim: true) }
+        while !entered.on { await Task.yield() }
+        release.open()
+        let focus = await reading.value
+        #expect(focus?.conversation == location("61"))
+    }
+
+    @Test func aFocusReportArrivingWhileAnotherAppIsInFrontCannotClaimThatAppOrActivateIt() async {
+        let front = Front()
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        front.app = Self.terminal
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        #expect(await ultimate.focusInFront(requireClaim: true) == nil)
+        #expect(await ultimate.open(location("61"), stillWanted: { true }) == .requested)
+        #expect(front.activated.isEmpty)
+    }
+
+    @Test(arguments: ["http://127.0.0.1:5050/?conversation=61", "https://example.com/", "file:///w/app/index.html"])
+    func aWindowShowingAnythingButThisProjectsPageIsNotItsPage(address: String) async {
+        let front = Front()
+        front.app = Self.browser
+        front.pages["cg:400"] = address
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        #expect(await ultimate.focusInFront(requireClaim: false) == nil)
+    }
+
+    @Test func switchingTabsInTheSameWindowImmediatelyClearsFocus() async {
+        let front = Front()
+        front.app = Self.browser
+        let ultimate = host(front)
+        let transport = AgentHubTests.FakeTransport()
+        let hub = AgentHub(
+            transport: transport, discovery: [], names: nil, focus: nil, front: nil,
+            receiptTimeout: .milliseconds(50), handOffLimit: .seconds(30), scanDeadline: .seconds(30), places: nil,
+            hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })], hostAllowed: { _ in true },
+            hostDeadline: .seconds(2), hostConfirmDelay: .seconds(3), heldLimit: .milliseconds(100),
+            processEnvironment: { _, _ in [:] }, processParent: { _ in nil }, now: Date.init,
+            makeId: { "r1" }, accessibilityTrusted: { true })
+        let id = session("61")
+        transport.live.insert(id)
+        var hello = AgentHostTests.hello(id)
+        hello.agent = "ultimate"
+        hello.features = ["shown", "readiness"]
+        await hub.rescan()
+        hub.handle(.hello(hello))
+        hub.handle(.shown(session: id, on: true))
+        #expect(await hub.hostShows(id) == true)
+        front.pages["cg:400"] = "https://example.com/"
+        #expect(await hub.hostShows(id) == false)
+        #expect(await hub.sessionInFrontWithoutAsking() == nil)
+        hub.stop()
+    }
+
+    @Test func anotherWindowShowingADifferentConversationNeverPairsWithARetainedReport() async {
+        let front = Front()
+        front.app = Self.browser
+        front.pages["cg:401"] = "http://ultimate.localhost:4747/?conversation=53"
+        let ultimate = host(front)
+        let transport = AgentHubTests.FakeTransport()
+        let hub = AgentHub(
+            transport: transport, discovery: [], names: nil, focus: nil, front: nil,
+            receiptTimeout: .milliseconds(50), handOffLimit: .seconds(30), scanDeadline: .seconds(30), places: nil,
+            hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })], hostAllowed: { _ in true },
+            hostDeadline: .seconds(2), hostConfirmDelay: .seconds(3), heldLimit: .milliseconds(100),
+            processEnvironment: { _, _ in [:] }, processParent: { _ in nil }, now: Date.init,
+            makeId: { "r1" }, accessibilityTrusted: { true })
+        let id61 = session("61")
+        let id53 = session("53")
+        transport.live.formUnion([id61, id53])
+        for id in [id61, id53] {
+            var hello = AgentHostTests.hello(id)
+            hello.agent = "ultimate"
+            hello.features = ["shown", "readiness"]
+            hub.handle(.hello(hello))
+        }
+        await hub.rescan()
+        hub.handle(.shown(session: id61, on: true))
+        #expect(await hub.hostShows(id61) == true)
+        front.app = AgentHostApp(bundle: Self.browser.bundle, pid: Self.browser.pid, name: Self.browser.name, window: "cg:401")
+        #expect(await hub.hostShows(id61) == false)
+        #expect(await hub.sessionInFrontWithoutAsking() == nil)
+        hub.stop()
+    }
+
+    @Test func switchingWindowsInOneBrowserDoesNotKeepThePreviousConversationInFront() async {
+        let front = Front()
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        front.app = Self.browser
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        #expect(await ultimate.focusInFront(requireClaim: true)?.app?.window == "cg:400")
+        front.app?.window = "cg:401"
+        #expect(await ultimate.focusInFront(requireClaim: true) == nil)
+    }
+
+    @Test(arguments: [["scan", "hello", "shown"], ["scan", "shown", "hello"],
+                      ["hello", "scan", "shown"], ["hello", "shown", "scan"],
+                      ["shown", "scan", "hello"], ["shown", "hello", "scan"]])
+    func aPageReportThroughTheHubFindsTheConversationAndKeepsItsNativeWindow(order: [String]) async {
+        let front = Front()
+        front.app = Self.browser
+        let ultimate = host(front)
+        let transport = AgentHubTests.FakeTransport()
+        let hub = AgentHub(
+            transport: transport, discovery: [], names: nil, focus: nil, front: nil,
+            receiptTimeout: .milliseconds(50), handOffLimit: .seconds(30), scanDeadline: .seconds(30), places: nil,
+            hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })], hostAllowed: { _ in true },
+            hostDeadline: .seconds(2), hostConfirmDelay: .seconds(3), heldLimit: .milliseconds(100),
+            processEnvironment: { _, _ in [:] }, processParent: { _ in nil }, now: Date.init,
+            makeId: { "r1" }, accessibilityTrusted: { true })
+        let id = session("61")
+        transport.live.insert(id)
+        var hello = AgentHostTests.hello(id)
+        hello.agent = "ultimate"
+        hello.features = ["shown", "readiness"]
+        for event in order {
+            switch event {
+            case "scan": await hub.rescan()
+            case "hello": hub.handle(.hello(hello))
+            default: hub.handle(.shown(session: id, on: true))
+            }
+        }
+        await hub.rescan()
+        let shown = await hub.sessionInFrontWithoutAsking()
+        #expect(shown?.id == id)
+        #expect(shown?.app.window == "cg:400")
+        #expect(await hub.hostShows(id) == true)
+        hub.stop()
+    }
+
+    @Test func aHoldReasonFromThePageIsGivenOnlyWhileItsWindowIsInFront() async {
+        let front = Front()
+        front.app = Self.browser
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: false, problem: "Ultimate shows conversation 999, but it is not listed.", pageConversation: "61"))
+        let first = await ultimate.focusInFront(requireClaim: true)
+        #expect(first?.problem == "Ultimate shows conversation 999, but it is not listed.")
+        #expect(first?.copy?.instance == Self.home)
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: false, problem: "A dialog covers Ultimate’s composer.", pageConversation: "61"))
+        #expect(await ultimate.focusInFront(requireClaim: true)?.problem == "A dialog covers Ultimate’s composer.")
+        front.app = Self.terminal
+        #expect(await ultimate.focusInFront(requireClaim: true) == nil)
     }
 
     @Test func aPageThatStopsShowingAConversationLeavesNothingInFront() async {
@@ -142,9 +545,11 @@ struct UltimateHostTests {
         let ultimate = host(front)
         _ = await ultimate.scan()
         front.app = Self.browser
-        ultimate.observe(.shown(session: session("61"), on: true))
-        ultimate.observe(.shown(session: session("61"), on: false))
-        #expect(ultimate.focusedWindow() == nil)
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        let app = await ultimate.focusInFront(requireClaim: true)?.app
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: false))
+        #expect(await ultimate.focusInFront(requireClaim: true) == nil)
+        #expect(await ultimate.front(among: [location("61")], reported: location("61"), in: app) == .unknown)
     }
 
     @Test func aReportForAnotherConversationThanTheHubExpectsIsUnknown() async {
@@ -152,17 +557,19 @@ struct UltimateHostTests {
         let ultimate = host(front)
         _ = await ultimate.scan()
         front.app = Self.browser
-        ultimate.observe(.shown(session: session("61"), on: true))
-        let app = ultimate.focusedWindow()
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        let app = await ultimate.focusInFront(requireClaim: true)?.app
         #expect(await ultimate.front(among: [location("53"), location("61")], reported: location("53"), in: app) == .unknown)
     }
 
-    @Test func openingShowsTheConversationThroughUltimateAndBringsItsPageForward() async {
+    @Test func openingShowsTheConversationThroughUltimateAndBringsForwardTheWindowLastSeenShowingIt() async {
         let front = Front()
         let ultimate = host(front)
         _ = await ultimate.scan()
         front.app = Self.browser
-        ultimate.observe(.shown(session: session("53"), on: true))
+        ultimate.observe(.shown(session: "53@\(Self.home)", on: true, pageConversation: "61"))
+        _ = await ultimate.focusInFront(requireClaim: true)
+        front.app = Self.terminal
         #expect(await ultimate.open(location("61"), stillWanted: { true }) == .opened)
         #expect(front.shown.map(\.0) == [4747])
         #expect(front.shown.map(\.1) == [61])
@@ -199,6 +606,15 @@ struct UltimateHostTests {
         let ultimate = host(front, projects: [])
         _ = await ultimate.scan()
         #expect(await ultimate.open(location("61"), stillWanted: { true }) == .failed)
+    }
+
+    final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var now = 0
+        private var peak = 0
+        var most: Int { lock.withLock { peak } }
+        func enter() { lock.withLock { now += 1; peak = max(peak, now) } }
+        func leave() { lock.withLock { now -= 1 } }
     }
 
     final class Flag: @unchecked Sendable {

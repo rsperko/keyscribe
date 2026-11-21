@@ -8,6 +8,19 @@ struct AgentStatusQueryTests {
         AgentStatusQuery.parse(text, names: names)
     }
 
+    @Test func aLongSubjectIsAStatusCheckOnlyWhenItReachesForAKnownNameOrSidebarTitle() {
+        let titles = ["discussing a plum orchard in spring"]
+        #expect(AgentStatusQuery.parse("check on discussing a plum orchard in spring", names: names, afterVerb: titles)
+                == .check(.name("discussing a plum orchard in spring", body: "")))
+        #expect(AgentStatusQuery.parse("check on discussing a plum orchard", names: names, afterVerb: titles)
+                == .check(.unresolved(spoken: "discussing a plum orchard", body: "")))
+        #expect(AgentStatusQuery.parse("check on discussing a plum orchards in spring", names: names, afterVerb: titles)
+                == .check(.name("discussing a plum orchard in spring", body: "")))
+        #expect(AgentStatusQuery.parse("check on discussing plum orchards in spring today", names: names, afterVerb: titles) == nil)
+        #expect(AgentStatusQuery.parse("check on the deploy before we merge today", names: names, afterVerb: titles) == nil)
+        #expect(AgentStatusQuery.parse("check on backend and then run the tests", names: names, afterVerb: titles) == nil)
+    }
+
     @Test(arguments: [
         ("check on architect", AgentAddress.name("architect", body: "")),
         ("Check on Architect.", .name("architect", body: "")),

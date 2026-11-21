@@ -5,6 +5,24 @@ import { command, type Message } from "./driver.ts"
 import { TerminalAgent } from "./terminal.ts"
 import { run } from "./util.ts"
 
+export function piMessages(entries: any[]): Message[] {
+  const messages: Message[] = []
+  let turn: string | undefined
+  for (const entry of entries) {
+    if (entry.type !== "message") continue
+    const content = entry.message?.content
+    const text = typeof content === "string" ? content : (Array.isArray(content) ? content : [])
+      .filter((part: any) => part.type === "text").map((part: any) => part.text).join("\n")
+    if (entry.message?.role === "user") {
+      turn = entry.id
+      messages.push({ role: "user", text, turn })
+    } else if (entry.message?.role === "assistant" && text) {
+      messages.push({ role: "agent", text, turn })
+    }
+  }
+  return messages
+}
+
 function sessionFiles(folder: string): string[] {
   if (!existsSync(folder)) return []
   return readdirSync(folder, { recursive: true, encoding: "utf8" })
@@ -52,21 +70,13 @@ abstract class PiFamily extends TerminalAgent {
 
   async messages(): Promise<Message[]> {
     if (!this.file || !statSync(this.file, { throwIfNoEntry: false })) return []
-    const messages: Message[] = []
-    let turn: string | undefined
+    const entries: any[] = []
     for (const line of readFileSync(this.file, "utf8").split("\n")) {
       let entry: any
       try { entry = JSON.parse(line) } catch { continue }
-      if (entry.type !== "message") continue
-      const text = (entry.message?.content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text).join("\n")
-      if (entry.message?.role === "user") {
-        turn = entry.id
-        messages.push({ role: "user", text, turn })
-      } else if (entry.message?.role === "assistant" && text) {
-        messages.push({ role: "agent", text, turn })
-      }
+      entries.push(entry)
     }
-    return messages
+    return piMessages(entries)
   }
 }
 

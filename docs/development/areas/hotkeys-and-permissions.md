@@ -255,6 +255,15 @@ still real and still gated, with steady-state delivery.) Chords still ride `Carb
 still rides the HUD local monitor — by design (no permission, guaranteed suppression from the
 focused app), not because the tap can't see keyDown. Re-verify if the macOS TCC model changes.
 
+### An instance started with `--no-input`
+
+A scripted instance (`--no-input`, the conformance and development runs) still builds a `HotkeyMonitor`, with
+no bindings. It binds no key, registers no Carbon chord and consumes no mouse button; it only starts the
+listen-only modifier tap, under the same Accessibility gate. The reason is the Agent take, not the hotkeys: an
+unnamed take keeps the conversation in front only if the user typed nothing after the press, and `UserInput`
+learns that from this tap alone. Without it every unnamed take in a scripted instance is unconfirmed, so the
+runs that drive a real window could never test the path a user takes.
+
 ## Chord triggers and keyboard layouts
 
 **Chord triggers + the Add-Dictionary / Add-Replacement action shortcuts** (key + modifiers,

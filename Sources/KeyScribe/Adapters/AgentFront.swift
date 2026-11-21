@@ -27,7 +27,12 @@ struct FrontSession: Equatable, Sendable {
 }
 
 protocol AgentFronting: Sendable {
+    func focusProblem() async -> String?
     func shown(among agents: [AgentFrontCandidate], asking: @escaping @MainActor @Sendable (String) -> Void) async -> FrontSession?
+}
+
+extension AgentFronting {
+    func focusProblem() async -> String? { nil }
 }
 
 struct AgentFront: AgentFronting, Sendable {
@@ -62,6 +67,16 @@ struct AgentFront: AgentFronting, Sendable {
         self.read = read
         self.facts = facts ?? { SystemTerminalFacts(environmentKeys: surfaces.environmentKeys) }
         self.confirming = confirming
+    }
+
+    func focusProblem() async -> String? {
+        guard case .pane(let pane) = await reading(), let tty = pane.tty,
+              let processes = facts().processes(onTTY: tty) else { return nil }
+        let foreground = processes.filter(\.foreground)
+        let parents = Set(foreground.compactMap(\.parent))
+        let names = Set(foreground.filter { !parents.contains($0.pid) }.map(\.name).filter { !$0.isEmpty }).sorted()
+        guard !names.isEmpty else { return nil }
+        return "The focused pane runs \(names.joined(separator: ", "))."
     }
 
     func reading(asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async -> FrontReading {

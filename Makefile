@@ -68,6 +68,10 @@ test-ultimate-live: ## Drive a real headless Ultimate through the connector (ULT
 test-agents: ## Run the agent conformance exercises against a real agent: make test-agents AGENT=codex|all [ONLY=D1,R1] [KEEP=1] (needs a dev build and the agents installed and logged in; spends a little of each agent's model)
 	timeout 5400 node Tests/AgentConformance/run.ts --agent '$(AGENT)' $(if $(ONLY),--only '$(ONLY)') $(if $(KEEP),--keep)
 
+.PHONY: test-ultimate-page
+test-ultimate-page: ## Run Ultimate's native-window conformance matrix (ULTIMATE_CLONE and ULTIMATE_BIN required; uses Chrome and a logged-in model)
+	timeout 1800 "$${ULTIMATE_NODE:-node}" Tests/AgentConformance/ultimate-page.ts $(if $(KEEP),--keep)
+
 voice-kit: ## Build the voice kit to hand out: make voice-kit [STUDY=accents] [APP=Name] → voice-kit/dist/
 	zsh voice-kit/package.sh $(if $(APP),--app '$(APP)') $(STUDY)
 

@@ -599,7 +599,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func buildHotkeyMonitor() {
-        guard listensForInput else { return }
+        guard listensForInput else {
+            if hotkey == nil {
+                hotkey = HotkeyMonitor(bindings: [], onStart: { _, _, _ in }, onCommit: { _ in })
+            }
+            return
+        }
         // One claimable set feeds BOTH shadowing and the bindings. Diverge here and a mode filtered out of
         // the bindings still claims the press in `shadowed`, which drops the mode that should have taken
         // it — leaving the key with no binding at all rather than the surviving one.
@@ -770,7 +775,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startListening() {
-        guard listensForInput else { return }
         // start() registers the Carbon chord hotkeys (no permission needed) regardless of the tap, and
         // creates the modifier-only event tap only when Accessibility is already granted — untrusted it
         // defers tap creation and returns false (leaving chords working). So chord triggers never depend on

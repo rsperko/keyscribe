@@ -119,6 +119,7 @@ final class DictationController {
         var agentNewConversation: CapturedFocus?
         var agentFocusUnconfirmed = false
         var agentHostCopyNotReady: AgentHub.HostCopyNotReady?
+        var agentPaneProblem: String?
         var agentFrontTask: Task<Void, Never>?
         var agentFrontCutoff: ContinuousClock.Instant?
         var agentSnapshot: AgentSnapshot?
@@ -1740,9 +1741,10 @@ final class DictationController {
         machine.finish(outcome)
         building.fingerprints[.final] = .of(body)
         let reason = outcome == .inserted ? nil : recorded ?? state.primaryText
+        let recordedOutcome: DictationRecord.Outcome = outcome == .inserted ? (body.isEmpty ? .command : .inserted) : .failed
         finish(machine: .alreadyTransitioned, cue: outcome == .inserted ? .success : .error, state: state,
                hideAfter: hideAfter ?? (outcome == .inserted ? 2 : 6),
-               record: (outcome == .inserted ? .inserted : .failed, reason),
+               record: (recordedOutcome, reason),
                history: HistoryWrite(
                    heard: heard, transformed: transformed, result: body, insertion: outcome, rewrite: rewrite,
                    failureReason: reason, summary: summary ?? recorded ?? state.primaryText,
@@ -2666,6 +2668,9 @@ extension DictationController: AgentTakeHost {
     }
     var agentHostCopyNotReady: AgentHub.HostCopyNotReady? {
         get { session?.agentHostCopyNotReady } set { session?.agentHostCopyNotReady = newValue }
+    }
+    var agentPaneProblem: String? {
+        get { session?.agentPaneProblem } set { session?.agentPaneProblem = newValue }
     }
     var agentFocusUnconfirmed: Bool {
         get { session?.agentFocusUnconfirmed ?? false } set { session?.agentFocusUnconfirmed = newValue }

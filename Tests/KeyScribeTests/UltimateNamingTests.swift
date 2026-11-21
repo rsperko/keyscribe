@@ -80,11 +80,11 @@ struct UltimateNamingTests {
         let ids = Self.ids(layout, company)
         let host = UltimateHost(
             home: "/u", enrolled: { [Self.setup] }, readProjects: { _ in order.reversed ? listed.reversed() : listed },
-            readConversations: { home in
+            readConversations: { home, _ in
                 let found = Self.conversations(ids, home: home, root: roots[home]!)
-                return order.reversed ? found.reversed() : found
+                return .connector(order.reversed ? found.reversed() : found)
             },
-            show: { _, _ in false }, retitle: { _, _, _ in false }, frontApp: { nil }, activate: { _ in false })
+            show: { _, _ in false }, retitle: { _, _, _ in false }, frontApp: { nil }, activate: { _, _ in false })
         let transport = AgentHubTests.FakeTransport()
         let hub = AgentHub(
             transport: transport, discovery: [AgentHubTests.FakeDiscovery(kind: .claude)], names: nil, focus: nil, front: nil,
@@ -154,5 +154,6 @@ struct UltimateNamingTests {
         let names = hub.directory.conversations.map(\.handle)
         #expect(AgentAddress.parse("tell ultimate 61 tests are failing", names: names) == .name("ultimate 61", body: "tests are failing"))
         #expect(AgentAddress.parse("tell ultimate 99 tests are failing", names: names) == .name("ultimate", body: "99 tests are failing"))
+        #expect(AgentAddress.parse("tell ultimate 99, tests are failing", names: names) == .unresolved(spoken: "ultimate 99", body: "tests are failing"))
     }
 }

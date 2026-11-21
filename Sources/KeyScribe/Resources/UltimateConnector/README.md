@@ -1,5 +1,5 @@
 Connects Ultimate to the dictation app on this Mac, so you can talk to @ultimate, your standing agents and your
-branches by voice and hear their replies.
+branches, subagents and side chats by voice and hear their replies.
 
 ## What you get
 
@@ -20,8 +20,9 @@ talks only to the dictation app, over a connection on this Mac, and only while t
 waits and sends nothing. It reports the reply, a short fingerprint of the prompt that started the turn (never the
 prompt itself), and the question a conversation asks you.
 
-Each open Ultimate page tells the server half whether it has focus, which conversation it shows and whether its
-message box holds text. Only a focused page keeps reporting.
+Each open Ultimate page tells the server half whether it has focus, which writable message box receives typing and whether that
+box holds text. A side chat in front receives the take. A dialog or a message box that is not ready holds it
+with an explanation. The app verifies the page against the browser window and project address. Only a focused page keeps reporting.
 
 The app installs and updates this folder. To remove it, choose Uninstall under Ultimate in the app's Agent
 settings; turning it off in Ultimate's Extensions panel also works.

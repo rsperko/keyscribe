@@ -17,7 +17,9 @@ const responseLimit = 512 * 1024
 const listSettles = 1000
 const root = 1
 const standing = 'agent'
-const unaddressed = new Set(['lander', 'side-chat'])
+const roles = new Set(['coordinator', 'side-chat'])
+const freshFor = 30_000
+const freshLimit = 64
 const userInputEvent = {
   name: 'user.input',
   kind: 'event.user.input',
@@ -25,17 +27,22 @@ const userInputEvent = {
   is: (event: { kind?: string } | undefined) => event?.kind === 'event.user.input',
 }
 
+type Conversation = {
+  id: number
+  parentConversationId?: number
+  ownerTaskId?: number
+  label?: string
+  title?: string
+  cwd: string
+  inputAt?: number
+  answerAt?: number
+}
+type Row = { id: number; handle?: string; title?: string; cwd: string; activeAt?: number }
 type Host = {
   home: string
   userHome: string
-  conversations(): Array<{
-    id: number
-    parentConversationId?: number
-    ownerTaskId?: number
-    label?: string
-    title?: string
-    cwd: string
-  }>
+  metadata: unknown
+  conversations(): Conversation[]
   harness(): any
   doc(kind: string): any
   emit(tx: unknown, event: unknown, data: unknown): Promise<void> | void
@@ -43,9 +50,7 @@ type Host = {
   onRelease(callback: () => Promise<void>): void
   onClose(callback: () => Promise<void>): void
 }
-type Connector = ReturnType<typeof keyscribe>
-
-let current: Connector | null = null
+let current: ReturnType<typeof start> | null = null
 
 function post(socketPath: string, path: string, body: string, token: string): Exchange {
   let cancel = () => {}
@@ -101,14 +106,51 @@ function textOf(content: unknown): string {
     .join('\n')
 }
 
-function served(host: Host, config: Config | null): boolean {
+export function served(host: Pick<Host, 'home'>, config: Pick<Config, 'setup'> | null): boolean {
   if (!config?.setup) return false
-  const projects = join(config.setup, 'projects') + '/'
   try {
+    const projects = realpathSync(join(config.setup, 'projects')) + '/'
     return realpathSync(host.home).startsWith(projects)
   } catch {
     return false
   }
+}
+
+export function unlistedReason(c: Pick<Conversation, 'id' | 'label'>): string | undefined {
+  if (c.id === root) return 'Ultimate shows its root context, which has no writable composer.'
+  if (c.label === 'lander') return 'Ultimate shows its lander, which has no writable composer.'
+  return undefined
+}
+
+function row(c: Conversation): Row {
+  const handle = c.label === standing ? c.title : c.label && !roles.has(c.label) ? c.label : undefined
+  const active = Math.max(c.inputAt ?? -1, c.answerAt ?? -1)
+  return { id: c.id, ...(handle ? { handle } : {}), ...(c.title ? { title: c.title } : {}), cwd: c.cwd,
+    ...(active >= 0 ? { activeAt: Math.floor(active / 1000) } : {}) }
+}
+
+export function listing(host: Pick<Host, 'conversations'>, fresh: Conversation[] = []): Row[] {
+  const listed = host.conversations().filter(c => unlistedReason(c) === undefined)
+  const known = new Set(listed.map(c => c.id))
+  return [...listed, ...fresh.filter(c => !known.has(c.id) && unlistedReason(c) === undefined)].map(row)
+}
+
+export function verifiesShown(host: Pick<Host, 'conversations'>, report: PageReport, fresh: Conversation[]): boolean {
+  const shown = report.conversation
+  return report.focused && !report.problem && shown !== null
+    && !host.conversations().some(c => c.id === shown) && !fresh.some(c => c.id === shown)
+}
+
+export async function pageConversation(host: Pick<Host, 'harness' | 'metadata'>, id: number): Promise<Conversation | undefined> {
+  if (!Number.isSafeInteger(id) || id <= root) return undefined
+  const harness = host.harness()
+  const conversation = await harness.conversation(id, context)
+  if (!conversation) return undefined
+  const metadata = await harness.snapshot(host.metadata, id, context)
+  const value = { id, label: metadata?.label, title: metadata?.title, cwd: '' }
+  if (unlistedReason(value) !== undefined) return undefined
+  value.cwd = (await conversation.agent(context)).cwd
+  return value
 }
 
 function start(host: Host, config: Config) {
@@ -118,27 +160,22 @@ function start(host: Host, config: Config) {
   const titled = new Map<number, string | undefined>()
   const summaries = host.doc('ultimate.conversation-summaries')
   const board = host.doc('board')
+  const now = () => Date.now()
+  const fresh = new Map<number, { conversation: Conversation; expires: number }>()
+  const stillFresh = () => [...fresh.values()].filter(value => value.expires > now()).map(value => value.conversation)
+  const rows = () => listing(host, stillFresh())
 
-  const addressable = () =>
-    host
-      .conversations()
-      .filter(
-        (c) =>
-          c.parentConversationId === undefined &&
-          c.ownerTaskId === undefined &&
-          c.id !== root &&
-          !unaddressed.has(c.label ?? '') &&
-          (c.label === undefined || c.label === standing),
-      )
-
-  const list = (): Summary[] =>
-    addressable().map((c) => ({
+  const list = (): Summary[] => {
+    const labels = new Map(host.conversations().map(c => [c.id, c.label]))
+    for (const c of stillFresh()) labels.set(c.id, c.label)
+    return rows().map((c) => ({
       id: c.id,
       title: c.title,
-      named: c.label === standing ? c.title !== undefined : namedByUser(titled.get(c.id), generated.get(c.id)),
+      named: labels.get(c.id) === standing ? c.title !== undefined : namedByUser(titled.get(c.id), generated.get(c.id)),
       cwd: c.cwd,
       busy: busy.has(c.id),
     }))
+  }
 
   async function submit(id: number, text: string, images: Image[], requestId: string): Promise<number> {
     const conversation = await harness.conversation(id as ConversationId, context)
@@ -162,10 +199,11 @@ function start(host: Host, config: Config) {
   }
 
   const connector = keyscribe(
-    { version: '', home: realpathSync(host.home), list, submit },
+    { version: '', home: realpathSync(host.home), list, submit,
+      unavailable: id => unlistedReason(host.conversations().find(c => c.id === id) ?? { id }) ?? `Ultimate shows conversation ${id}, but it is not listed.` },
     {
       pid: process.pid,
-      now: () => Date.now(),
+      now,
       read: (path) => readFile(path, 'utf8'),
       readBase64: async (path) => (await readFile(path)).toString('base64'),
       after: (ms, fn) => {
@@ -263,8 +301,8 @@ function start(host: Host, config: Config) {
     })
 
   void (async () => {
-    for (const c of addressable()) {
-      if (c.label === standing) continue
+    for (const c of host.conversations()) {
+      if (c.label === standing || unlistedReason(c) !== undefined) continue
       const metadata = await harness.snapshot(host.metadata, c.id, context).catch(() => undefined)
       titled.set(c.id, metadata?.title)
       if (!summaries) continue
@@ -275,8 +313,26 @@ function start(host: Host, config: Config) {
     refresh()
   })()
 
+  const rememberFresh = async (id: number) => {
+    const conversation = await pageConversation(host, id).catch(() => undefined)
+    if (!conversation) return
+    for (const [key, value] of fresh) if (value.expires <= now()) fresh.delete(key)
+    if (fresh.size >= freshLimit) fresh.delete(fresh.keys().next().value!)
+    fresh.set(conversation.id, { conversation, expires: now() + freshFor })
+    connector.changed()
+  }
+
   return {
     connector,
+    list: rows,
+    page: async (report: PageReport) => {
+      if (verifiesShown(host, report, stillFresh()) && report.conversation !== null) await rememberFresh(report.conversation)
+      connector.page(report)
+    },
+    started: async (id: string, page: string, result: { sent: boolean; withDraft?: boolean; reason?: string; detail?: string; conversation?: number }) => {
+      if (result.sent && typeof result.conversation === 'number') await rememberFresh(result.conversation)
+      return connector.started(id, page, result)
+    },
     close: () => {
       if (again) clearTimeout(again)
       watchingCommitsForEntriesSubmissionsAndQuestionsWhichPiRecordsWithoutDomainEvents.detach()
@@ -286,39 +342,62 @@ function start(host: Host, config: Config) {
   }
 }
 
-export const userActions = ['page', 'next', 'composed', 'readAloud', 'label']
+export const userActions = ['list', 'page', 'next', 'composed', 'started', 'readAloud', 'label']
 
 function args(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
 export const actions = {
+  async list() {
+    if (!current) throw new Error('The Ultimate connector is not ready.')
+    return current.list()
+  },
   async page(value: unknown) {
-    const { page, focused, conversation, draft } = args(value)
+    const { page, seq, focused, conversation, draft, newConversation, parent, pageConversation, problem } = args(value)
     if (typeof page !== 'string') throw new Error('Expected a page')
-    current?.page({ page, focused: focused === true, conversation: typeof conversation === 'number' ? conversation : null, draft: draft === true } satisfies PageReport)
+    await current?.page({
+      page, focused: focused === true, conversation: typeof conversation === 'number' ? conversation : null, draft: draft === true,
+      ...(typeof seq === 'number' && Number.isFinite(seq) ? { seq } : {}),
+      ...(newConversation === true ? { newConversation: true } : {}),
+      ...(typeof parent === 'number' ? { parent } : {}),
+      ...(typeof pageConversation === 'number' ? { pageConversation } : {}),
+      ...(typeof problem === 'string' ? { problem: problem.slice(0, 300) } : {}),
+    } satisfies PageReport)
     return {}
   },
   async next(value: unknown) {
     const { page } = args(value)
     if (typeof page !== 'string') throw new Error('Expected a page')
-    return { ask: (await current?.nextCompose(page)) ?? null }
+    return { ask: (await current?.connector.nextCompose(page)) ?? null }
   },
   async composed(value: unknown) {
     const { id, page, draft } = args(value)
     if (typeof id !== 'string' || typeof page !== 'string' || typeof draft !== 'string') throw new Error('Expected a request, page and draft')
-    return { sent: (await current?.composed(id, page, draft)) ?? false }
+    return { sent: (await current?.connector.composed(id, page, draft)) ?? false }
+  },
+  async started(value: unknown) {
+    const { id, page, sent, withDraft, reason, detail, conversation } = args(value)
+    if (typeof id !== 'string' || typeof page !== 'string') throw new Error('Expected a request and page')
+    const ok = await current?.started(id, page, {
+      sent: sent === true,
+      ...(withDraft === true ? { withDraft: true } : {}),
+      ...(typeof reason === 'string' ? { reason } : {}),
+      ...(typeof detail === 'string' ? { detail: detail.slice(0, 200) } : {}),
+      ...(typeof conversation === 'number' ? { conversation } : {}),
+    })
+    return { ok: ok ?? false }
   },
   async label(value: unknown) {
     const { conversation } = args(value)
     if (typeof conversation !== 'number') throw new Error('Expected a conversation')
-    return { label: current?.label(conversation) ?? null }
+    return { label: current?.connector.label(conversation) ?? null }
   },
   async readAloud(value: unknown) {
     const { conversation, on } = args(value)
     if (typeof conversation !== 'number') throw new Error('Expected a conversation')
     if (!current) return { message: `${appNameOf(null)} isn’t connected to this project.` }
-    return { message: await current.command(conversation, on !== false) }
+    return { message: await current.connector.command(conversation, on !== false) }
   },
 }
 
@@ -330,10 +409,10 @@ export default (host: Host) => {
   host.onOpen(async () => {
     if (running || !served(host, config) || !config) return
     running = start(host, config)
-    current = running.connector
+    current = running
   })
   const close = async () => {
-    if (running && current === running.connector) current = null
+    if (running && current === running) current = null
     running?.close()
     running = null
   }
@@ -351,7 +430,7 @@ export default (host: Host) => {
         parameters: obj({}),
         replay: 'safe',
         async execute(_args: unknown, api: { conversationId: ConversationId }) {
-          const answer = current ? await current.readAloud(api.conversationId as number) : null
+          const answer = current ? await current.connector.readAloud(api.conversationId as number) : null
           return { output: [{ type: 'text', text: readAloudReply(app, answer) }] }
         },
       } as any),

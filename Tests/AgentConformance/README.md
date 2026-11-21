@@ -20,7 +20,8 @@ a downstream one, point `KEYSCRIBE_APP` at its executable inside the `.app` bund
 1. Checks that the dev build knows every flag the run uses, and stops if it does not. An older build would ignore
    `--config-dir` and `--no-input` and start a second app on your real bridge.
 2. Starts a second KeyScribeDev with its own support folder under `/tmp` and `--no-input`, so it never takes your
-   hotkeys or mouse buttons and only reaches the agent setups enrolled in that folder. Your own KeyScribeDev keeps
+   hotkeys or mouse buttons and only reaches the agent setups enrolled in that folder. Its passive input monitor
+   still detects focus changes during a take. Your own KeyScribeDev keeps
    running.
 3. Gives the agent a scratch configuration folder, a scratch project, and a private tmux server. The agent's login is
    copied into the scratch folder and deleted with it.
@@ -49,6 +50,15 @@ agent in a scratch project folder called `kestrel`, which is the name the exerci
 
 A terminal agent runs in a private tmux server, and the driver answers the screens a fresh setup shows (trust this
 folder, review hooks, an update notice) the way a person would.
+
+## Ultimate page conformance
+
+`make test-ultimate-page` exercises Ultimate in a real Chrome app window, using a real branch made by
+the standing agent's branch tool, an owned subagent, the standing agent, an ordinary conversation and a side chat. Set
+`ULTIMATE_CLONE` to an installed checkout, `ULTIMATE_BIN` to its command and `ULTIMATE_NODE` to its
+supported Node executable. `ULTIMATE_MODEL` selects the model. The run needs another app window for
+the background-reply checks, moves foreground focus, preserves the clipboard, and writes each case's
+result to `conformance.json` in its temporary instance folder. A failed run keeps its scratch folders.
 
 ## Adding an agent
 

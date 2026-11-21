@@ -287,6 +287,8 @@ final class AgentOutput {
 
     static func notReadyLine(_ notReady: AgentHub.HostCopyNotReady) -> String {
         switch notReady {
+        case .unavailable(let reason):
+            "\(reason) \(nothingSent)"
         case .missing(let name):
             "\(name) doesn\u{2019}t have the \(Branding.appName) plugin. \(nothingSent) Agent settings shows how to install it."
         case .notConnected(let name):

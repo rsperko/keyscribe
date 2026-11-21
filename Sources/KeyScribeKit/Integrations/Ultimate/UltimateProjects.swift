@@ -12,12 +12,14 @@ public enum UltimateProjects {
     public struct Conversation: Equatable, Sendable {
         public var id: String
         public var handle: String?
+        public var sidebarTitle: String?
         public var folder: String
         public var activeAt: Int?
 
-        public init(id: String, handle: String? = nil, folder: String, activeAt: Int? = nil) {
+        public init(id: String, handle: String? = nil, sidebarTitle: String? = nil, folder: String, activeAt: Int? = nil) {
             self.id = id
             self.handle = handle
+            self.sidebarTitle = sidebarTitle
             self.folder = folder
             self.activeAt = activeAt
         }
@@ -45,7 +47,7 @@ public enum UltimateProjects {
 
     private static let rootConversation = 1
     private static let standingLabel = "agent"
-    private static let unaddressedLabels: Set<String> = ["lander", "side-chat"]
+    private static let landerLabel = "lander"
 
     private struct Listed: Decodable {
         var id: Int
@@ -59,12 +61,29 @@ public enum UltimateProjects {
     public static func conversations(_ data: Data) -> [Conversation]? {
         guard let listed = try? JSONDecoder().decode([Listed].self, from: data) else { return nil }
         return listed.compactMap { item in
-            guard item.id != rootConversation, !unaddressedLabels.contains(item.label ?? "") else { return nil }
-            let standing = item.label == standingLabel
-            guard standing || item.label == nil else { return nil }
+            guard item.id != rootConversation, item.label != landerLabel else { return nil }
             let latest = [item.inputAt, item.answerAt].compactMap { $0 }.max()
             return Conversation(
-                id: String(item.id), handle: standing ? item.title : nil, folder: item.cwd ?? "", activeAt: latest.map { Int($0 / 1000) })
+                id: String(item.id), handle: item.label == standingLabel ? item.title : nil,
+                sidebarTitle: item.title, folder: item.cwd ?? "", activeAt: latest.map { Int($0 / 1000) })
+        }
+    }
+
+    private struct ConnectorList: Decodable {
+        struct Row: Decodable {
+            var id: Int
+            var handle: String?
+            var title: String?
+            var cwd: String
+            var activeAt: Int?
+        }
+        var result: [Row]
+    }
+
+    public static func listed(_ answer: Data) -> [Conversation]? {
+        guard let list = try? JSONDecoder().decode(ConnectorList.self, from: answer) else { return nil }
+        return list.result.map {
+            Conversation(id: String($0.id), handle: $0.handle, sidebarTitle: $0.title, folder: $0.cwd, activeAt: $0.activeAt)
         }
     }
 

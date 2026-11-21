@@ -24,8 +24,20 @@ public enum AgentStatusQuery: Equatable, Sendable {
             return .check(.name(other, body: ""))
         }
         switch AgentAddress.spokenName(subject, names: names, namesKnown: namesKnown, read: read) {
-        case .none: return words.count - verb.count > AgentRename.nameWords ? nil : .check(.unresolved(spoken: subject, body: ""))
+        case .none:
+            let unresolved = AgentStatusQuery.check(.unresolved(spoken: subject, body: ""))
+            if words.count - verb.count <= AgentRename.nameWords { return unresolved }
+            return begins(subject, oneOf: names + afterVerb) ? unresolved : nil
         case let address: return .check(address)
+        }
+    }
+
+    private static func begins(_ subject: String, oneOf known: [String]) -> Bool {
+        func words(_ text: String) -> [String] { AgentHandles.normalize(text).split(separator: " ").map { AgentHandles.singular(String($0)) } }
+        let said = words(subject)
+        return known.contains { name in
+            let named = words(name)
+            return said.count <= named.count && Array(named.prefix(said.count)) == said
         }
     }
 

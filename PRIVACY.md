@@ -290,19 +290,26 @@ in the same `Application Support` folder:
   If you install KeyScribe's extension in Ultimate, KeyScribe writes it into Ultimate's user folder, and Ultimate
   loads it into every project it runs on your Mac. KeyScribe reads, for each running Ultimate project, the files
   Ultimate keeps in that user folder that say which process serves it and which conversations it has: each
-  conversation's id, folder, label, title and when it last had input or an answer. It keeps the ids, folders and
-  times, and uses the title of a standing agent such as @ultimate as that conversation's name. The extension runs
+  conversation's id, folder, label, title and when it last had input or an answer. While the extension runs, KeyScribe
+  asks it, over that project's local address, for the same list, which also has the subagents the files leave out.
+  It keeps the ids, folders and times, uses the title of a standing agent such as @ultimate, and the name of a
+  subagent, as that conversation's name, and uses the title the sidebar shows as a name after “tell”, “ask” or
+  “check on”. The extension runs
   inside Ultimate and reports to KeyScribe, over the same local connection the connectors use, when a conversation
   starts and finishes a turn, with the reply to that turn and a short fingerprint of the prompt it started with,
   never the prompt itself, and the name you gave a conversation in Ultimate. KeyScribe uses a reply only to read
   aloud the answer to what you dictated or asked to hear, under the same rules as a connector's. When a
   conversation asks you a question, the extension reports the question's text and its options. It submits what you
   dictate, with any image you pasted, as your own message in that conversation. Each open Ultimate page tells the
-  extension whether it has focus, which conversation it shows and whether its message box has text; when you
+  extension whether it has focus, which conversation's message box takes your typing, whether that box has text,
+  and, when it cannot take dictation, why (such as a dialog covering it); when you
   dictate to the conversation in front, the page hands that text to the extension inside Ultimate, which sends it
   with what you said, and it never reaches KeyScribe. KeyScribe
-  keeps which conversation is in front in memory only, and trusts it only while the window that reported it is
-  still the one in front. To show a conversation, KeyScribe asks that project's Ultimate, over its local address,
+  keeps which conversation is in front in memory only. To tell whether that page is the window in front, KeyScribe
+  reads the address of the front window through Accessibility: when an Ultimate page comes to the front, when you
+  dictate with an Ultimate project running, when a reply finishes while a page claims focus, and when you say “open”.
+  It compares only the address's host, port, and conversation number with the project and page report, and never stores
+  or sends it. To show a conversation, KeyScribe asks that project's Ultimate, over its local address,
   to switch its pages to it. While KeyScribe isn't running the extension sends nothing, and for a conversation you
   disconnected it sends nothing but that conversation's identity. Ultimate's own voice features are separate from
   KeyScribe, and what they send is up to Ultimate.

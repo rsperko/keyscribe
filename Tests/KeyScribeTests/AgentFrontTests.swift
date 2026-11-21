@@ -81,6 +81,20 @@ struct AgentFrontTests {
             .showing(tmuxPane: tty)
     }
 
+    @Test func aNonAgentInTheFocusedSplitNamesTheProgramThatHasFocus() async {
+        let facts = Self.tmux(showing: "/dev/ttys006")
+            .add(50, parent: 1, tty: "/dev/ttys006", "/bin/zsh")
+            .add(51, parent: 50, tty: "/dev/ttys006", "/usr/local/bin/dashboard")
+        let reader = front(Front(Self.ghosttyApp), reply: .value("/dev/ttys001"), facts: [facts])
+        #expect(await reader.focusProblem() == "The focused pane runs dashboard.")
+    }
+
+    @Test func anUnconfirmedFocusedSplitDoesNotGuessItsProgram() async {
+        let facts = Self.tmux(showing: "/dev/ttys006").add(51, parent: 1, tty: "/dev/ttys006", "/usr/local/bin/dashboard")
+        let reader = front(Front(Self.ghosttyApp, Self.safari), reply: .value("/dev/ttys001"), facts: [facts])
+        #expect(await reader.focusProblem() == nil)
+    }
+
     @Test func cmuxIsAskedForItsFocusedTerminalAndAnsweredWithThatSurface() async {
         let cmux = FrontApp(bundle: "com.cmuxterm.app", pid: 10, name: "cmux")
         let facts = Facts()

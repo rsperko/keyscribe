@@ -88,7 +88,6 @@ struct BiasBenchmarkTests {
     static func audioURL() throws -> URL {
         let wav = URL(fileURLWithPath: "/tmp/keyscribe-bench.wav")
         if FileManager.default.fileExists(atPath: wav.path) { return wav }
-        let aiff = "/tmp/keyscribe-bench.aiff"
         let passage = """
             I am building a dictation app called KeyScribe on top of FluidBloo. The speech recognition \
             runs entirely on device using Parakeet and WhisperKit. KeyScribe tokenizes sensitive spans \
@@ -98,21 +97,12 @@ struct BiasBenchmarkTests {
             passages. FluidBloo and KeyScribe both handle technical vocabulary like eigenvector \
             decomposition and Bayesian inference without trouble.
             """
-        try shell("/usr/bin/say", ["-o", aiff, passage])
-        try shell("/usr/bin/afconvert", ["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", aiff, wav.path])
+        guard ScriptedTakeCLI.speak(passage, into: wav) else { throw CocoaError(.fileWriteUnknown) }
         return wav
     }
 
     static func duration(of url: URL) throws -> Double {
         let file = try AVAudioFile(forReading: url)
         return Double(file.length) / file.fileFormat.sampleRate
-    }
-
-    static func shell(_ path: String, _ args: [String]) throws {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: path)
-        p.arguments = args
-        try p.run()
-        p.waitUntilExit()
     }
 }

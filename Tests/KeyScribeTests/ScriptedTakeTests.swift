@@ -39,6 +39,39 @@ struct ScriptedTakeTests {
         return url
     }
 
+    private func speechTool(hangsFirst: Bool, always: Bool = false) throws -> (tool: URL, folder: URL) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ks-say-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let marker = folder.appendingPathComponent("hung").path
+        let tool = folder.appendingPathComponent("say")
+        let body = always ? "exec sleep 30" : """
+            if [ -e "\(marker)" ] || [ \(hangsFirst ? 0 : 1) = 1 ]; then printf clip > "$2"; exit 0; fi
+            touch "\(marker)"
+            exec sleep 30
+            """
+        try Data("#!/bin/sh\n\(body)\n".utf8).write(to: tool)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        return (tool, folder)
+    }
+
+    @Test func aSpeechToolThatStallsOnceIsStoppedAndTheClipIsSpokenAgain() throws {
+        let (tool, folder) = try speechTool(hangsFirst: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let clip = folder.appendingPathComponent("take.wav")
+        let started = ContinuousClock.now
+        #expect(ScriptedTakeCLI.speak("hi", into: clip, using: tool, within: 0.5))
+        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(FileManager.default.contents(atPath: clip.path) == Data("clip".utf8))
+    }
+
+    @Test func aSpeechToolThatKeepsStallingFailsWithinItsBound() throws {
+        let (tool, folder) = try speechTool(hangsFirst: true, always: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let started = ContinuousClock.now
+        #expect(!ScriptedTakeCLI.speak("hi", into: folder.appendingPathComponent("take.wav"), using: tool, within: 0.5))
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
     @Test func anArmedCaptureServesACopyOfItsClipForOneTakeAndThenTheMicrophoneAgain() async throws {
         let microphone = Microphone()
         let capture = ScriptedCapture(microphone)
@@ -143,6 +176,18 @@ struct ScriptedTakeTests {
         #expect(result.conversation == nil)
         #expect(result.agent == nil)
         #expect(result.receiptKind == nil)
+    }
+
+    @Test func anAgentCommandSucceedsWithoutAMessageReceipt() async throws {
+        let target = Target()
+        target.receipt = nil
+        target.outcome = .command
+        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1))
+        let result = try await take(runner, ScriptedTakeRequest(id: "command", wav: try wav().path, transcript: "check on docs", mode: nil, caller: getpid(), issued: Date()))
+        #expect(result.ok)
+        #expect(result.problem == nil)
+        #expect(result.conversation == nil)
+        #expect(result.receipt == nil)
     }
 
     @Test func everyReceiptHasAStableKindName() {

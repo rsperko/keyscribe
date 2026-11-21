@@ -16,12 +16,24 @@ export type Ultimate = {
   version: string
   home: string
   list: () => Summary[]
+  unavailable?: (id: number) => string
   submit: (id: number, text: string, images: Image[], requestId: string) => Promise<number>
 }
 export type Waiting = { kind?: string; title?: string; detail?: string }
 export type ReadAloud = boolean | "quiet" | null
-export type PageReport = { page: string; focused: boolean; conversation: number | null; draft: boolean }
-export type ComposeAsk = { id: string; conversation: number; text: string }
+export type PageReport = {
+  page: string
+  seq?: number
+  focused: boolean
+  conversation: number | null
+  draft: boolean
+  newConversation?: boolean
+  parent?: number
+  pageConversation?: number | null
+  problem?: string
+}
+export type ComposeAsk = { id: string; kind?: "start"; conversation: number; text: string }
+export type StartResult = { sent: boolean; withDraft?: boolean; reason?: string; detail?: string }
 export type Config = {
   protocol: number
   socketPath: string
@@ -69,12 +81,13 @@ type Delivery = {
 }
 type Placed = { conversation: number; turn: string; started: boolean }
 type Join = { ask: ComposeAsk; page: string; started: boolean; stop: () => void; draft: (text: string | null) => void; sent?: (ok: boolean) => void }
+type PendingStart = { ask: ComposeAsk; page: string; picked: boolean; stop: () => void; finish: (result: StartResult) => void }
 type Command = {
   op?: unknown; id?: unknown; expectedSession?: unknown; text?: unknown; expiresAt?: unknown; images?: unknown; merge?: unknown; request?: unknown
   expectedPrompts?: unknown
 }
 
-const features = ["readiness", "notify", "images", "check", "steer", "merge", "promptDigest", "shown", "label"]
+const features = ["readiness", "notify", "images", "check", "steer", "merge", "promptDigest", "shown", "label", "start"]
 const labelLimit = 200
 const answerLimit = 8 * 1024
 const eventDeadline = 2000
@@ -164,6 +177,23 @@ function remember<K, V>(map: Map<K, V>, key: K, value: V) {
   }
 }
 
+export type TypingTarget = { kind: "conversation"; id: number } | { kind: "newSideChat"; parent: number } | { kind: "none" }
+
+export function typingTarget(
+  editors: Array<{ id: number; active: boolean; sideMode?: boolean }>, blocked: boolean
+): TypingTarget {
+  if (blocked) return { kind: "none" }
+  const active = editors.filter(editor => editor.active)
+  const chosen = active.length === 1 ? active[0] : editors.length === 1 ? editors[0] : undefined
+  if (!chosen) return { kind: "none" }
+  return chosen.sideMode ? { kind: "newSideChat", parent: chosen.id } : { kind: "conversation", id: chosen.id }
+}
+
+export function typingConversation(editors: Array<{ id: number; active: boolean; sideMode?: boolean }>, blocked: boolean): number | null {
+  const target = typingTarget(editors, blocked)
+  return target.kind === "conversation" ? target.id : null
+}
+
 export function namedByUser(title: string | undefined, generatedTitle: string | undefined): boolean {
   return title !== undefined && title !== generatedTitle
 }
@@ -174,8 +204,12 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   const deliveries = new Map<string, Delivery>()
   const placements = new Map<number, number>()
   const inputs = new Map<number, Placed>()
-  const pages = new Map<string, { conversation: number | null; draft: boolean; focused: boolean; focusedAt: number; seenAt: number }>()
+  const pages = new Map<string, {
+    conversation: number | null; draft: boolean; newConversation: boolean; parent?: number; pageConversation?: string
+    focused: boolean; focusedAt: number; seenAt: number; problem?: string; seq?: number
+  }>()
   const joins = new Map<string, Join>()
+  const starts = new Map<string, PendingStart>()
   const waiters = new Map<string, (ask: ComposeAsk | null) => void>()
   let config: Config | null = null
   let token = ""
@@ -190,8 +224,14 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   let turns = 0
   let wanted: number | null = null
   let wantedDraft = false
+  let wantedNew = false
+  let wantedPage: string | undefined
+  let wantedProblem: string | undefined
   let told: number | null | undefined
   let toldDraft = false
+  let toldNew = false
+  let toldPage: string | undefined
+  let toldProblem: string | undefined
   let telling = false
   let retelling: (() => void) | null = null
   let sweeping: (() => void) | null = null
@@ -249,6 +289,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     retelling?.()
     retelling = null
     for (const join of [...joins.values()]) finishJoin(join.ask.id, false)
+    for (const pending of [...starts.values()]) finishStart(pending.ask.id, { sent: false, reason: "gone" })
     for (const waiter of waiters.values()) waiter(null)
     waiters.clear()
   }
@@ -294,9 +335,10 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       return (!m.helloed || m.resay) && !m.greeting
     })
     const results: Array<"ok" | "failed" | "gone" | number> = []
+    const cwds = new Map(ultimate.list().map((s) => [s.id, s.cwd]))
     let next = 0
     const worker = async () => {
-      while (next < due.length && !stopped) results.push(await greet(due[next++]))
+      while (next < due.length && !stopped) results.push(await greet(due[next++], cwds))
     }
     await Promise.all(Array.from({ length: Math.min(greetingLimit, due.length) }, worker))
     if (!connected || stopped) return
@@ -309,17 +351,19 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     repoll()
   }
 
-  async function greet(id: number): Promise<"ok" | "failed" | "gone" | number> {
+  async function greet(id: number, cwds: Map<number, string>): Promise<"ok" | "failed" | "gone" | number> {
     const m = members.get(id)
     if (!m || !config) return "gone"
     m.greeting = true
     m.resay = false
-    const summary = ultimate.list().find((s) => s.id === id)
+    const greetedPrompts = m.prompts
+    const greetedTitle = m.title
+    const greetedWaiting = JSON.stringify(m.waiting ?? null)
     const response = await post("/event", {
       op: "hello", protocol: config.protocol, agent: "ultimate", agentVersion: ultimate.version, codeVersion: config.version,
       instance: instanceOf(id), session: sessionOf(id), pid: host.pid, features, idle: !m.busy, gap: true, connection,
-      installation: config.installation, cwd: summary?.cwd, prompts: m.prompts,
-      ...(m.title ? { title: m.title } : {}),
+      installation: config.installation, cwd: cwds.get(id), prompts: greetedPrompts,
+      ...(greetedTitle ? { title: greetedTitle } : {}),
       ...(m.waiting ? { waiting: m.waiting } : {}),
       ...(m.turn ? { turn: m.turn.id } : {}),
     }, eventDeadline)
@@ -341,6 +385,22 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     }
     m.helloed = true
     if (!m.quiet) m.unsaid = false
+    if (!m.quiet && m.prompts > greetedPrompts) {
+      const prompts = m.prompts
+      report(id, () => ({ op: "typed", session: sessionOf(id), prompts }))
+    }
+    if (!m.quiet && m.title !== greetedTitle) {
+      const text = m.title ?? ""
+      report(id, () => ({ op: "title", session: sessionOf(id), text }))
+    }
+    if (!m.quiet && JSON.stringify(m.waiting ?? null) !== greetedWaiting) {
+      const now = m.waiting
+      report(id, () => (now ? { op: "waiting", session: sessionOf(id), waiting: now } : { op: "waiting", session: sessionOf(id) }), true)
+    }
+    if (!m.quiet && m.turn?.input) {
+      const turn = m.turn
+      report(id, () => (m.turn === turn && turn.input ? { op: "turnStarted", session: sessionOf(id), turn: turn.id, prompt: turn.input.prompt } : null))
+    }
     return "ok"
   }
 
@@ -391,8 +451,9 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       if (command.op === "status" && typeof command.text === "string") m.label = command.text.slice(0, labelLimit)
       reply(id, { op: "ack", request: command.id })
       if (command.op === "submit") void submit(id, command)
+      else if (command.op === "start") void startFromPage(id, command)
       else if (command.op === "check") check(id, command)
-      else if (command.op === "focus" || command.op === "start") reply(id, { op: "refused", request: command.id, reason: "unsupported" })
+      else if (command.op === "focus") reply(id, { op: "refused", request: command.id, reason: "unsupported" })
     }
     const unknown: string[] = Array.isArray(parsed?.unknown) ? parsed.unknown : []
     for (const [id, m] of members) if (unknown.includes(instanceOf(id)) || readmitted.includes(id)) m.helloed = false
@@ -512,6 +573,27 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     if (entry !== undefined) match(delivery, entry)
   }
 
+  async function startFromPage(id: number, command: Command) {
+    const requestId = command.id as string
+    const text = typeof command.text === "string" ? command.text : ""
+    if (!(host.now() < (typeof command.expiresAt === "number" ? command.expiresAt : 0))) {
+      return reply(id, { op: "refused", request: requestId, reason: "expired" })
+    }
+    const shown = frontPage()
+    if (!shown || !shown.newConversation || shown.parent === undefined) {
+      return reply(id, { op: "refused", request: requestId, reason: "gone" })
+    }
+    if (members.get(shown.parent)?.quiet) {
+      return reply(id, { op: "refused", request: requestId, reason: "disconnected" })
+    }
+    const result = await askStart(shown.page, { id: requestId, kind: "start", conversation: shown.parent, text })
+    if (result.sent) {
+      changed()
+      return reply(id, { op: "submitted", request: requestId, turn: "", ...(result.withDraft ? { withDraft: true } : {}) })
+    }
+    reply(id, { op: "refused", request: requestId, reason: result.reason ?? "failed", ...(result.detail ? { detail: result.detail } : {}) })
+  }
+
   function check(id: number, command: Command) {
     const request = typeof command.request === "string" ? command.request : ""
     const delivery = deliveries.get(request)
@@ -552,7 +634,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     match(delivery, entry)
   }
 
-  function startTurn(id: number, m: Member): Turn {
+  function startTurn(id: number, m: Member, prompt?: string): Turn {
     m.busy = true
     if (m.turn) return m.turn
     const turn: Turn = { id: newTurn() }
@@ -560,17 +642,19 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     m.answer = ""
     m.answered = false
     m.failed = null
-    report(id, () => ({ op: "turnStarted", session: sessionOf(id), turn: turn.id }))
+    report(id, () => ({ op: "turnStarted", session: sessionOf(id), turn: turn.id, ...(prompt ? { prompt } : {}) }))
     return turn
   }
 
   function input(id: number, entry: number, kind: string, text: string) {
+    if (!members.has(id)) changed()
     const m = members.get(id)
     if (!m) return
     if (m.turn && m.answered) endTurn(id, m)
     const started = m.turn === null
-    const turn = startTurn(id, m)
-    turn.input = { entry, prompt: promptDigest(text), ...(kind === userInput ? {} : { from: "agent" }) }
+    const prompt = promptDigest(text)
+    const turn = startTurn(id, m, prompt)
+    turn.input = { entry, prompt, ...(kind === userInput ? {} : { from: "agent" }) }
     remember(inputs, entry, { conversation: id, turn: turn.id, started })
     const delivery = [...deliveries.values()].find((d) => d.conversation === id && (d.entry === entry || (d.submission !== null && placements.get(d.submission) === entry)))
     if (delivery) return match(delivery, entry)
@@ -690,10 +774,15 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     return commandAnswer(appNameOf(config), !on, await readAloud(id, on), running)
   }
 
-  function frontPage(): { page: string; conversation: number | null; draft: boolean } | null {
+  function frontPage(): {
+    page: string; conversation: number | null; draft: boolean; newConversation: boolean; parent?: number; pageConversation?: string; problem?: string
+  } | null {
     const now = host.now()
     for (const [page, p] of pages) if (now - p.seenAt > pageSilence) pages.delete(page)
-    let best: { page: string; conversation: number | null; draft: boolean; focusedAt: number } | null = null
+    let best: {
+      page: string; conversation: number | null; draft: boolean; newConversation: boolean; parent?: number; pageConversation?: string
+      focusedAt: number; problem?: string
+    } | null = null
     for (const [page, p] of pages) if (p.focused && p.focusedAt > 0 && (!best || p.focusedAt > best.focusedAt)) best = { page, ...p }
     return best
   }
@@ -710,24 +799,41 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
 
   function tell() {
     if (!connected || stopped || telling || !config) return
-    const target = reachable(wanted) ? wanted : null
-    const draft = target !== null && wantedDraft
-    if (told !== undefined && told === target && toldDraft === draft) return
+    const target = !wantedProblem && !wantedNew && reachable(wanted) ? wanted : null
+    const newConversation = !wantedProblem && wantedNew
+    const draft = (target !== null || newConversation) && wantedDraft
+    const problem = !wantedNew && wanted !== null && !reachable(wanted)
+      ? ultimate.unavailable?.(wanted) ?? `Ultimate shows conversation ${wanted}, but it is not listed.` : wantedProblem
+    const pageConversation = target !== null || newConversation || problem ? wantedPage : undefined
+    if (told !== undefined && told === target && toldDraft === draft && toldNew === newConversation
+      && toldPage === pageConversation && toldProblem === problem) return
     const via = target ?? (reachable(told) ? told : [...members.keys()].find(reachable))
     if (via === undefined || via === null) {
       told = target
       toldDraft = draft
+      toldNew = newConversation
+      toldPage = pageConversation
+      toldProblem = problem
       return
     }
     telling = true
     retelling?.()
     retelling = null
-    const body = { op: "shown", session: sessionOf(via), on: target !== null, draft, instance: instanceOf(via), connection }
+    const body = {
+      op: "shown",
+      ...(problem ? { problem } : {}),
+      ...(newConversation ? { newConversation: true } : {}),
+      ...(pageConversation ? { pageConversation } : {}),
+      session: sessionOf(via), on: target !== null, draft, instance: instanceOf(via), connection,
+    }
     void post("/event", body, eventDeadline).then((response) => {
       telling = false
       if (response?.ok) {
         told = target
         toldDraft = draft
+        toldNew = newConversation
+        toldPage = pageConversation
+        toldProblem = problem
         return tell()
       }
       if (response?.status === 409 && members.get(via)) {
@@ -742,6 +848,9 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     const shown = frontPage()
     wanted = shown?.conversation ?? null
     wantedDraft = shown?.draft ?? false
+    wantedNew = shown?.newConversation ?? false
+    wantedPage = shown?.pageConversation
+    wantedProblem = shown?.problem
     tell()
     if (pages.size && !sweeping && !stopped) {
       sweeping = host.after(pageSweep, () => {
@@ -754,15 +863,62 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   function page(report: PageReport) {
     if (stopped || typeof report?.page !== "string") return
     const known = pages.get(report.page)
+    if (typeof report.seq === "number" && known?.seq !== undefined && report.seq < known.seq) return
+    if (typeof report.conversation === "number" && !members.has(report.conversation)) changed()
     const focused = report.focused === true
+    const conversation = typeof report.conversation === "number" ? report.conversation : null
+    const draft = report.draft === true
+    const newConversation = report.newConversation === true
+    const parent = typeof report.parent === "number" ? report.parent : undefined
+    const pageConversation = typeof report.pageConversation === "number" ? String(report.pageConversation) : undefined
+    const stateChanged = !known || !known.focused || known.conversation !== conversation || known.draft !== draft
+      || known.newConversation !== newConversation || known.parent !== parent || known.pageConversation !== pageConversation
+      || known.problem !== report.problem
     pages.set(report.page, {
-      conversation: typeof report.conversation === "number" ? report.conversation : null,
-      draft: report.draft === true,
+      conversation,
+      draft,
+      newConversation,
+      parent,
+      pageConversation,
       focused,
-      focusedAt: !focused ? 0 : known?.focused ? known.focusedAt : ++focusings,
+      focusedAt: !focused ? 0 : stateChanged ? ++focusings : known.focusedAt,
       seenAt: host.now(),
+      problem: report.problem,
+      seq: typeof report.seq === "number" ? report.seq : known?.seq,
     })
     settleFront()
+  }
+
+  function askStart(page: string, ask: ComposeAsk): Promise<StartResult> {
+    return new Promise((resolve) => {
+      const pending: PendingStart = {
+        ask, page, picked: false, stop: () => {},
+        finish: (result) => { pending.finish = () => {}; resolve(result) },
+      }
+      pending.stop = host.after(composeDeadline, () => finishStart(ask.id, { sent: false, reason: "gone" }))
+      starts.set(ask.id, pending)
+      const waiter = waiters.get(page)
+      if (waiter) {
+        waiters.delete(page)
+        pending.picked = true
+        waiter(ask)
+      }
+    })
+  }
+
+  function finishStart(id: string, result: StartResult) {
+    const pending = starts.get(id)
+    if (!pending) return
+    starts.delete(id)
+    pending.stop()
+    pending.finish(result)
+  }
+
+  function started(id: string, page: string, result: StartResult): boolean {
+    const pending = starts.get(id)
+    if (!pending || pending.page !== page) return false
+    finishStart(id, result)
+    return true
   }
 
   function compose(page: string, ask: ComposeAsk): Promise<string | null> {
@@ -790,6 +946,10 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   function nextCompose(page: string): Promise<ComposeAsk | null> {
     if (stopped) return Promise.resolve(null)
     for (const join of joins.values()) if (join.page === page && !join.started) return Promise.resolve(join.ask)
+    for (const pending of starts.values()) if (pending.page === page && !pending.picked) {
+      pending.picked = true
+      return Promise.resolve(pending.ask)
+    }
     waiters.get(page)?.(null)
     return new Promise((resolve) => {
       const clear = host.after(composeWait, () => {
@@ -830,6 +990,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     page,
     nextCompose,
     composed,
+    started,
     readAloud,
     command,
     label: (id: number) => (connected && reachable(id) ? members.get(id)?.label ?? null : null),

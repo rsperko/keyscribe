@@ -428,6 +428,14 @@ struct AgentBridgeCodecTests {
         #expect(try AgentBridgeCodec.decodeEvent(Data(plain.utf8)) == .shown(session: "t1", on: true))
     }
 
+    @Test func aPageReportKeepsItsFocusProblemAndPageConversationThroughDecodingAndHostRenaming() throws {
+        let wire = Data(#"{"op":"shown","session":"61@/u/project","on":false,"problem":"A dialog covers the composer.","pageConversation":"48"}"#.utf8)
+        let event = try AgentBridgeCodec.decodeEvent(wire)
+        #expect(event == .shown(session: "61@/u/project", on: false, problem: "A dialog covers the composer.", pageConversation: "48"))
+        #expect(event.renamingSession { "ultimate:" + $0 }
+                == .shown(session: "ultimate:61@/u/project", on: false, problem: "A dialog covers the composer.", pageConversation: "48"))
+    }
+
     @Test func aWindowShowingNoThreadSaysWhetherItShowsABoxThatStartsAConversation() throws {
         let starts = #"{"op":"shown","session":"t1","on":false,"newConversation":true}"#
         #expect(try AgentBridgeCodec.decodeEvent(Data(starts.utf8)) == .shown(session: "t1", on: false, newConversation: true))
