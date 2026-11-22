@@ -225,6 +225,38 @@ test("a message that arrives while the agent is still working, or after a failed
   }
 })
 
+test("a note Ultimate itself adds to a dictated turn never replaces the dictation the reply answers", async () => {
+  for (const kind of ["subagents.report", "watchdog.failure", "side-chat.summary"]) {
+    const h = harness()
+    await h.connect()
+    h.connector.input(61, 930, "pi.user", "check the build")
+    h.connector.replied(61, "Waiting on the worker.", "toolUse")
+    h.connector.input(61, 931, kind, "The worker finished.")
+    h.connector.replied(61, "The build passes.", "stop")
+    h.state.conversations[1].busy = true
+    h.connector.changed()
+    h.state.conversations[1].busy = false
+    h.connector.changed()
+    await h.flush()
+    assert.deepEqual(h.events("turnComplete").map((c) => [c.answer, c.from, c.prompt]), [["The build passes.", undefined, promptDigest("check the build")]], kind)
+  }
+})
+
+test("a turn Ultimate started with its own note reads as someone else's, and one an automation started as scheduled", async () => {
+  for (const [kind, from] of [["subagents.report", "other"], ["automations.fired", "schedule"], ["board.delivered", "agent"]]) {
+    const h = harness()
+    await h.connect()
+    h.connector.input(61, 940, kind, "Something arrived.")
+    h.connector.replied(61, "Handled.", "stop")
+    h.state.conversations[1].busy = true
+    h.connector.changed()
+    h.state.conversations[1].busy = false
+    h.connector.changed()
+    await h.flush()
+    assert.deepEqual(h.events("turnComplete").map((c) => c.from), [from], kind)
+  }
+})
+
 test("a turn another agent started says so, and a failed turn reports no reply", async () => {
   const h = harness()
   await h.connect()

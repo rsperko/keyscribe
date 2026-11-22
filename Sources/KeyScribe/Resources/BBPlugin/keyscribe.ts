@@ -31,7 +31,7 @@ export type ComposeAsk = { id: string; window: string; thread: string | null; te
 export type ComposeAnswer = { id: string } & Composed
 export type Waiting = { kind?: string; title?: string; tool?: string; detail?: string }
 export type ReadAloud = boolean | "quiet" | null
-export type Accepted = { said: string; at: number }
+export type Accepted = { said: string; at: number; host?: true }
 
 type Config = { protocol: number; socketPath: string; tokenPath: string; readyPath: string; installation: string; instance: string; version?: string; appName?: string }
 type Member = {
@@ -376,8 +376,9 @@ export function acceptedInEndedTurn(rows: unknown, failed: boolean, since: numbe
   for (const e of events) {
     if (e.type !== "client/turn/requested" || typeof e.data?.requestId !== "string" || typeof e.createdAt !== "number") continue
     const said = text(e.data.input) ?? ""
-    const first = typeof e.data.retryOf?.requestId === "string" ? asked.get(e.data.retryOf.requestId) : undefined
-    asked.set(e.data.requestId, { said, at: first?.at ?? e.createdAt })
+    const first = typeof e.data.retryOfRequestId === "string" ? asked.get(e.data.retryOfRequestId) : undefined
+    const at = first?.at ?? e.createdAt
+    asked.set(e.data.requestId, e.data.initiator === "system" ? { said, at, host: true } : { said, at })
   }
   const taken = events
     .filter((e) => e.type === "turn/input/accepted" && e.scope?.turnId === turn)
@@ -893,12 +894,14 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     queued.delete(entry.id)
     const m = members.get(entry.threadId)
     if (!m) return
-    const said = entry.initiator === "system" ? null : text(entry.content)
+    const own = entry.initiator === "system"
+    const said = own ? null : text(entry.content)
     const from = senderOf(entry.initiator)
     if (m.turn === null) {
-      m.next = { said, from }
+      if (!own || m.next === undefined) m.next = { said, from }
       return
     }
+    if (own && m.input?.turn === m.turn) return
     m.input = { turn: m.turn, from, prompt: said === null ? undefined : digestFor(entry.threadId, said) }
   })
   bb.on("thread.active", ({ thread }) => {
@@ -1010,7 +1013,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
       if (input) m.input = null
       const body = { op: "turnComplete", session: sessionOf(thread.id), reason, answer: spokenMentions(answer, (thread) => names.get(thread) ?? null).slice(0, answerLimit), from: input?.from, prompt: input?.prompt }
       const accepted = await record
-      return accepted === null ? body : { ...body, accepted: accepted.map(({ said, at }) => ({ digest: digestFor(thread.id, said), at })) }
+      return accepted === null ? body : { ...body, accepted: accepted.map(({ said, at, host }) => ({ digest: digestFor(thread.id, said), at, ...(host ? { host } : {}) })) }
     })
   }
   bb.on("thread.idle", ({ thread, lastAssistantText }) => ended(thread, "complete", typeof lastAssistantText === "string" ? lastAssistantText : ""))

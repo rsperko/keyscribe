@@ -81,4 +81,77 @@ struct CodexPluginTests {
         #expect(CodexPlugin.installed(Data(#"{"installed":[],"available":[]}"#.utf8), pluginId: id, path: "/x") == .absent)
         #expect(CodexPlugin.installed(Data("{}".utf8), pluginId: id, path: "/x") == nil)
     }
+
+    @Test func uninstallingForgetsOnlyThePluginsHookTrust() {
+        let config = """
+            model = "gpt-6-luna"
+
+            [plugins."keyscribe-dev@keyscribe-dev-local"]
+            enabled = true
+
+            [hooks.state]
+
+            [hooks.state."keyscribe-dev@keyscribe-dev-local:plugin.json#hooks[0]:stop:0:0"]
+            trusted_hash = "sha256:aaa"
+
+            [hooks.state."/w/.codex/hooks.json:stop:0:0"]
+            trusted_hash = "sha256:bbb"
+
+            [hooks.state."keyscribe-dev@keyscribe-dev-local:plugin.json#hooks[0]:interrupt:0:0"]
+            trusted_hash = "sha256:ccc"
+            [tui]
+            terminal_title = ["thread-id"]
+            """
+        let forgotten = CodexPlugin.forgettingTrust(in: config, pluginId: "keyscribe-dev@keyscribe-dev-local")
+        #expect(!forgotten.contains("keyscribe-dev@keyscribe-dev-local:"))
+        #expect(!forgotten.contains("sha256:aaa") && !forgotten.contains("sha256:ccc"))
+        #expect(forgotten.contains("[hooks.state.\"/w/.codex/hooks.json:stop:0:0\"]\ntrusted_hash = \"sha256:bbb\""))
+        #expect(forgotten.contains("[plugins.\"keyscribe-dev@keyscribe-dev-local\"]"))
+        #expect(forgotten.contains("[tui]\nterminal_title = [\"thread-id\"]"))
+        #expect(CodexPlugin.forgettingTrust(in: forgotten, pluginId: "keyscribe-dev@keyscribe-dev-local") == forgotten)
+        #expect(CodexPlugin.forgettingTrust(in: "model = \"x\"\n", pluginId: "keyscribe-dev@keyscribe-dev-local") == "model = \"x\"\n")
+        let trailing = "model = \"x\"\n[hooks.state.\"keyscribe-dev@keyscribe-dev-local:plugin.json#hooks[0]:stop:0:0\"]\ntrusted_hash = \"sha256:a\"\n"
+        #expect(CodexPlugin.forgettingTrust(in: trailing, pluginId: "keyscribe-dev@keyscribe-dev-local") == "model = \"x\"\n")
+    }
+
+    @Test func trustTextInsideAStringIsNeverTakenForATable() {
+        let config = #"""
+            developer_instructions = """
+            Trust looks like this:
+            [hooks.state."keyscribe-dev@keyscribe-dev-local:plugin.json#hooks[0]:stop:0:0"]
+            trusted_hash = "sha256:example"
+            """
+            model = "gpt-6-luna"
+
+            [ hooks . state . "keyscribe-dev@keyscribe-dev-local:plugin.json#hooks[0]:stop:0:0" ]
+            trusted_hash = "sha256:aaa"
+
+            [hooks.state.'keyscribe-dev@keyscribe-dev-local:plugin.json#hooks[0]:interrupt:0:0']
+            trusted_hash = "sha256:ccc"
+
+            # the table below is the user's own
+            [tui]
+            terminal_title = ["thread-id"]
+
+            """#
+        let forgotten = CodexPlugin.forgettingTrust(in: config, pluginId: "keyscribe-dev@keyscribe-dev-local")
+        #expect(forgotten == #"""
+            developer_instructions = """
+            Trust looks like this:
+            [hooks.state."keyscribe-dev@keyscribe-dev-local:plugin.json#hooks[0]:stop:0:0"]
+            trusted_hash = "sha256:example"
+            """
+            model = "gpt-6-luna"
+
+            # the table below is the user's own
+            [tui]
+            terminal_title = ["thread-id"]
+
+            """#)
+    }
+
+    @Test func aConfigTheScannerCannotReadIsLeftAsItIs() {
+        let config = "a = { b = [1, 2\n[hooks.state.\"keyscribe-dev@keyscribe-dev-local:plugin.json#hooks[0]:stop:0:0\"]\ntrusted_hash = \"x\"\n"
+        #expect(CodexPlugin.forgettingTrust(in: config, pluginId: "keyscribe-dev@keyscribe-dev-local") == config)
+    }
 }

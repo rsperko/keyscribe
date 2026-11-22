@@ -30,8 +30,10 @@ export async function ultimateMessages(read: (before: number) => Promise<History
     if (/user/i.test(kind) && entry.input) {
       turn = String(entry.id)
       messages.push({ role: "user", text, turn })
-    } else if (/assistant/i.test(kind) && text) {
-      messages.push({ role: "agent", text, turn })
+    } else if (/assistant/i.test(kind)) {
+      if (text) messages.push({ role: "agent", text, turn })
+      const stop = (Array.isArray(entry.model) ? entry.model : [entry.model]).at(-1)?.stopReason
+      if (stop && stop !== "toolUse") messages.push({ role: "ended", text: "", turn })
     }
   }
   return messages

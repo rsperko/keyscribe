@@ -96,7 +96,7 @@ struct DeadlineQueueTests {
         let steps = Counter()
         let call = Task {
             await queue.run(within: 5) { isCurrent in
-                for _ in 0..<100 {
+                for _ in 0..<1000 {
                     guard isCurrent() else { break }
                     steps.bump()
                     Thread.sleep(forTimeInterval: 0.01)
@@ -112,8 +112,9 @@ struct DeadlineQueueTests {
             return
         }
         #expect(Date().timeIntervalSince(cancelledAt) < 0.5)
+        let atCancel = steps.count
         _ = await queue.run(within: 1) { 0 }
-        #expect(steps.count < 100)
+        #expect(steps.count <= atCancel + 1)
     }
 
     @Test func aCallerCancelledBeforeItStartsNeverRunsTheWork() async {

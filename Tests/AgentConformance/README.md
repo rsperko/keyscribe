@@ -93,11 +93,26 @@ agent in a scratch project folder called `kestrel`, which is the name the exerci
 | Pi | `auth.json` and `models.json` copied from `~/.pi/agent` (or `PI_LOGIN_HOME`), plus your default model | `PI_MODEL`, `PI_BIN` |
 | omp | `config.yml`, `models.yml` and a backup of `agent.db` from `~/.omp/agent` (or `PI_LOGIN_HOME`) | `OMP_BIN` |
 | Codex | `auth.json` copied from `~/.codex` (or `CODEX_AUTH_HOME`) | `CODEX_MODEL`, `CODEX_BIN` |
-| bb | a second copy of `bb.app` started on a scratch data folder and its own port; its threads use bb's provider logins | `BB_APP` |
+| bb | a second copy of `bb.app` (`BB_APP`), cloned into the scratch folder so it runs from a location of its own as a separate copy of bb does, and started on a scratch data folder, its own ports and its own Electron profile (bb runs one copy per profile, so without one it quits at once beside yours). The driver marks bb's first-run setup guide done, as for a scratch Ultimate home, since the guide covers the window. The run stops it with SIGKILL, never a quit, and keeps killing every process whose arguments or environment name its scratch folder until none is left, because a packaged bb installs a downloaded update into its app when it quits, and that app is yours; its threads run on Codex with a copy of your Codex login (`CODEX_AUTH_HOME`) in a scratch `CODEX_HOME`, and its Pi folder is scratch too, so nothing the scratch copy runs is recorded in your own Codex or omp history | `BB_MODEL` (default `gpt-6-luna`), `BB_APP` |
 | Ultimate | your Pi login, which Ultimate shares | `ULTIMATE_MODEL`, `ULTIMATE_BIN` |
 
 A terminal agent runs in a private tmux server, and the driver answers the screens a fresh setup shows (trust this
 folder, review hooks, an update notice) the way a person would.
+
+A driver whose agent has an app window of its own offers `window`: show its conversation there, report whether a
+focused window shows it and what its message box holds, and add text to that box. The exercises for the conversation
+in front, open and draft joining run only against such a driver, move focus between its window and another app's
+window (so the run needs one open), and never type into a window. bb's driver installs a test-only plugin,
+`bb-window/`, into its scratch copy of bb for this: `bb thread open` shows the thread, and the plugin answers through
+`bb plugin rpc call` from inside bb's own window, using bb's composer API to fill the box. It is never installed
+anywhere else. A driver whose agent's app can add its own note to a running turn (bb's notice that a child thread
+finished) offers `noteFromHost`, which R7 uses. One whose app can be
+made unreachable offers `server` to stop and start it (bb: its server is killed, then the scratch copy is started
+again on the same folder and ports). bb's scratch threads run on a small model at a low reasoning level, since every exercise asks
+for one short reply.
+
+Exercises that copy something set the clipboard through the context (`clipboard.set`) inside `clipboard.keep`, which
+saves your clipboard first and restores it afterwards, through `clipboard.swift`.
 
 ## Ultimate page conformance
 
@@ -112,7 +127,8 @@ result to `conformance.json` in its temporary instance folder. A failed run keep
 
 Write a driver in `lib/` that implements `AgentDriver` (`lib/driver.ts`): set up a scratch folder, start the agent the
 way people normally start it, name its conversation, report when it is idle, and read its messages from the agent's
-own record. Register it in `run.ts`. Every exercise then runs against it; an exercise for something the agent cannot
+own record, including where the agent's record says each turn ended (an `ended` message), never inferred from
+what a reply says. Register it in `run.ts`. Every exercise then runs against it; an exercise for something the agent cannot
 do should check that the user is told so, not be skipped.
 
 ## Adding an exercise
@@ -120,4 +136,6 @@ do should check that the user is told so, not be skipped.
 Add it to `exercises.ts` with an id from its family (D delivery, I images, R replies, N names,
 P discovery, C connection, L install, S safety). Assert what the agent recorded. An exercise for something only some
 agents' conversations have, such as an address of their own in their app (a driver's `addresses`), sets `applies`
-and reports N/A for the others; anything a user could ask of every agent still runs against every agent.
+and reports N/A for the others; anything a user could ask of every agent still runs against every agent. An exercise
+that needs a driver capability (`window`, `noteFromHost`, `server`) sets `applies` the same way, and `exercises.test.ts` gives
+its fake agent every capability, so each exercise's own logic is checked without an agent.

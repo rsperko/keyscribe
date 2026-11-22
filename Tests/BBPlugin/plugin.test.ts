@@ -376,7 +376,7 @@ test("a turn bb took a message into that its record cannot place gives no list r
   const row = (seq: number, createdAt: unknown, type: string, scope: object, data: object) => ({ seq, createdAt, type, scope, data })
   const asked = (seq: number, at: unknown, requestId: string, said: string, retryOf?: string) =>
     row(seq, at, "client/turn/requested", { kind: "thread" },
-      { requestId, input: [{ type: "text", text: said, mentions: [] }], ...(retryOf ? { retryOf: { requestId: retryOf, attempt: 1 } } : {}) })
+      { requestId, input: [{ type: "text", text: said, mentions: [] }], ...(retryOf ? { retryOfRequestId: retryOf, retryAttempt: 2 } : {}) })
   const took = (seq: number, at: number, turnId: string, clientRequestId: string) =>
     row(seq, at, "turn/input/accepted", { kind: "turn", turnId }, { clientRequestId })
   const turn = (accepted: object[]) => [
@@ -399,6 +399,40 @@ test("a turn bb took a message into that its record cannot place gives no list r
   assert.deepEqual(
     acceptedInEndedTurn(turn([took(20, 8_000, "t1", "creq_retry"), asked(15, 7_000, "creq_retry", "one", "creq_one"), asked(5, 1_000, "creq_one", "one")]), false, null),
     [{ said: "one", at: 1_000 }])
+})
+
+test("a note bb itself wrote into a turn is listed as bb's own, after the dictation it followed", () => {
+  const row = (seq: number, createdAt: number, type: string, scope: object, data: object) => ({ seq, createdAt, type, scope, data })
+  const asked = (seq: number, at: number, requestId: string, said: string, initiator: string) =>
+    row(seq, at, "client/turn/requested", { kind: "thread" }, { requestId, initiator, input: [{ type: "text", text: said, mentions: [] }] })
+  const took = (seq: number, at: number, clientRequestId: string) => row(seq, at, "turn/input/accepted", { kind: "turn", turnId: "t1" }, { clientRequestId })
+  const rows = [
+    row(90, 9_000, "turn/completed", { kind: "turn", turnId: "t1" }, { status: "completed" }),
+    took(31, 3_000, "creq_note"),
+    asked(30, 3_000, "creq_note", "[bb system]\n\n@thread:thr_child completed", "system"),
+    took(21, 2_000, "creq_said"),
+    asked(20, 2_000, "creq_said", "name three fruits", "user"),
+    row(10, 2_000, "turn/started", { kind: "turn", turnId: "t1" }, {}),
+  ]
+  assert.deepEqual(acceptedInEndedTurn(rows, false, null), [
+    { said: "name three fruits", at: 2_000 },
+    { said: "[bb system]\n\n@thread:thr_child completed", at: 3_000, host: true },
+  ])
+})
+
+test("a note bb itself adds to a turn that took a dictation never replaces the dictation the turn answers", async () => {
+  const h = await connected({ inputs: { thr_a: [] } })
+  h.bb.turnInputs = async () => [{ said: "name three fruits", at: 5_000 }, { said: "[bb system] child completed", at: 5_100, host: true }]
+  await h.emit("message.dispatched", { entry: { id: "q1", threadId: "thr_a", initiator: "user", content: [{ type: "text", text: "name three fruits" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.emit("message.dispatched", { entry: { id: "s1", threadId: "thr_a", initiator: "system", content: [{ type: "text", text: "[bb system] child completed" }] } })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "Apple. Mango. Pear." })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => [b.from, b.prompt, b.accepted]), [[undefined, promptDigest("name three fruits"), [
+    { digest: promptDigest("name three fruits"), at: 5_000 },
+    { digest: promptDigest("[bb system] child completed"), at: 5_100, host: true },
+  ]]])
 })
 
 test("a failed turn's record is asked for as a failed turn, and the record is asked for when the turn ends, before earlier reports land", async () => {

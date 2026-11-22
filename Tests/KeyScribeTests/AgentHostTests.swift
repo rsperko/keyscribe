@@ -212,7 +212,7 @@ struct AgentHostTests {
         return AgentHub(
             transport: transport, discovery: [claude], names: names, focus: focus, front: front,
             receiptTimeout: receiptTimeout, handOffLimit: handOffLimit, scanDeadline: .seconds(30), places: places,
-            hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostAllowed: allowed, hostDeadline: hostDeadline,
+            hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostAllowed: allowed, hostDeadline: hostDeadline, hostOpenDeadline: hostDeadline,
             hostConfirmDelay: hostConfirmDelay, heldLimit: heldLimit,
             processEnvironment: { pid, keys in (environments[pid] ?? [:]).filter { keys.contains($0.key) } },
             processParent: { parents[$0] }, now: now,
@@ -344,7 +344,12 @@ struct AgentHostTests {
         #expect(await hub.open(Self.id("t1")) == .none)
         host.opening = .unsupported
         #expect(await hub.open(Self.id("t1")) == .none)
+        host.opening = .refused("Example has no window open to show this thread.")
+        #expect(await hub.open(Self.id("t1")) == .refused("Example has no window open to show this thread."))
+        #expect(await hub.open(Self.id("t1"), stillWanted: { false }) == .none)
         #expect(focus.focused.isEmpty)
+        let result = AgentFocusResult.refused("Example has no window open to show this thread.")
+        #expect(result.historySummary(handle: "docs") == "Couldn\u{2019}t open docs. Example has no window open to show this thread.")
     }
 
     @Test func openAskedAfterItIsNoLongerWantedNeverReachesTheHost() async {
@@ -3563,7 +3568,7 @@ struct AgentHostTests {
         host.hangs = true
         let started = ContinuousClock.now
         #expect(await hub.deliver("fix the test", to: Self.id("t1")) == .uncertain("docs"))
-        #expect(await hub.open(Self.id("t1")) == .none)
+        #expect(await hub.open(Self.id("t1")) == .refused("Example didn\u{2019}t answer in time."))
         #expect(await hub.sessionInFront() == nil)
         #expect(ContinuousClock.now - started < .seconds(10))
         #expect(host.delivered.count == 1)

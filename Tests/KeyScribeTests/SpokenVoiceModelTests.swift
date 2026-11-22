@@ -71,8 +71,9 @@ struct SpokenVoiceModelTests {
         }
     }
 
-    private func settled() async {
+    private func settled(until done: () -> Bool = { true }) async {
         for _ in 0..<200 { await Task.yield() }
+        for _ in 0..<500 where !done() { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     @Test func anInstalledVoiceStartsReadyAndAMissingOneOffersTheDownload() {
@@ -100,7 +101,7 @@ struct SpokenVoiceModelTests {
         installer.synthesisFails = true
         installer.isIntact = false
         speech.speak("All done.", voice: nil)
-        await settled()
+        await settled { model.status == .needsAttention }
         #expect(model.status == .needsAttention)
         #expect(model.error == "Some of this voice\u{2019}s files are missing. Reinstall it.")
     }
@@ -111,7 +112,7 @@ struct SpokenVoiceModelTests {
         let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
         installer.synthesisFails = true
         speech.speak("All done.", voice: nil)
-        await settled()
+        await settled { model.status == .ready }
         #expect(model.status == .ready)
     }
 
@@ -121,13 +122,13 @@ struct SpokenVoiceModelTests {
         let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
         installer.synthesisFails = true
         speech.speak("All done.", voice: nil)
-        await settled()
+        await settled { model.fellBack }
         #expect(model.status == .ready)
         #expect(model.fellBack)
         #expect(model.fallbackReason == "the natural voice failed")
         installer.synthesisFails = false
         speech.speak("All done.", voice: nil)
-        await settled()
+        await settled { !model.fellBack }
         #expect(!model.fellBack)
         #expect(model.fallbackReason == nil)
     }
@@ -137,10 +138,10 @@ struct SpokenVoiceModelTests {
         installer.holds = true
         let model = SpokenVoiceModel(installer: installer)
         model.download()
-        await settled()
+        await settled { model.status == .downloading(phase: "Downloading voice\u{2026}", fraction: 0.4) }
         #expect(model.status == .downloading(phase: "Downloading voice\u{2026}", fraction: 0.4))
         installer.release()
-        await settled()
+        await settled { model.status == .ready }
         #expect(model.status == .ready)
         #expect(installer.isInstalled)
         #expect(model.error == nil)
@@ -155,7 +156,7 @@ struct SpokenVoiceModelTests {
         model.download()
         await settled()
         installer.release()
-        await settled()
+        await settled { installer.downloads == 1 }
         #expect(installer.downloads == 1)
     }
 
@@ -164,7 +165,7 @@ struct SpokenVoiceModelTests {
         installer.downloadFails = true
         let model = SpokenVoiceModel(installer: installer)
         model.download()
-        await settled()
+        await settled { model.status == .notInstalled }
         #expect(model.status == .notInstalled)
         #expect(installer.removals == 1)
         #expect(model.error != nil)
@@ -176,7 +177,7 @@ struct SpokenVoiceModelTests {
         installer.verifies = false
         let model = SpokenVoiceModel(installer: installer)
         model.download()
-        await settled()
+        await settled { model.status == .needsAttention }
         #expect(model.status == .needsAttention)
         #expect(!installer.isInstalled)
         #expect(model.error == "This voice didn\u{2019}t produce any sound. Reinstall it.")
@@ -187,10 +188,10 @@ struct SpokenVoiceModelTests {
         installer.verifies = false
         let model = SpokenVoiceModel(installer: installer)
         model.download()
-        await settled()
+        await settled { model.status == .needsAttention }
         installer.verifies = true
         model.reinstall()
-        await settled()
+        await settled { model.status == .ready }
         #expect(model.status == .ready)
         #expect(installer.downloads == 2)
         #expect(installer.removals == 1)
@@ -203,7 +204,7 @@ struct SpokenVoiceModelTests {
         #expect(model.pendingDelete)
         #expect(installer.removals == 0)
         model.confirmDelete()
-        await settled()
+        await settled { model.status == .notInstalled }
         #expect(!model.pendingDelete)
         #expect(model.status == .notInstalled)
         #expect(installer.removals == 1)
@@ -225,7 +226,7 @@ struct SpokenVoiceModelTests {
         let model = SpokenVoiceModel(installer: installer)
         model.requestDelete()
         model.confirmDelete()
-        await settled()
+        await settled { model.status == .needsAttention }
         #expect(model.status == .needsAttention)
         #expect(!installer.isInstalled)
         #expect(model.error == "Some of this voice\u{2019}s files couldn\u{2019}t be removed. Delete it again, or reinstall it.")
@@ -233,7 +234,7 @@ struct SpokenVoiceModelTests {
         model.requestDelete()
         #expect(model.pendingDelete)
         model.confirmDelete()
-        await settled()
+        await settled { model.status == .notInstalled }
         #expect(model.status == .notInstalled)
         #expect(model.error == nil)
     }
@@ -244,7 +245,7 @@ struct SpokenVoiceModelTests {
         let player = NaturalSpeechTests.FakePlayer()
         let speech = model.makeSpeech(player: player, fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
         speech.speak("All done.", voice: nil)
-        await settled()
+        await settled { player.isPlaying }
         #expect(player.isPlaying)
         model.requestDelete()
         model.confirmDelete()
@@ -271,12 +272,12 @@ struct SpokenVoiceModelTests {
         let preview = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), preview: true, details: { _ in [] })
         installer.synthesisFails = true
         preview.speak("Sample.", voice: nil)
-        await settled()
+        await settled { model.previewFallbackReason == "the natural voice failed" }
         #expect(model.previewFallbackReason == "the natural voice failed")
         #expect(model.fallbackReason == nil)
         installer.synthesisFails = false
         preview.speak("Sample.", voice: nil)
-        await settled()
+        await settled { model.previewFallbackReason == nil }
         #expect(model.previewFallbackReason == nil)
     }
 
@@ -290,7 +291,7 @@ struct SpokenVoiceModelTests {
         await settled()
         #expect(used == 0)
         installer.release()
-        await settled()
+        await settled { model.status == .ready }
         #expect(model.status == .ready)
         #expect(used == 1)
     }
@@ -306,7 +307,7 @@ struct SpokenVoiceModelTests {
         #expect(used == 0)
         let preview = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), preview: true, details: { _ in [] })
         preview.speak("Sample.", voice: nil)
-        await settled()
+        await settled { used == 1 }
         #expect(used == 1)
     }
 
@@ -317,14 +318,14 @@ struct SpokenVoiceModelTests {
         let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), attempts: attempts, details: { _ in [] })
         installer.synthesisFails = true
         speech.speak("docs: Done.", voice: nil)
-        await settled()
+        await settled { model.fallbackReason != nil }
         let failed = speech.attempt
         model.replySaved(attempt: "another attempt", entry: "unrelated")
         #expect(model.fallbackEntry == nil)
         model.replySaved(attempt: failed, entry: "e1")
         #expect(model.fallbackEntry == "e1")
         speech.speak("a notice", voice: nil)
-        await settled()
+        await settled { model.fallbackEntry == nil }
         #expect(model.fallbackEntry == nil)
     }
 }

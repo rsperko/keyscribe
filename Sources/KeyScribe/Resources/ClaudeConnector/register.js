@@ -1266,8 +1266,10 @@ export function register(on) {
     if (text === null) return result
     if (currentTurn === null) return result
     const taken = takeQueued(text)
-    const last = taken[taken.length - 1]
-    lastInput = last ? { from: last.from, prompt: promptDigest(last.text) } : {}
+    const asked = taken.filter((input) => input.from !== 'task')
+    const onlyNotices = taken.length > 0 && asked.length === 0 && lastInput && lastInput.prompt
+    const last = asked[asked.length - 1] ?? taken[taken.length - 1]
+    if (!onlyNotices) lastInput = last ? { from: last.from, prompt: promptDigest(last.text) } : {}
     for (const input of taken) {
       if (input.box) observe($, { op: 'absorbed', session, turn: currentTurn, prompt: promptDigest(input.box.prompt), request: input.box.request })
     }

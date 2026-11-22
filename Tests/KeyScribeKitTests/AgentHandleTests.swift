@@ -335,6 +335,21 @@ struct AgentAddressTests {
         #expect(AgentAddress.closest(to: "keyscribe", among: ["backend", "frontend"]) == [])
     }
 
+    @Test func aHeldTargetResemblesTheOneNameItBeginsOrNearlyBeginsOrThatItBeginsWith() {
+        let names = ["banana test", "banana bread", "lemon", "keyscribe", "web blue"]
+        #expect(AgentAddress.resembling("lemon tart", among: names) == "lemon")
+        #expect(AgentAddress.resembling("banana test", among: ["banana test two", "lemon"]) == "banana test two")
+        #expect(AgentAddress.resembling("banan test", among: names) == "banana test")
+        #expect(AgentAddress.resembling("web", among: names) == "web blue")
+        #expect(AgentAddress.resembling("keyscrib", among: names) == "keyscribe")
+        #expect(AgentAddress.resembling("banana", among: names) == nil)
+        #expect(AgentAddress.resembling("banana", among: ["banana test", "lemon"]) == "banana test")
+        #expect(AgentAddress.resembling("zebra", among: names) == nil)
+        #expect(AgentAddress.resembling("frontend", among: names) == nil)
+        #expect(AgentAddress.resembling("keyscribe green", among: ["keyscribe blue"]) == nil)
+        #expect(AgentAddress.resembling("", among: names) == nil)
+    }
+
     @Test func openingByPartOfANameNeedsTwoOfItsWords() {
         let names = ["jk boots manager", "jk boots helper", "frontend"]
         #expect(AgentAddress.parse("open boots", names: names) == .open(.unresolved(spoken: "boots", body: "")))

@@ -473,6 +473,12 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(len(stray), 1)
         self.assertIn("custom-pfx-123", stray[0])
 
+    def test_swift_raw_strings_hide_comment_markers_and_a_comment_after_one_is_still_found(self):
+        raw = 'let a = #"{"url":"https://example.com"}"#\nlet b = ##"say "#" then // too"##\nlet c = #"""\n"quoted" // inside\n"""#\nlet d = #"x"# // real\n'
+        issues = check_file_lines("Tests/KeyScribeKitTests/Raw.swift", raw)
+        self.assertEqual(len(issues), 1, issues)
+        self.assertIn("Raw.swift:6:", issues[0])
+
     def test_check_diff_allows_naming_a_supported_agent_and_flags_attribution(self):
         self.assertEqual(check_file_lines("FAQ.md", "In " + "Cla" + "ude Code, run /reload-plugins."), [])
         self.assertEqual(check_file_lines("docs/a.md", "The " + "Co" + "dex connector reads its history."), [])

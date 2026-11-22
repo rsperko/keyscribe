@@ -44,11 +44,12 @@ build, so an incremental build after a pin bump never keeps an earlier stamp; it
 lockfile has no FluidAudio pin. `./make-app.sh` builds the **dev** target with the
 stable self-signed cert (**`KeyScribe Local`**) for persistent TCC, else ad-hoc; it **ignores**
 `KEYSCRIBE_SIGN_ID` / `CODESIGN_IDENTITY` for dev (those are the release Developer ID identity, so an
-`.envrc` for `release.sh` never leaks into dev). When `TOOLCHAINS` is unset and `xcrun -sdk macosx metal`
-fails — which happens in background/launchd sessions that cannot query the GUI-session MobileAsset
-daemon — `make-app.sh` inspects the newest mounted MetalToolchain cryptex under
-`/private/var/run/com.apple.security.cryptexd/mnt/` and exports `TOOLCHAINS` so MLX's Metal shaders still
-compile. `release.sh` archives and exports the public target;
+`.envrc` for `release.sh` never leaks into dev). When `TOOLCHAINS` is unset, `make-app.sh` names
+the newest mounted MetalToolchain cryptex under `/private/var/run/com.apple.security.cryptexd/mnt/` in `TOOLCHAINS`
+before it prepares the project, so MLX's Metal shaders compile. It does so even when `xcrun -sdk macosx metal
+--version` answers: that can succeed while compiling a shader fails with "missing Metal Toolchain" (a background
+session that cannot query the GUI-session MobileAsset daemon, and a sandboxed shell on 2026-11-21), which is what
+`prepare-xcode-project.sh`'s compile probe checks. `release.sh` archives and exports the public target;
 Xcode signs Sparkle's helpers, the framework, the binary, and the bundle inside-out with hardened runtime
 itself, so there is no re-sign block. **A downstream distribution `include:`s the template and adds its
 own target** with its own identity, signing, entry file (`main.swift` that sets `delegate.updater`), and

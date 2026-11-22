@@ -8,6 +8,7 @@ import { Instance, type TakeResult } from "./lib/instance.ts"
 import { UltimateDriver } from "./lib/ultimate.ts"
 import { freePort, run, sha256, until } from "./lib/util.ts"
 import { failureBundle } from "./lib/artifacts.ts"
+import { clipboard } from "./lib/clipboard.ts"
 import { matchesPageCase, parsePageOptions, type PageTargetKind } from "./lib/options.ts"
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
@@ -32,7 +33,6 @@ function command(tool: string, args: string[], timeout = 30) {
   assert.equal(answer.status, 0, `${tool} failed: ${answer.stdout}${answer.stderr}`)
   return answer.stdout
 }
-const clipboard = (...args: string[]) => command("xcrun", ["swift", join(repository, "Tests/AgentConformance/clipboard.swift"), ...args])
 function cleanup() {
   return cleaning ??= (async () => {
     try {
@@ -85,26 +85,12 @@ const take = (text: string, reply = false) => {
   assert.ok(!stopping, "conformance interrupted")
   return instance.take(text, { timeout: 45, ...(reply ? { waitReply: replyWait } : {}) })
 }
-const records = () => readdirSync(join(instance.folder, "history")).filter(f => f.endsWith(".jsonl"))
-  .flatMap(f => readFileSync(join(instance.folder, "history", f), "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)))
-const record = (text: string) => records().filter(e => e.heard === text || e.heard?.endsWith(text)).at(-1)
+const record = (text: string) => instance.record(text)
 let chromeWindow = ""
 let otherWindow = ""
 
-function windows() {
-  const lines = instance.cli(["--windows-probe"], 30).stdout.split("\n")
-  let app = "", pid = ""
-  return lines.flatMap(line => {
-    const process = /^(\S+) pid=(\d+)/.exec(line)
-    if (process) { app = process[1]; pid = process[2] }
-    const window = /AXStandardWindow id=(cg:\d+).*title=(.*)/.exec(line)
-    return window ? [{ app, spec: `${pid}:${window[1]}`, title: window[2] }] : []
-  })
-}
-function focus(spec: string) {
-  const result = instance.cli(["--windows-probe", "--focus", spec], 15)
-  assert.equal(result.status, 0, result.stdout + result.stderr)
-}
+const windows = () => instance.windows()
+const focus = (spec: string) => instance.focus(spec)
 async function shown(page: any, id: number, side?: number) {
   await request("/api/ui", { set: { "shell.surface": "agent", "shell.conversation": id,
     "ext.side-chat.front": side ?? null } })
@@ -169,9 +155,6 @@ try {
   command("git", ["-C", agent.project, "fetch", "--depth=1", repository, "HEAD"])
   command("git", ["-C", agent.project, "reset", "--hard", "FETCH_HEAD"])
   await instance.prepare()
-  const settings = join(instance.folder, "settings.toml")
-  writeFileSync(settings, readFileSync(settings, "utf8").replace(/\[agents\.spoken_result\][\s\S]*?(?=\n\[|$)/,
-    "[agents.spoken_result]\nenabled = true\ntext_only = true\n"))
   const linked = join(agent.root, "linked-setup")
   symlinkSync(agent.folder, linked)
   const installed = instance.connector("install", "ultimate", linked, agent.tool)

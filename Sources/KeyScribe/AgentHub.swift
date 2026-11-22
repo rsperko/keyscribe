@@ -152,6 +152,7 @@ final class AgentHub {
     private let addresses: [AgentNativeAddress]
     private let addressesTurnedOn: @MainActor (String) -> Bool
     private let hostDeadline: Duration
+    private let hostOpenDeadline: Duration?
     private let hostConfirmDelay: Duration
     private let heldLimit: Duration
     private(set) var retryWaiting: Set<String> = []
@@ -227,7 +228,8 @@ final class AgentHub {
         disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
         places: (any AgentPlaceReading)? = nil, hosts: [AgentHostIntegration] = [], addresses: [AgentNativeAddress] = [],
         hostAllowed: @escaping @MainActor (String) -> Bool = { _ in false },
-        hostDeadline: Duration = AgentHub.defaultHostDeadline, hostConfirmDelay: Duration = .seconds(3), heldLimit: Duration = .seconds(120),
+        hostDeadline: Duration = AgentHub.defaultHostDeadline, hostOpenDeadline: Duration? = nil,
+        hostConfirmDelay: Duration = .seconds(3), heldLimit: Duration = .seconds(120),
         processEnvironment: @escaping (_ pid: Int, _ keys: Set<String>) -> [String: String] = { _, _ in [:] },
         processParent: @escaping (_ pid: Int) -> Int? = { _ in nil },
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
@@ -240,6 +242,7 @@ final class AgentHub {
         self.addresses = addresses + hosts.compactMap(\.addresses)
         self.addressesTurnedOn = hostAllowed
         self.hostDeadline = hostDeadline
+        self.hostOpenDeadline = hostOpenDeadline
         self.hostConfirmDelay = hostConfirmDelay
         self.heldLimit = heldLimit
         self.exclusions = exclusions
@@ -440,9 +443,11 @@ final class AgentHub {
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return .none }
         if let (source, location) = host(of: conversation) {
             guard stillWanted() else { return .none }
-            switch await Self.within(hostDeadline, otherwise: AgentHostOpen.failed, { await source.host.open(location, stillWanted: stillWanted) }) {
+            let late = AgentHostOpen.refused("\(source.kind.displayName) didn\u{2019}t answer in time.")
+            switch await Self.within(hostOpenDeadline ?? source.host.openDeadline, otherwise: late, { await source.host.open(location, stillWanted: stillWanted) }) {
             case .opened: return .exact
             case .requested: return .requested(source.kind.displayName)
+            case .refused(let why): return stillWanted() && !Task.isCancelled ? .refused(why) : .none
             case .failed, .unsupported: break
             }
         }

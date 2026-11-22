@@ -7,6 +7,18 @@ import { type AgentDriver, type Message, command, removeScratch, scratch } from 
 import { pidsListeningOn, sleep, texts, until } from "./util.ts"
 import { Tmux } from "./tmux.ts"
 
+export function codexMessages(newestFirst: any[]): Message[] {
+  const messages: Message[] = []
+  for (const turn of [...newestFirst].reverse()) {
+    for (const item of turn.items ?? []) {
+      if (item.type === "userMessage") messages.push({ role: "user", text: texts(item.content ?? item).join("\n"), turn: turn.id, mark: item.clientId })
+      if (item.type === "agentMessage") messages.push({ role: "agent", text: typeof item.text === "string" ? item.text : texts(item).join("\n"), turn: turn.id })
+    }
+    if (turn.status && turn.status !== "inProgress") messages.push({ role: "ended", text: "", turn: turn.id })
+  }
+  return messages
+}
+
 class Daemon {
   private socket: Socket
   private buffer = Buffer.alloc(0)
@@ -145,7 +157,19 @@ export class CodexDriver implements AgentDriver {
     await until("Codex's app server", () => (existsSync(this.socket) ? true : undefined), 60)
     this.daemon = await Daemon.open(this.socket)
     await this.tmux.type("Reply with only the word ready.")
+    let retype = false
     this.thread = await until("the scratch thread on the app server", async () => {
+      const screen = this.tmux.screen()
+      if (this.answerHooks(screen)) {
+        retype = true
+        await sleep(1000)
+        return undefined
+      }
+      if (retype && /ask codex to do anything|for shortcuts/i.test(screen)) {
+        retype = false
+        await this.tmux.type("Reply with only the word ready.")
+        return undefined
+      }
       const loaded: string[] = (await this.daemon!.call("thread/loaded/list", {}))?.data ?? []
       if (loaded[0]) return loaded[0]
       const listed: any[] = (await this.daemon!.call("thread/list", {}))?.data ?? []
@@ -161,18 +185,34 @@ export class CodexDriver implements AgentDriver {
       const screen = this.tmux.screen()
       if (/update available/i.test(screen) && /skip/i.test(screen) && /enter continue|esc skip/i.test(screen)) {
         this.tmux.keys("Escape")
-      } else if (/hooks need review/i.test(screen)) {
-        const lines = screen.split("\n")
-        const trust = lines.findIndex((line) => /trust all/i.test(line))
-        const selected = lines.findIndex((line) => /^\s*›/.test(line))
-        for (let step = selected; step >= 0 && step < trust; step++) this.tmux.keys("Down")
-        this.tmux.keys("Enter")
+      } else if (this.answerHooks(screen)) {
+        await sleep(1000)
+        continue
       } else if (/ask codex to do anything|for shortcuts/i.test(screen)) {
         return
       }
       await sleep(1000)
     }
     throw new Error(`Codex never reached its prompt; last screen:\n${this.tmux.screen()}`)
+  }
+
+  private answerHooks(screen: string): boolean {
+    if (/\bt trust all\b/i.test(screen) && /need review/i.test(screen)) {
+      this.tmux.keys("t")
+      return true
+    }
+    if (/turn hooks on or off|lifecycle hooks from config/i.test(screen)) {
+      this.tmux.keys("Escape")
+      return true
+    }
+    if (!/hooks need review/i.test(screen)) return false
+    const lines = screen.split("\n")
+    const trust = lines.findIndex((line) => /^\s*›?\s*\d+\.\s*trust all/i.test(line))
+    const selected = lines.findIndex((line) => /^\s*›\s*\d+\./.test(line))
+    if (trust < 0 || selected < 0) return false
+    for (let step = selected; step < trust; step++) this.tmux.keys("Down")
+    this.tmux.keys("Enter")
+    return true
   }
 
   async idle(seconds: number) {
@@ -185,15 +225,7 @@ export class CodexDriver implements AgentDriver {
 
   async messages(): Promise<Message[]> {
     const listed = await this.daemon!.call("thread/turns/list", { threadId: this.thread, itemsView: "full" })
-    const turns: any[] = [...(listed?.data ?? [])].reverse()
-    const messages: Message[] = []
-    for (const turn of turns) {
-      for (const item of turn.items ?? []) {
-        if (item.type === "userMessage") messages.push({ role: "user", text: texts(item.content ?? item).join("\n"), turn: turn.id, mark: item.clientId })
-        if (item.type === "agentMessage") messages.push({ role: "agent", text: typeof item.text === "string" ? item.text : texts(item).join("\n"), turn: turn.id })
-      }
-    }
-    return messages
+    return codexMessages(listed?.data ?? [])
   }
 
   untouched() {

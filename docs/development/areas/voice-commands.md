@@ -382,7 +382,13 @@ every rule above applies to it, with these sharpenings:
   the agent's final message starts a new turn of the host's own. bb (a Codex-style turn) can take a message into the
   turn while the final message streams; its plugin sees only the thread going idle and the last assistant text, so a
   reply there can still answer a message that came after the dictation, and the cue names that sender when bb
-  records one.
+  records one. Ultimate names an input's sender from its entry kind (`senderOf` in its connector): `pi.user` is the user,
+  `board.*` another conversation, `automations.fired` a schedule, and anything else Ultimate submits (a subagent's
+  report, a side-chat summary, a watchdog or pause note) is its own note, which never replaces the input already named
+  for the turn and alone reads as someone else's. Claude Code's background-task notice (`task-notification`) absorbed into a running
+  turn likewise never replaces the input already named for it; a turn it starts alone reads as after a background task. A note the host writes itself is never that sender: the cue looks at the last message a turn took that
+  the host did not write (`SpokenResult.cause`, `AgentAcceptedMessage.fromHost`), so a dictated turn that bb also fed
+  a child thread's outcome is still read as the dictation's answer.
 - **Pi and omp share one connector core, with an adapter per agent.** `Resources/PiConnector/index.ts` holds the core
   (queue, poll loop, submissions, receipts, read aloud, focus) and each agent's adapter for the signals that differ;
   the installer writes `installedFor` and gives each agent its own folder under `extensions/` (the plugin name with
@@ -496,7 +502,17 @@ every rule above applies to it, with these sharpenings:
   still speaks; a slow or hung host listing never holds it longer, and a stopped hub ends the wait. Reports about
   other agents and other copies do not wake it.
   Instance paths use the filesystem's canonical path on both sides.
-  “Open” switches Ultimate's shared UI state through its loopback `/api/ui` and raises the window last matched. A rename in KeyScribe retitles a branch through the conversations
+  “Open” switches Ultimate's shared UI state through its loopback `/api/ui` and raises the window last matched, and
+  reads as opened only when that window, once raised, still shows this project's page (`UltimateHost.view`): a
+  tab closed since then leaves a window that shows something else. A window whose page cannot be read, or that is not
+  yet in front after raising, is not the same as one showing something else: it reads as requested and opens nothing,
+  since the page was already told to switch and a new tab on every open would pile up. Only with no remembered window,
+  or one that positively shows something else, does it open the conversation's page (`UltimateHost.page`, the
+  `ultimate.localhost` address Ultimate prints) in the default browser, and read as requested. The page reader keeps
+  the address of whatever page the window shows (`UltimateHost.pageURL`), so a window that moved on to another site reads
+  as showing something else, not as unreadable. That new page is
+  remembered the same way as any other, once it reports from the front, so the next open raises it instead of adding a
+  tab. A rename in KeyScribe retitles a branch through the conversations
   extension's `rename` action on the same loopback API (`UltimateHost.rename`); a standing agent's `@name` title is
   fixed in Ultimate, so its rename stays in KeyScribe. The extension takes `label` and shows the name to say in
   `composer.status`, read through its `label` action while the page is visible. Measured against Ultimate `1c5d0565`
@@ -856,7 +872,10 @@ every rule above applies to it, with these sharpenings:
   since a wrapper can hand bb its folder at launch without declaring it, and a wrong guess would send words to another
   folder's thread. A closed folder no app is known to use asks for the copy that uses it to be opened, and says that
   an open copy that doesn't name the folder can't be matched to it; it never asks the user to edit an app's
-  `Info.plist`, which would break the app's signature. That app's location, not its bundle
+  `Info.plist`, which would break the app's signature. The running process that is a copy's app, which Open raises
+  and reopens, is first the app that owns the process its trusted runtime record names
+  (`BBBuilds.process`, `BBBuildFinder.runningApp`), since two copies can run from one app bundle with different data
+  folders and then share its location too. Otherwise that app's location, not its bundle
   id, says whether it is open and which app in front is it, since copies of one app share a bundle id; any running
   app whose launch environment names the folder also counts as it being open. An app in front whose launch
   environment names a folder is that folder's copy, even when another app also names it. When the recorded location is stale,
@@ -915,7 +934,26 @@ every rule above applies to it, with these sharpenings:
   queued, its error envelope as refused in plain words, and anything else as uncertain; bb's error code goes to
   the log as public and its message as private, since a message could echo what was sent. Open only asks:
   bb's answer counts the clients it broadcast to, not a window that showed the thread, so it reads as requested, and bb is brought forward only when some client took it and the open is
-  still wanted. In-front comes from bb's plugin (below), since bb's command reports no focused thread. While neither bb's app runs nor the process its runtime record names serves on this Mac
+  still wanted. On macOS bb keeps running with every window closed and makes a new one only when reopened, as a Dock
+  click does (read from bb 0.49's desktop source, 2026-11-21), so an open first checks that copy's app for a window (`BBBuildFinder.windows`; bb's answer counts every
+  client, not windows: 4 with one window open and 3 once it closed, measured on bb 0.50.1, 2026-11-21). A window on
+  screen is used as it is. A window that exists but is not on screen, minimized or on another Space, is brought back
+  rather than treated as closed: the one window bb lists first, through the same window focus voice commands use
+  (`BBBuildFinder.restore`), which checks that the open is still wanted before each step. The open goes ahead even if
+  it is still not on screen after the wait. With no window at all it reopens that copy (`BBBuildFinder.reopen`) and
+  waits for its window before asking. When bb does not say which windows it has (Accessibility unanswered or not
+  granted), that stays its own state: the copy is reopened the same way, and if no window appears the open says bb
+  did not say which windows it has, not that it has none. The wait polls only the on-screen window list. The app all of these act on is the first regular app above the process bb's runtime record names
+  (`BBBuildFinder.appServing`), never a helper process, which has a bundle id of its own. The reopen goes through
+  `open -a` with the copy's own location: `NSWorkspace.openApplication` picks a running app by bundle id, so with two
+  copies of bb running it reopened the other one. An open bb does not take says
+  why (`AgentHostOpen.refused`, with the reason `BBHost.open` found), and that reason is the HUD line and the History
+  summary, never “Nothing showing … was brought forward”.
+  Open has its own deadline, which each host states (`AgentHost.openDeadline`) from the steps its open takes, so the
+  hub's cutoff never comes before a step the host is still allowed to finish; bb's adds its window wait to its
+  command's timeout. A host that refuses an open says why and is not followed by focusing a terminal: only a
+  conversation with a process is focused that way, and host conversations have none.
+  In-front comes from bb's plugin (below), since bb's command reports no focused thread. While neither bb's app runs nor the process its runtime record names serves on this Mac
   (`BBBuilds.serves`), its command is not run at all; a server left running after its app quits still lists, takes
   messages and renames, but Open needs a window, so it waits for the app. The command never starts bb's server either (it fails at once, measured with bb
   0.49.0 on 2026-11-14). Its data folder is not watched: bb writes its database every few seconds even while
@@ -987,10 +1025,13 @@ every rule above applies to it, with these sharpenings:
   a `turnComplete` only for a turn
   it saw start or found running when it loaded, naming the sender bb records for a row an agent, an automation or bb
   itself queued (never for one a plugin queued, since that can be the user's own dictation), and the newest row the
-  running turn took in when another was dispatched while it ran. Its `turnComplete` also lists, as `accepted`, the
+  running turn took in when another was dispatched while it ran; a note bb itself dispatches never replaces a message
+  already named for that turn or the next one. Its `turnComplete` also lists, as `accepted`, the
   digest of every message bb accepted into the turn that ended, read from bb's own record of that turn
   (`client/turn/requested` joined to `turn/input/accepted` by request id, `acceptedInEndedTurn`), each with the time bb
-  recorded its request (a retry's original request's), and a joined draft named by the dictation it carried; a record
+  recorded its request (a retry's original request's, `retryOfRequestId` in bb 0.49's record), marked `host` when bb
+  wrote it itself (its `[bb system]` notes, such as a child thread finishing, `initiator: system`), and a joined draft
+  named by the dictation it carried; a record
   bb cannot give within its deadline, or one with a message it cannot place (no request to join, no number for its
   time), sends no list rather than an empty or shorter one. A message with no text (an image alone) is placed and
   listed, and matches no dictation. A message bb or another thread's agent sends is recorded the same way as the

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { existsSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { markKept, scratchPrefixes } from "./scratch.ts"
 import { run, sleep, socketAnswers, until } from "./util.ts"
@@ -56,7 +56,37 @@ export class Instance {
     const enabled = /^\[features\]$/m.test(text)
       ? text.replace(/^\[features\]$/m, "[features]\nagents = true")
       : `${text.trimEnd()}\n\n[features]\nagents = true\n`
-    writeFileSync(settings, enabled)
+    const spoken = "[agents.spoken_result]\nenabled = true\ntext_only = true\n"
+    const speaking = /\[agents\.spoken_result\]/.test(enabled)
+      ? enabled.replace(/\[agents\.spoken_result\][\s\S]*?(?=\n\[|$)/, spoken)
+      : `${enabled.trimEnd()}\n\n${spoken}`
+    writeFileSync(settings, speaking)
+  }
+
+  windows(): { app: string; spec: string; title: string }[] {
+    let app = "", pid = ""
+    return this.cli(["--windows-probe"], 30).stdout.split("\n").flatMap((line) => {
+      const owner = /^(\S+) pid=(\d+)/.exec(line)
+      if (owner) { app = owner[1]; pid = owner[2] }
+      const window = /AXStandardWindow id=(cg:\d+).*title=(.*)/.exec(line)
+      return window ? [{ app, spec: `${pid}:${window[1]}`, title: window[2] }] : []
+    })
+  }
+
+  focus(spec: string) {
+    const result = this.cli(["--windows-probe", "--focus", spec], 15)
+    if (result.status !== 0) throw new Error(`could not bring ${spec} forward: ${result.stdout}${result.stderr}`)
+  }
+
+  records(): any[] {
+    const folder = join(this.folder, "history")
+    if (!existsSync(folder)) return []
+    return readdirSync(folder).filter((file) => file.endsWith(".jsonl"))
+      .flatMap((file) => readFileSync(join(folder, file), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)))
+  }
+
+  record(text: string): any {
+    return this.records().filter((entry) => entry.heard === text || entry.heard?.endsWith(text)).at(-1)
   }
 
   private spawn() {

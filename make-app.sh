@@ -26,6 +26,17 @@ case "$OUTPUT" in
   *) echo "error: app output path must end in .app" >&2; exit 1 ;;
 esac
 
+if [ -z "${TOOLCHAINS:-}" ]; then
+  while IFS= read -r plist; do
+    [ -f "$plist" ] || continue
+    metal_id="$(/usr/libexec/PlistBuddy -c 'Print :Identifier' "$plist" 2>/dev/null || true)"
+    if [ -n "$metal_id" ]; then
+      export TOOLCHAINS="$metal_id com.apple.dt.toolchain.XcodeDefault"
+      break
+    fi
+  done < <(ls -dt /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-*/Metal.xctoolchain/ToolchainInfo.plist 2>/dev/null || true)
+fi
+
 PREPARED="$(./scripts/prepare-xcode-project.sh)"
 VERSION_SETTINGS=()
 while IFS= read -r line; do VERSION_SETTINGS+=("$line"); done <<< "$PREPARED"
@@ -63,17 +74,6 @@ case "$VARIANT" in
       SIGN_SETTINGS=("KEYSCRIBE_RELEASE_SIGN_IDENTITY=-" "KEYSCRIBE_RELEASE_HARDENED_RUNTIME=NO" "KEYSCRIBE_RELEASE_ENTITLEMENTS=")
     fi ;;
 esac
-
-if [ -z "${TOOLCHAINS:-}" ] && ! xcrun -sdk macosx metal --version >/dev/null 2>&1; then
-  while IFS= read -r plist; do
-    [ -f "$plist" ] || continue
-    metal_id="$(/usr/libexec/PlistBuddy -c 'Print :Identifier' "$plist" 2>/dev/null || true)"
-    if [ -n "$metal_id" ]; then
-      export TOOLCHAINS="$metal_id com.apple.dt.toolchain.XcodeDefault"
-      break
-    fi
-  done < <(ls -dt /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-*/Metal.xctoolchain/ToolchainInfo.plist 2>/dev/null || true)
-fi
 
 echo "== building $SCHEME (Release) =="
 xcodebuild build \

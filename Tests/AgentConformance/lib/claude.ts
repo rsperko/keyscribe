@@ -4,6 +4,29 @@ import { command, type Message } from "./driver.ts"
 import { TerminalAgent } from "./terminal.ts"
 import { texts } from "./util.ts"
 
+export function claudeMessages(transcript: string): Message[] {
+  const messages: Message[] = []
+  let turn: string | undefined
+  for (const line of transcript.split("\n")) {
+    let entry: any
+    try { entry = JSON.parse(line) } catch { continue }
+    if (entry.isSidechain || entry.isMeta) continue
+    const content = entry.message?.content
+    if (entry.type === "user") {
+      const parts = typeof content === "string" ? [content] : (content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text)
+      if (!parts.length) continue
+      turn = entry.uuid
+      messages.push({ role: "user", text: parts.join("\n"), turn })
+    } else if (entry.type === "assistant") {
+      const parts = (content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text)
+      if (parts.length) messages.push({ role: "agent", text: texts(parts).join("\n"), turn })
+    } else if (entry.type === "system" && entry.subtype === "turn_duration") {
+      messages.push({ role: "ended", text: "", turn })
+    }
+  }
+  return messages
+}
+
 export class ClaudeDriver extends TerminalAgent {
   readonly kind = "claude"
   readonly tool = command("claude", "CLAUDE_BIN")
@@ -56,23 +79,6 @@ export class ClaudeDriver extends TerminalAgent {
   async messages(): Promise<Message[]> {
     const file = this.transcript()
     if (!file) return []
-    const messages: Message[] = []
-    let turn: string | undefined
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      let entry: any
-      try { entry = JSON.parse(line) } catch { continue }
-      if (entry.isSidechain || entry.isMeta) continue
-      const content = entry.message?.content
-      if (entry.type === "user") {
-        const parts = typeof content === "string" ? [content] : (content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text)
-        if (!parts.length) continue
-        turn = entry.uuid
-        messages.push({ role: "user", text: parts.join("\n"), turn })
-      } else if (entry.type === "assistant") {
-        const parts = (content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text)
-        if (parts.length) messages.push({ role: "agent", text: texts(parts).join("\n"), turn })
-      }
-    }
-    return messages
+    return claudeMessages(readFileSync(file, "utf8"))
   }
 }

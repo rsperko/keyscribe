@@ -42,6 +42,17 @@ test('a reply after a background task’s notice says it came after that task, a
   expect(completed(h)).toMatchObject([{ from: 'task', prompt: digest('Build finished.') }])
 })
 
+test('a background task’s notice a dictated turn takes in never replaces the dictation the reply answers', async ($, on) => {
+  const h = harness(on)
+  await dictated($, h, 'Yes to all four.')
+  await $.prompt.submit({ text: 'Build finished.', origin: { kind: 'task-notification' }, turnId: 't1', wait: false } as any)
+  await $.session.append(queuedCommand('Build finished.') as any)
+  await $.turn.complete({ turnId: 't1', answer: 'All four are in, and the build passed.', durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
+  await h.answerEvents()
+  expect(completed(h)).toMatchObject([{ prompt: digest('Yes to all four.') }])
+  expect(completed(h)[0].from).toBeUndefined()
+})
+
 test('a reply after something the turn took in that nobody can place names neither a sender nor a prompt', async ($, on) => {
   const h = harness(on)
   await dictated($, h, 'Yes to all four.')

@@ -205,22 +205,26 @@ final class CodexConnector: AgentConnector {
     }
 
     func uninstallWithoutTool(target: ConnectorTarget) async throws {
-        try await takeTitleItemBack(target)
+        try await restoreConfig(target)
     }
 
-    private func takeTitleItemBack(_ target: ConnectorTarget) async throws {
+    private func restoreConfig(_ target: ConnectorTarget) async throws {
         let recordURL = titleRecordURL(target.folder)
         let config = configURL(target.folder)
+        let pluginId = layout.pluginId
         let failure: String? = await Task.detached {
-            guard let data = FileManager.default.contents(atPath: recordURL.path),
-                  let record = try? JSONDecoder().decode(CodexTitleItem.Record.self, from: data)
-            else { return nil }
+            let record = FileManager.default.contents(atPath: recordURL.path).flatMap { try? JSONDecoder().decode(CodexTitleItem.Record.self, from: $0) }
             let current: String?
             do { current = try Self.readNow(config) } catch { return Self.titleUnreadable }
-            guard let restored = CodexTitleItem.removing(from: current, record: record) else { return Self.titleNotRemoved }
+            var restored = current
+            if let record {
+                guard let removed = CodexTitleItem.removing(from: current, record: record) else { return Self.titleNotRemoved }
+                restored = removed
+            }
+            restored = restored.map { CodexPlugin.forgettingTrust(in: $0, pluginId: pluginId) }
             do {
-                if restored != (current ?? "") { try Data(restored.utf8).write(to: config, options: .atomic) }
-                try FileManager.default.removeItem(at: recordURL)
+                if let restored, restored != (current ?? "") { try Data(restored.utf8).write(to: config, options: .atomic) }
+                if record != nil { try FileManager.default.removeItem(at: recordURL) }
                 return nil
             } catch {
                 return error.localizedDescription
@@ -242,7 +246,7 @@ final class CodexConnector: AgentConnector {
         if left.status != 0, Self.mentions((try? await Self.read(config)) ?? nil, marketplace: layout.marketplace, at: marketplace.path) {
             throw AgentConnectorError(message: Self.problem(left))
         }
-        try await takeTitleItemBack(target)
+        try await restoreConfig(target)
         let codexFolder = self.codexFolder
         let executable = self.executable
         let failure: String? = await Task.detached {

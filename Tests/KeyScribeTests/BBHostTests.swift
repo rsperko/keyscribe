@@ -48,16 +48,24 @@ struct BBHostTests {
         _ runner: Runner, builds: [BBBuild], enrolled: [String]? = nil, installed: Bool = true,
         open: @escaping @MainActor (BBBuild) -> Bool = { _ in true }, serving: @escaping @MainActor (BBBuild) -> Bool = { _ in false },
         frontmost: @escaping @MainActor () -> AgentHostApp? = { nil },
-        frontApp: (@MainActor () -> AgentHostApp?)? = nil, dataFolders: [String: String] = [:]
+        frontApp: (@MainActor () -> AgentHostApp?)? = nil, dataFolders: [String: String] = [:],
+        reopened: @escaping @MainActor (BBBuild) -> Void = { _ in },
+        windowed: @escaping @MainActor (BBBuild) -> BBWindows = { _ in .shown },
+        restored: @escaping @MainActor (BBBuild) -> Void = { _ in },
+        described: @escaping @Sendable () -> Void = {}
     ) -> (BBHost, () -> [String]) {
         var activations: [String] = []
         let host = BBHost(
-            home: Self.home, enrolled: { enrolled ?? builds.map(\.folder) }, describe: { folder in builds.first { $0.folder == folder } },
+            home: Self.home, enrolled: { enrolled ?? builds.map(\.folder) }, describe: { folder in
+                described()
+                return builds.first { $0.folder == folder }
+            },
             installed: { path in installed && builds.contains { $0.launcher == path } }, isOpen: open, serving: serving,
             run: { try await runner.run($0, subcommand: $1, input: $2, environment: $3) },
             activate: { activations.append($0.folder) }, frontmost: { _ in frontmost() },
             frontApp: frontApp ?? { frontmost().map { AgentHostApp(bundle: $0.bundle, pid: $0.pid, name: $0.name, path: $0.path) } },
-            dataFolder: { dataFolders[$0] })
+            dataFolder: { dataFolders[$0] }, reopen: reopened, windows: { windowed($0) }, shown: { windowed($0) == .shown },
+            restore: { build, _, wanted in if wanted() { restored(build) } }, windowRetries: 3, windowRetryDelay: .milliseconds(1))
         return (host, { activations })
     }
 
@@ -145,7 +153,7 @@ struct BBHostTests {
         let (bb, activations) = host(runner, running: false)
         #expect(await bb.scan() == .unreadable("bb isn\u{2019}t open. Open bb to reach its threads."))
         #expect(await bb.deliver("x", images: [], request: "r", to: Self.location) == .refused("bb isn\u{2019}t open."))
-        #expect(await bb.open(Self.location, stillWanted: { true }) == .failed)
+        #expect(await bb.open(Self.location, stillWanted: { true }) == .refused("bb isn\u{2019}t open."))
         #expect(runner.calls.isEmpty)
         #expect(activations() == 0)
     }
@@ -208,7 +216,7 @@ struct BBHostTests {
         let odd = AgentHostLocation(host: "bb", instance: "/Users/a/.bb", native: "--split")
         #expect(await bb.deliver("x", images: [], request: "r", to: other) == .refused("bb no longer lists this thread."))
         #expect(await bb.deliver("x", images: [], request: "r", to: odd) == .refused("bb no longer lists this thread."))
-        #expect(await bb.open(other, stillWanted: { true }) == .failed)
+        #expect(await bb.open(other, stillWanted: { true }) == .refused("bb no longer lists this thread."))
         #expect(runner.calls.isEmpty)
     }
 
@@ -221,14 +229,128 @@ struct BBHostTests {
         #expect(activations() == 1)
     }
 
-    @Test func openWithNoBBWindowOrNoAnswerIsNotOpened() async {
+    @Test func openWithNoBBWindowReopensBBsWindowFirstThenAsksItToShowTheThread() async {
         let runner = Runner()
-        let (bb, activations) = host(runner)
+        runner.answers["thread open"] = Self.output(#"{"threadId":"thr_abc1","delivered":3}"#)
+        var window = false
+        var reopened: [String] = []
+        let (bb, activations) = host(runner, builds: [Self.usual], reopened: { build in
+            reopened.append(build.folder)
+            window = true
+        }, windowed: { _ in window ? .shown : .none })
+        #expect(await bb.open(Self.location, stillWanted: { true }) == .requested)
+        #expect(reopened == [Self.usual.folder])
+        #expect(runner.calls.count == 1)
+        #expect(activations() == [Self.usual.folder])
+    }
+
+    @Test func openWhenNoBBWindowAppearsOrBBRefusesSaysWhyAndAnsweringClientsAreNoWindow() async {
+        let runner = Runner()
+        var reopened = 0
+        runner.answers["thread open"] = Self.output(#"{"threadId":"thr_abc1","delivered":3}"#)
+        let (closed, closedActivations) = host(runner, builds: [Self.usual], reopened: { _ in reopened += 1 }, windowed: { _ in .none })
+        #expect(await closed.open(Self.location, stillWanted: { true }) == .refused("bb has no window open to show this thread."))
+        #expect(reopened == 1)
+        #expect(runner.calls.isEmpty)
+        #expect(closedActivations().isEmpty)
+        let (bb, activations) = host(runner, builds: [Self.usual])
         runner.answers["thread open"] = Self.output(#"{"threadId":"thr_abc1","delivered":0}"#)
-        #expect(await bb.open(Self.location, stillWanted: { true }) == .failed)
+        #expect(await bb.open(Self.location, stillWanted: { true }) == .refused("bb has no window open to show this thread."))
         runner.answers["thread open"] = .failure(.timedOut("thread open"))
-        #expect(await bb.open(Self.location, stillWanted: { true }) == .failed)
-        #expect(activations() == 0)
+        #expect(await bb.open(Self.location, stillWanted: { true }) == .refused("bb didn\u{2019}t answer."))
+        runner.answers["thread open"] = .failure(.couldNotStart("thread open"))
+        #expect(await bb.open(Self.location, stillWanted: { true }) == .refused("bb could not start."))
+        runner.answers["thread open"] = Self.output(#"{"ok":false,"error":{"code":"thread_not_found","message":"HTTP 404: Thread not found"}}"#, status: 1)
+        #expect(await bb.open(Self.location, stillWanted: { true }) == .refused("bb no longer has this thread."))
+        #expect(activations().isEmpty)
+    }
+
+    @Test func openNoLongerWantedWhileBBsWindowReopensStopsAsking() async {
+        let runner = Runner()
+        runner.answers["thread open"] = Self.output(#"{"delivered":1}"#)
+        var wanted = true
+        let (bb, activations) = host(runner, builds: [Self.usual], reopened: { _ in wanted = false }, windowed: { _ in .none })
+        #expect(await bb.open(Self.location, stillWanted: { wanted }) == .failed)
+        #expect(runner.calls.isEmpty)
+        #expect(activations().isEmpty)
+    }
+
+    final class Wanted: @unchecked Sendable {
+        var value = true
+    }
+
+    @Test func openNoLongerWantedWhileBbIsFoundNeverReopensItsWindow() async {
+        let runner = Runner()
+        runner.answers["thread open"] = Self.output(#"{"delivered":1}"#)
+        let wanted = Wanted()
+        var reopened = 0
+        var restored = 0
+        let (bb, activations) = host(
+            runner, builds: [Self.usual], reopened: { _ in reopened += 1 }, windowed: { _ in .none }, restored: { _ in restored += 1 },
+            described: { wanted.value = false })
+        #expect(await bb.open(Self.location, stillWanted: { wanted.value }) == .failed)
+        #expect(reopened == 0 && restored == 0)
+        #expect(runner.calls.isEmpty)
+        #expect(activations().isEmpty)
+    }
+
+    @Test func aMinimizedOrOtherSpaceWindowIsBroughtBackRatherThanReopenedAndOpensTheThread() async {
+        let runner = Runner()
+        runner.answers["thread open"] = Self.output(#"{"threadId":"thr_abc1","delivered":3}"#)
+        var state = BBWindows.hidden("cg:9")
+        var reopened = 0
+        let (bb, activations) = host(
+            runner, builds: [Self.usual], reopened: { _ in reopened += 1 }, windowed: { _ in state }, restored: { _ in state = .shown })
+        #expect(await bb.open(Self.location, stillWanted: { true }) == .requested)
+        #expect(reopened == 0)
+        #expect(state == .shown)
+        #expect(activations() == [Self.usual.folder])
+        let (stuck, _) = host(runner, builds: [Self.usual], reopened: { _ in reopened += 1 }, windowed: { _ in .hidden("cg:9") })
+        #expect(await stuck.open(Self.location, stillWanted: { true }) == .requested)
+        #expect(reopened == 0)
+    }
+
+    @Test func openWhenBbsWindowsCannotBeReadReopensAndSaysSoIfNoWindowAppears() async {
+        let runner = Runner()
+        runner.answers["thread open"] = Self.output(#"{"threadId":"thr_abc1","delivered":3}"#)
+        var state = BBWindows.unknown
+        var reopened = 0
+        let (bb, activations) = host(runner, builds: [Self.usual], reopened: { _ in reopened += 1 }, windowed: { _ in state })
+        #expect(await bb.open(Self.location, stillWanted: { true }) == .refused("bb didn\u{2019}t say which windows it has open."))
+        #expect(runner.calls.isEmpty)
+        let (reopening, _) = host(runner, builds: [Self.usual], reopened: { _ in
+            reopened += 1
+            state = .shown
+        }, windowed: { _ in state })
+        #expect(await reopening.open(Self.location, stillWanted: { true }) == .requested)
+        #expect(reopened == 2)
+        #expect(activations().isEmpty)
+    }
+
+    @Test func openNoLongerWantedWhileBbsWindowIsBroughtBackStopsThere() async {
+        let runner = Runner()
+        runner.answers["thread open"] = Self.output(#"{"delivered":1}"#)
+        var wanted = true
+        var restored = 0
+        let (bb, activations) = host(runner, builds: [Self.usual], windowed: { _ in .hidden("cg:9") }, restored: { _ in
+            restored += 1
+            wanted = false
+        })
+        #expect(await bb.open(Self.location, stillWanted: { wanted }) == .failed)
+        #expect(restored == 1)
+        #expect(runner.calls.isEmpty)
+        #expect(activations().isEmpty)
+    }
+
+    @Test func theAppServingABuildIsTheFirstRegularAppAboveItsRuntimeNeverAHelper() {
+        let apps: [Int: (bundle: String?, regular: Bool)] = [
+            30: ("dev.bb.desktop.helper", false), 20: ("dev.bb.desktop", true), 10: ("com.apple.Terminal", true),
+        ]
+        let parents = [40: 30, 30: 20, 20: 10]
+        let found = { (bundle: String?) in BBBuildFinder.appServing(from: 40, bundle: bundle, parent: { parents[$0] }, app: { apps[$0] }) }
+        #expect(found(nil) == 20)
+        #expect(found("dev.bb.desktop") == 20)
+        #expect(found("com.example.other") == nil)
     }
 
     @Test func openNoLongerWantedWhenBBAnswersNeverBringsBBForward() async {
@@ -534,7 +656,7 @@ struct BBHostTests {
         let thread = AgentHostLocation(host: "bb", instance: Self.acme.folder, native: "thr_abc1")
         #expect(await bb.scan() == .found([]))
         #expect(await bb.deliver("x", images: [], request: "r", to: thread) == .accepted)
-        #expect(await bb.open(thread, stillWanted: { true }) == .failed)
+        #expect(await bb.open(thread, stillWanted: { true }) == .refused("bb (Acme) isn\u{2019}t open."))
         #expect(activated().isEmpty)
     }
 

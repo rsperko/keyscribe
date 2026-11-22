@@ -11,7 +11,9 @@ import { Instance } from "./lib/instance.ts"
 import { OmpDriver, PiDriver } from "./lib/pi.ts"
 import { UltimateDriver } from "./lib/ultimate.ts"
 import { failureBundle } from "./lib/artifacts.ts"
+import { clipboard, withClipboard } from "./lib/clipboard.ts"
 import { parseRunOptions } from "./lib/options.ts"
+import { until } from "./lib/util.ts"
 
 const drivers: Record<string, (name: string) => AgentDriver> = {
   claude: (name) => new ClaudeDriver(name),
@@ -43,7 +45,10 @@ const { only, failFast, repeat, keep, replyWait } = options
 const binary = Instance.locate()
 const instance = new Instance(binary)
 const agent = drivers[agentKind]("kestrel")
-const context: Context = { instance, agent, replyWait }
+const context: Context = {
+  instance, agent, replyWait,
+  clipboard: { set: (kind, value) => clipboard(kind, ...(value === undefined ? [] : [value])), keep: withClipboard },
+}
 const results: { id: string; title: string; ok: boolean; why?: string; seconds: number }[] = []
 let cleaning: Promise<void> | undefined
 function cleanup(preserve: boolean) {
@@ -92,6 +97,7 @@ try {
   await instance.launch()
   await agent.start()
   console.log(`conversation: ${agent.conversation} named ${agent.name}`)
+  await until("the app to know the conversation by its name", () => (instance.take(`check on ${agent.name}`).ok ? true : undefined), 90, 3000)
   let stopEarly = false
   for (let round = 0; round < repeat && !stopEarly; round++) {
     for (const exercise of exercises) {

@@ -1,0 +1,23 @@
+{
+  "name": "bb-plugin-keyscribe-conformance-window",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "bb": ">=0.49",
+    "bbPluginSdk": ">=0.6.132"
+  },
+  "bb": {
+    "name": "KeyScribe conformance window",
+    "description": "Test only. Reports which thread a scratch bb window shows and fills a thread's message box, so the conformance run never types into a window.",
+    "branding": {
+      "icon": "Mic"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.6.132"
+  }
+}

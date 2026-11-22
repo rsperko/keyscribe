@@ -46,7 +46,7 @@ export type Config = {
   plugin?: string
 }
 
-type Turn = { id: string; input?: { entry: number; from?: string; prompt: string } }
+type Turn = { id: string; input?: { entry: number; from?: string; prompt?: string } }
 type Member = {
   helloed: boolean
   greeting: boolean
@@ -107,6 +107,13 @@ const waitingTitleLimit = 300
 const waitingDetailLimit = 1000
 const maxImages = 8
 const userInput = "pi.user"
+
+export function senderOf(kind: string): string | null | undefined {
+  if (kind === userInput) return undefined
+  if (kind.startsWith("board.")) return "agent"
+  if (kind === "automations.fired") return "schedule"
+  return null
+}
 
 export function promptDigest(text: string): string {
   const plain = (text.startsWith("​") ? text.slice(1) : text).trim()
@@ -654,7 +661,12 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     const started = m.turn === null
     const prompt = promptDigest(text)
     const turn = startTurn(id, m, prompt)
-    turn.input = { entry, prompt, ...(kind === userInput ? {} : { from: "agent" }) }
+    const from = senderOf(kind)
+    if (from === null) {
+      if (!turn.input) turn.input = { entry, from: "other" }
+    } else {
+      turn.input = { entry, prompt, ...(from ? { from } : {}) }
+    }
     remember(inputs, entry, { conversation: id, turn: turn.id, started })
     const delivery = [...deliveries.values()].find((d) => d.conversation === id && (d.entry === entry || (d.submission !== null && placements.get(d.submission) === entry)))
     if (delivery) return match(delivery, entry)
@@ -689,7 +701,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     m.answer = ""
     m.answered = false
     m.failed = null
-    const after = turn.input ? { prompt: turn.input.prompt, ...(turn.input.from ? { from: turn.input.from } : {}) } : {}
+    const after = turn.input ? { ...(turn.input.prompt ? { prompt: turn.input.prompt } : {}), ...(turn.input.from ? { from: turn.input.from } : {}) } : {}
     report(id, () => ({ op: "turnComplete", session: sessionOf(id), reason, answer, ...after }))
   }
 

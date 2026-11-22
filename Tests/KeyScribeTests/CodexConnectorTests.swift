@@ -120,11 +120,14 @@ struct CodexConnectorTests {
         #expect(!rig.connector.hasFiles(in: rig.target))
     }
 
+    static let trusted = "[hooks.state.\"keyscribe@keyscribe-local:plugin.json#hooks[0]:stop:0:0\"]\ntrusted_hash = \"sha256:b\"\n"
+
     @Test func uninstallRemovesThePluginAndOnlyTheTitleItemItAddedLeavingTheConfigAsItWas() async throws {
         let original = "[tui]\nterminal_title = [\"project-name\", \"git-branch\"]\n\n[hooks.state.\"other@x:hooks[0]:stop:0:0\"]\ntrusted_hash = \"a\"\n"
         let rig = try rig(config: original)
         try await installed(rig)
         #expect(text(rig.config) != original)
+        try Data(((text(rig.config) ?? "") + Self.trusted).utf8).write(to: rig.config)
         try await rig.connector.uninstall(tool: "/x/codex", target: rig.target)
         #expect(text(rig.config) == original)
         #expect(rig.codex.subcommands.suffix(2) == ["plugin remove keyscribe@keyscribe-local", "plugin marketplace remove"])
@@ -196,6 +199,7 @@ struct CodexConnectorTests {
         let original = "[tui]\nterminal_title = [\"project-name\"]\n"
         let rig = try rig(config: original)
         try await installed(rig)
+        try Data(((text(rig.config) ?? "") + Self.trusted).utf8).write(to: rig.config)
         try await rig.connector.uninstallWithoutTool(target: rig.target)
         #expect(text(rig.config) == original)
         #expect(rig.connector.manualUninstall(for: rig.target).count == 3)

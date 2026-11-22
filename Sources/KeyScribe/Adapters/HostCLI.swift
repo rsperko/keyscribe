@@ -23,9 +23,12 @@ public enum HostCLI {
         }
     }
 
+    public static let defaultTimeout: Duration = .seconds(5)
+    public static let defaultGrace: Duration = .seconds(1)
+
     public static func run(
         _ argv: [String], subcommand: String, input: Data? = nil, environment: [String: String]? = nil,
-        timeout: Duration = .seconds(5), grace: Duration = .seconds(1), limit: Int = 1 << 20
+        timeout: Duration = defaultTimeout, grace: Duration = defaultGrace, limit: Int = 1 << 20
     ) async throws -> Output {
         let child = Child()
         return try await withTaskCancellationHandler {

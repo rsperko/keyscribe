@@ -15,6 +15,8 @@ struct UltimateHostTests {
         var pages: [String: String] = ["cg:400": "http://ultimate.localhost:4747/?conversation=61"]
         var frontReads = 0
         var pageReads = 0
+        var openedPages: [String] = []
+        var activationLags = false
     }
 
     final class Box: @unchecked Sendable {
@@ -56,6 +58,10 @@ struct UltimateHostTests {
             }, activate: { app, stillWanted in
                 guard stillWanted() else { return false }
                 front.activated.append(app.pid)
+                if !front.activationLags { front.app = app }
+                return true
+            }, openPage: { url in
+                front.openedPages.append(url.absoluteString)
                 return true
             })
     }
@@ -575,14 +581,77 @@ struct UltimateHostTests {
         #expect(front.shown.map(\.0) == [4747])
         #expect(front.shown.map(\.1) == [61])
         #expect(front.activated == [40])
+        #expect(front.openedPages.isEmpty)
     }
 
-    @Test func openingWithNoPageSeenYetSwitchesButOnlyRequests() async {
+    @Test func openingWithNoPageSeenYetOpensTheConversationsPage() async {
         let front = Front()
         let ultimate = host(front)
         _ = await ultimate.scan()
         #expect(await ultimate.open(location("61"), stillWanted: { true }) == .requested)
         #expect(front.activated.isEmpty)
+        #expect(front.openedPages == ["http://ultimate.localhost:4747/?conversation=61"])
+    }
+
+    @Test func aWindowLastSeenShowingThePageThatNoLongerShowsItIsNotOpenedButThePageIs() async {
+        let front = Front()
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        front.app = Self.browser
+        ultimate.observe(.shown(session: "53@\(Self.home)", on: true, pageConversation: "53"))
+        _ = await ultimate.focusInFront(requireClaim: true)
+        front.pages["cg:400"] = "https://example.com/"
+        front.app = Self.terminal
+        #expect(await ultimate.open(location("61"), stillWanted: { true }) == .requested)
+        #expect(front.openedPages == ["http://ultimate.localhost:4747/?conversation=61"])
+    }
+
+    @Test(arguments: [true, false])
+    func aWindowWhosePageCannotBeReadOrIsNotInFrontYetIsRaisedWithoutOpeningAnotherTab(unreadable: Bool) async {
+        let front = Front()
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        front.app = Self.browser
+        ultimate.observe(.shown(session: "53@\(Self.home)", on: true, pageConversation: "53"))
+        _ = await ultimate.focusInFront(requireClaim: true)
+        front.app = Self.terminal
+        if unreadable { front.pages["cg:400"] = nil } else { front.activationLags = true }
+        #expect(await ultimate.open(location("61"), stillWanted: { true }) == .requested)
+        #expect(front.activated == [40])
+        #expect(front.openedPages.isEmpty)
+    }
+
+    @Test func aPageOpenedForAConversationIsReusedByTheNextOpenOnceItReportsFromTheFront() async {
+        let front = Front()
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        #expect(await ultimate.open(location("61"), stillWanted: { true }) == .requested)
+        front.app = Self.browser
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        for _ in 0..<50 { await Task.yield() }
+        front.app = Self.terminal
+        #expect(await ultimate.open(location("53"), stillWanted: { true }) == .opened)
+        #expect(front.openedPages == ["http://ultimate.localhost:4747/?conversation=61"])
+    }
+
+    @Test func theReaderKeepsAnotherPagesAddressSoAClosedTabReadsAsShowingSomethingElse() {
+        let local = URL(string: "http://ultimate.localhost:4747/?conversation=61")!
+        let other = URL(string: "https://example.com/news")!
+        let link = URL(string: "https://example.com/about")!
+        #expect(UltimateHost.pageURL(in: [("AXURL", link), ("AXDocument", other)]) == other)
+        #expect(UltimateHost.pageURL(in: [("AXDocument", other), ("AXURL", local)]) == local)
+        #expect(UltimateHost.pageURL(in: [("AXURL", link)]) == nil)
+        #expect(UltimateHost.pageURL(in: []) == nil)
+    }
+
+    @Test func anOpenNoLongerWantedOpensNoPage() async {
+        let front = Front()
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        var wanted = true
+        let open = await ultimate.open(location("61"), stillWanted: { defer { wanted = false }; return wanted })
+        #expect(open == .failed)
+        #expect(front.openedPages.isEmpty)
     }
 
     @Test func anOpenNoLongerWantedTouchesNothing() async {

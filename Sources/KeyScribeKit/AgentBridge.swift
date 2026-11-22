@@ -209,10 +209,12 @@ extension AgentEvent.Hello {
 public struct AgentAcceptedMessage: Equatable, Sendable {
     public var digest: String
     public var at: Date?
+    public var fromHost: Bool
 
-    public init(digest: String, at: Date?) {
+    public init(digest: String, at: Date?, fromHost: Bool = false) {
         self.digest = digest
         self.at = at
+        self.fromHost = fromHost
     }
 }
 
@@ -264,6 +266,7 @@ public enum AgentBridgeCodec {
     private struct AcceptedWire: Codable {
         var digest: String
         var at: Double?
+        var host: Bool?
     }
 
     private struct Wire: Codable {
@@ -379,7 +382,7 @@ public enum AgentBridgeCodec {
         case "turnComplete":
             let from = w.from.flatMap(AgentTurnInput.Sender.init(rawValue:))
             let accepted = w.accepted.map {
-                $0.suffix(acceptedLimit).map { AgentAcceptedMessage(digest: $0.digest, at: $0.at.map { Date(timeIntervalSince1970: $0 / 1000) }) }
+                $0.suffix(acceptedLimit).map { AgentAcceptedMessage(digest: $0.digest, at: $0.at.map { Date(timeIntervalSince1970: $0 / 1000) }, fromHost: $0.host == true) }
             }
             let after = from == nil && w.prompt == nil && accepted == nil ? nil : AgentTurnInput(from: from, prompt: w.prompt, accepted: accepted)
             return .turnComplete(session: try required(w.session), reason: w.reason ?? "", answer: w.answer ?? "", after: after)

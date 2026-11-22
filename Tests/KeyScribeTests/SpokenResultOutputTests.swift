@@ -176,6 +176,112 @@ struct SpokenResultOutputTests {
         #expect(unread.map(\.1) == ["r1"])
     }
 
+    enum UnreadState: CaseIterable { case preparing, queued, playingUnheard, playingHeard, mergedUnheard, replayed }
+    enum UnreadEvent: CaseIterable { case supersede, supersedeBySameTake, forget, withdraw, stop, endedWhileDictating, endedIdle }
+
+    private static let wordy = Array(repeating: "Then more words.", count: 20).joined(separator: " ")
+
+    private static func kind(_ unread: SpokenResultOutput.Unread) -> String {
+        switch unread {
+        case .inFront: "in front"
+        case .replaced: "replaced"
+        case .dictationStarted: "dictation"
+        case .cancelled: "cancelled"
+        case .disconnected: "disconnected"
+        case .stopped: "stopped"
+        case .notStarted: "not started"
+        }
+    }
+
+    private static func expectedUnread(_ state: UnreadState, _ event: UnreadEvent) -> [String] {
+        let origins = state == .mergedUnheard ? ["a", "a2"] : ["a"]
+        let reason: String? = switch (state, event) {
+        case (.playingHeard, _), (.replayed, _): nil
+        case (_, .supersede): "replaced"
+        case (_, .forget): "disconnected"
+        case (_, .withdraw): "cancelled"
+        case (_, .stop): "stopped"
+        case (.preparing, .endedWhileDictating), (.preparing, .endedIdle), (.queued, .endedWhileDictating), (.queued, .endedIdle): nil
+        case (_, .endedWhileDictating): "dictation"
+        case (_, .endedIdle): "not started"
+        case (_, .supersedeBySameTake): "replaced"
+        }
+        guard let reason else { return [] }
+        let reported = event == .supersedeBySameTake ? origins.filter { $0 != "a" } : origins
+        return reported.map { "\($0) \(reason)" }
+    }
+
+    @Test(arguments: UnreadState.allCases)
+    func aReplyDroppedBeforeItIsHeardIsReportedForItsTakeWithWhyAndOneHeardOrReplayedIsNot(state: UnreadState) async {
+        for event in UnreadEvent.allCases {
+            let silencer = SpeechSilencer()
+            let llm = FakeLLM()
+            let (output, speech, _) = make(llm: llm, permits: state != .mergedUnheard, silencer: silencer)
+            var unread: [String] = []
+            output.onUnread = { unread.append("\($1) \(Self.kind($0))") }
+            switch state {
+            case .preparing:
+                llm.holds = true
+                output.finished(conversation: "pi:s1", handle: "api", answer: Self.wordy, origin: "a")
+            case .queued:
+                output.finished(conversation: "pi:s0", handle: "cli", answer: "Playing.")
+                output.finished(conversation: "pi:s1", handle: "api", answer: "Queued.", origin: "a")
+            case .playingUnheard:
+                output.finished(conversation: "pi:s1", handle: "api", answer: "Playing.", origin: "a")
+            case .playingHeard:
+                output.finished(conversation: "pi:s1", handle: "api", answer: "Playing.", origin: "a")
+                await settled()
+                speech.start()
+            case .mergedUnheard:
+                output.finished(conversation: "pi:s0", handle: "cli", answer: "Playing.")
+                await settled()
+                output.finished(conversation: "pi:s1", handle: "api", answer: Self.wordy, origin: "a")
+                output.finished(conversation: "pi:s2", handle: "docs", answer: Self.wordy, origin: "a2")
+                await settled()
+                speech.finish()
+            case .replayed:
+                output.finished(conversation: "pi:s1", handle: "api", answer: "Playing.", origin: "a")
+                await settled()
+                speech.start()
+                speech.finish()
+                _ = output.repeatLast()
+            }
+            await settled()
+            switch event {
+            case .supersede: output.finished(conversation: "pi:s1", handle: "api", answer: "Newer.", origin: "b")
+            case .supersedeBySameTake: output.finished(conversation: "pi:s1", handle: "api", answer: "Newer.", origin: "a")
+            case .forget: output.forget(conversation: "pi:s1")
+            case .withdraw: output.withdraw(conversation: "pi:s1")
+            case .stop: output.stop()
+            case .endedWhileDictating: silencer.recordingStarted()
+            case .endedIdle: speech.finish()
+            }
+            await settled()
+            #expect(unread == Self.expectedUnread(state, event), "\(state) then \(event)")
+            llm.release()
+            await settled()
+        }
+    }
+
+    @Test func aReplyPreparedAfterReadingWasTurnedOffIsReportedAndNotLeftPreparing() async {
+        let box = SettingsBox(SpokenResultSettings(enabled: true, connection: "omlx"))
+        let llm = FakeLLM()
+        llm.holds = true
+        let connection = connection
+        let output = SpokenResultOutput(
+            client: llm, permits: { _ in true }, speech: FakeSpeech(), silencer: SpeechSilencer(), settings: { box.value },
+            connection: { $0 == connection.id ? connection : nil })
+        var unread: [String] = []
+        output.onUnread = { unread.append("\($1) \(Self.kind($0))") }
+        output.finished(conversation: "pi:s1", handle: "api", answer: Self.wordy, origin: "a")
+        await settled()
+        box.value.enabled = false
+        llm.release()
+        await settled()
+        #expect(unread == ["a stopped"])
+        #expect(output.pendingSummaries == 0)
+    }
+
     @Test func aResultStillCheckingWhatIsInFrontIsReplacedByANewerOneAndDroppedByStop() async {
         let gate = FrontGate()
         let (output, speech, llm) = make(inFront: { _ in await gate.wait() })

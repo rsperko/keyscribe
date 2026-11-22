@@ -325,8 +325,11 @@ a hello on any other protocol is refused with `426` and is never registered or s
   `/hooks`, which Settings reads from Codex's app server. Installing also adds the `thread-id` item to
   `[tui] terminal_title` in that home's `config.toml` and records what it changed in `title-item.json`; a
   `config.toml` KeyScribe cannot read stops the install before anything changes. Uninstalling runs
-  `codex plugin remove` and `codex plugin marketplace remove`, removes only the item it added, and deletes the
-  marketplace folder. An item the user removed is reported as needing repair and put back only by Update.
+  `codex plugin remove` and `codex plugin marketplace remove`, removes only the item it added and the trust Codex
+  recorded for the plugin's own hooks (the `[hooks.state."<plugin id>:…"]` tables, which `codex plugin remove` leaves
+  behind as of Codex 0.171), and deletes the marketplace folder. Both changes are one write of `config.toml`, made only
+  when the file still reads as TOML afterwards with every other table and setting unchanged; text that only looks like
+  such a table, inside a string, is never touched. An item the user removed is reported as needing repair and put back only by Update.
 - **A report is an event-only path for a host's hooks.** A hook that cannot hold a connection (Codex's) posts
   the agent's own hook payload, at most `AgentBridgeCodec.maxFrameBytes`, to `POST /report` with
   `Authorization: Bearer <token>`, `X-KeyScribe-Agent` and `X-KeyScribe-Installation`; there is no hello and no

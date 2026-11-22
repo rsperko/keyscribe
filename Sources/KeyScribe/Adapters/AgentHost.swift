@@ -12,6 +12,7 @@ public enum AgentHostOpen: Equatable, Sendable {
     case opened
     case requested
     case failed
+    case refused(String)
     case unsupported
 }
 
@@ -102,6 +103,7 @@ public protocol AgentHost: AnyObject {
     func location(in environment: [String: String]) -> AgentHostLocation?
     func scan() async -> AgentHostScan
     func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen
+    var openDeadline: Duration { get }
     func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront
     func focusInFront(requireClaim: Bool) async -> AgentHostFocus?
     func focusedWindow() -> AgentHostApp?
@@ -125,6 +127,7 @@ extension AgentHost {
     public var identityKeys: [String] { [] }
     public func location(in environment: [String: String]) -> AgentHostLocation? { nil }
     public func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen { .unsupported }
+    public var openDeadline: Duration { .seconds(8) }
     public func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront {
         .unsupported
     }

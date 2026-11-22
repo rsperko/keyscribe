@@ -36,5 +36,6 @@ test("the recorded reply contains visible message text without thinking or provi
   assert.deepEqual(messages, [
     { role: "user", text: "Say ready", turn: "1" },
     { role: "agent", text: "ready", turn: "1" },
+    { role: "ended", text: "", turn: "1" },
   ])
 })

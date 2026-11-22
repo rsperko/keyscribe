@@ -66,11 +66,13 @@ def brace_lang_comment_lines(text, is_swift):
     block_depth = 0
     in_triple = False
     in_template = False
+    raw_triple = None
     for line_no, line in enumerate(text.splitlines(), start=1):
         i = 0
         n = len(line)
         in_single = False
         in_double = False
+        raw = None
         if block_depth > 0 and line.strip():
             comment_lines.add(line_no)
         while i < n:
@@ -81,6 +83,22 @@ def brace_lang_comment_lines(text, is_swift):
                 elif line.startswith("*/", i):
                     block_depth -= 1
                     i += 2
+                else:
+                    i += 1
+                continue
+            if raw_triple is not None:
+                closing = '"""' + raw_triple
+                if line.startswith(closing, i):
+                    raw_triple = None
+                    i += len(closing)
+                else:
+                    i += 1
+                continue
+            if raw is not None:
+                closing = '"' + raw
+                if line.startswith(closing, i):
+                    raw = None
+                    i += len(closing)
                 else:
                     i += 1
                 continue
@@ -128,6 +146,17 @@ def brace_lang_comment_lines(text, is_swift):
                 block_depth += 1
                 i += 2
                 continue
+            if is_swift and line[i] == "#":
+                hashes = len(line[i:]) - len(line[i:].lstrip("#"))
+                after = i + hashes
+                if line.startswith('"""', after):
+                    raw_triple = "#" * hashes
+                    i = after + 3
+                    continue
+                if line.startswith('"', after):
+                    raw = "#" * hashes
+                    i = after + 1
+                    continue
             if is_swift and line.startswith('"""', i):
                 in_triple = True
                 i += 3

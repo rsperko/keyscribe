@@ -384,10 +384,10 @@ final class AgentTake {
                             outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: shown, facts: facts)
                 return
             }
-            let shown = line(reason, retry, reachable(snapshot, agents, for: retry), inFront)
+            let shown = line(reason, retry, reachable(snapshot, agents, for: retry))
             finishAgent(state: .error(message: AgentOutput.kept(shown, body: body), action: Self.askAction(reason, mode: mode), heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil,
-                        recorded: line(reason, nil, [:], nil), facts: facts)
+                        recorded: line(reason, nil, [:]), facts: facts)
         case .deliver(let id, let body, _):
             host.noteAgentDestination(id, facts: facts)
             await host.rewriteAndDeliver(

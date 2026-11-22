@@ -95,7 +95,27 @@ enum BBBuildFinder {
     }
 
     @MainActor static func runningApp(_ build: BBBuild) -> NSRunningApplication? {
-        sharingIdentity(build) ?? declaring(build.folder)
+        serving(build) ?? sharingIdentity(build) ?? declaring(build.folder)
+    }
+
+    @MainActor private static func serving(_ build: BBBuild) -> NSRunningApplication? {
+        guard let pid = BBBuilds.process(runtime: runtime(of: build.folder), started: started) else { return nil }
+        let found = appServing(from: Int(pid), bundle: build.bundle, parent: SystemTerminalFacts.parent(of:)) { pid in
+            NSRunningApplication(processIdentifier: pid_t(pid)).map { ($0.bundleIdentifier, $0.activationPolicy == .regular) }
+        }
+        return found.flatMap { NSRunningApplication(processIdentifier: pid_t($0)) }
+    }
+
+    nonisolated static func appServing(
+        from pid: Int, bundle: String?, parent: (Int) -> Int?, app: (Int) -> (bundle: String?, regular: Bool)?
+    ) -> Int? {
+        var pid = pid
+        for _ in 0..<4 {
+            if let found = app(pid), found.regular, let id = found.bundle, bundle == nil || id == bundle { return pid }
+            guard let next = parent(pid), next > 1 else { return nil }
+            pid = next
+        }
+        return nil
     }
 
     @MainActor private static func declaring(_ folder: String) -> NSRunningApplication? {
@@ -150,6 +170,38 @@ enum BBBuildFinder {
         }
         nonisolated(unsafe) let tokens = observers
         return { tokens.forEach(center.removeObserver) }
+    }
+
+    @MainActor static func shown(_ build: BBBuild) -> Bool {
+        guard let pid = runningApp(build)?.processIdentifier else { return false }
+        let onScreen = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return onScreen.contains { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }
+    }
+
+    @MainActor static func windows(_ build: BBBuild) async -> BBWindows {
+        guard let pid = runningApp(build)?.processIdentifier else { return .none }
+        if shown(build) { return .shown }
+        switch await Task.detached(operation: { AppWindows.read(pid: pid) { true } }).value {
+        case .windows(let listed):
+            let window = listed.first { $0.subrole == kAXStandardWindowSubrole as String && $0.number != nil }?.number
+            return window.map { .hidden("cg:\($0)") } ?? .none
+        case .noResponse, .notTrusted:
+            return .unknown
+        }
+    }
+
+    @MainActor static func restore(_ build: BBBuild, window: String, stillWanted: @escaping @MainActor () -> Bool) async {
+        guard let app = runningApp(build), let bundle = app.bundleIdentifier else { return }
+        let target = VoiceCommandCatalog.Window(bundleId: bundle, appName: app.localizedName ?? "", pid: app.processIdentifier, id: window, title: "")
+        _ = await LiveVoiceCommandSystem().focusWindow(target, stillWanted: stillWanted)
+    }
+
+    @MainActor static func reopen(_ build: BBBuild) {
+        guard let url = runningApp(build)?.bundleURL else { return }
+        let open = Process()
+        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        open.arguments = ["-a", url.path]
+        try? open.run()
     }
 
     @MainActor static func bringForward(_ build: BBBuild) {

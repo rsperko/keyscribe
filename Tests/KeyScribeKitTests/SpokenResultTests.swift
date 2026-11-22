@@ -158,6 +158,17 @@ struct SpokenResultTests {
         #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: mine, accepted: []), asked: asked) == nil)
     }
 
+    @Test func aNoteTheHostAddedAfterTheRequestLeavesTheReplyTheRequests() {
+        let asked = "name three fruits"
+        let mine = AgentPromptDigest.of(asked)
+        let note = AgentAcceptedMessage(digest: AgentPromptDigest.of("[bb system] child completed"), at: nil, fromHost: true)
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: .other, prompt: nil, accepted: [.init(digest: mine, at: nil), note]), asked: asked) == .request(asked))
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: .other, prompt: nil, accepted: [note, .init(digest: mine, at: nil), note]), asked: asked) == .request(asked))
+        let typed = AgentAcceptedMessage(digest: AgentPromptDigest.of("typed later"), at: nil)
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: nil, accepted: [.init(digest: mine, at: nil), typed, note]), asked: asked) == nil)
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: .other, prompt: nil, accepted: [note]), asked: asked) == .sender(.other))
+    }
+
     @Test func aSenderCueJoinsTheConversationNameWithoutAddingASentence() {
         #expect(SpokenResult.prefaced("Done.", name: "auth", cause: .sender(.agent)) == "auth, answering another agent: Done.")
         #expect(SpokenResult.prefaced("Done.", name: "", cause: .sender(.task)) == "After a background task: Done.")

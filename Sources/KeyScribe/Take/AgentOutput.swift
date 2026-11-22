@@ -251,8 +251,8 @@ final class AgentOutput {
         }
     }
 
-    static func openAskLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], focused: String? = nil) -> String {
-        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names, focused: focused)].compactMap { $0 }
+    static func openAskLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:]) -> String {
+        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names)].compactMap { $0 }
         guard !advice.isEmpty else {
             let problem = askProblem(reason)
             return problem.prefix(1).uppercased() + problem.dropFirst()
@@ -260,8 +260,8 @@ final class AgentOutput {
         return ([sentence(askProblem(reason))] + advice).joined(separator: " ")
     }
 
-    static func askLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], focused: String? = nil) -> String {
-        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names, focused: focused)].compactMap { $0 }
+    static func askLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:]) -> String {
+        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names)].compactMap { $0 }
         return ([sentence(askProblem(reason)), nothingSent] + advice).joined(separator: " ")
     }
 
@@ -318,15 +318,10 @@ final class AgentOutput {
         hint.isEmpty ? line : line + (line.hasSuffix(".") ? " " : ". ") + hint
     }
 
-    static func example(names: [String: String], focused: String?) -> String? {
-        let ordered = names.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-        return ordered.first { names[$0] == focused } ?? ordered.first
-    }
-
-    private static func retryHint(_ reason: AgentRecipient.AskReason, retry: Retry?, names: [String: String], focused: String?) -> String? {
+    private static func retryHint(_ reason: AgentRecipient.AskReason, retry: Retry?, names: [String: String]) -> String? {
         guard let retry else { return nil }
         let name: String? = switch reason {
-        case .unknownName: example(names: names, focused: focused)
+        case .unknownName(let spoken): AgentAddress.resembling(spoken, among: Array(names.keys))
         case .shownOn(_, let name, _): names[name] == nil ? nil : name
         default: nil
         }

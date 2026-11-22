@@ -1031,7 +1031,7 @@ struct AgentDeliveryWiringTests {
 
     @Test func aRetryUsesTheNameAPaneTookDuringTheTakeNotTheOneItLeft() async {
         let reader = AgentPlaceTrackerTests.Reader()
-        let rig = await rig("Tell frontend to run the tests.", focused: "claude:s1", places: reader)
+        let rig = await rig("Tell zeta green to run the tests.", focused: "claude:s1", places: reader)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         while let reading = rig.hub.placeTracker?.reading { await reading.value }
         let pane = "/s#pane:p1"
@@ -1046,7 +1046,7 @@ struct AgentDeliveryWiringTests {
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
             if case .error(let message, _, _) = $0 {
-                message == "No conversation named \u{201C}frontend\u{201D}. Nothing sent. Try \u{201C}tell zeta, \u{2026}\u{201D}. Your words are kept for Paste last dictation."
+                message == "No conversation named \u{201C}zeta green\u{201D}. Nothing sent. Try \u{201C}tell zeta, \u{2026}\u{201D}. Your words are kept for Paste last dictation."
             } else { false }
         })
     }
@@ -1308,7 +1308,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(focus.sessions.isEmpty)
-        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == "No conversation named \u{201C}two\u{201D}. Try \u{201C}open keyscribe\u{201D}" } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == "No conversation named \u{201C}two\u{201D}" } else { false } })
     }
 
     @Test func sessionBeforeANameAddressesThatConversation() async {
@@ -3168,7 +3168,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test(arguments: [
-        ("Open frontend.", "No conversation named \u{201C}frontend\u{201D}. Try \u{201C}open keyscribe\u{201D}", "No conversation named \u{201C}frontend\u{201D}"),
+        ("Open frontend.", "No conversation named \u{201C}frontend\u{201D}", "No conversation named \u{201C}frontend\u{201D}"),
         ("Go to key scrub", "\u{201C}key scrub\u{201D} sounded like \u{201C}keyscribe\u{201D}", "\u{201C}key scrub\u{201D} sounded like \u{201C}keyscribe\u{201D}"),
         ("Go to session keyscribe review", "No conversation named \u{201C}keyscribe review\u{201D}. Try \u{201C}open keyscribe\u{201D}", "No conversation named \u{201C}keyscribe review\u{201D}"),
     ])
@@ -3184,18 +3184,18 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.summary == recorded)
     }
 
-    @Test func anUnknownNameOffersOneRetryWithTheHighlightedConversationAndOpensItsSettings() async {
-        let rig = await rig("Tell frontend to run the tests.", focused: "claude:s2")
+    @Test func anUnknownNameOffersOneRetryWithTheConversationItResemblesAndOpensItsSettings() async {
+        let rig = await rig("Tell keyscribe green to run the tests.", focused: "claude:s2")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let entry = await lastHistoryEntry(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
             if case .error(let message, .openAgents?, _) = $0 {
-                message == "No conversation named \u{201C}frontend\u{201D}. Nothing sent. Try \u{201C}tell keyscribe blue, \u{2026}\u{201D}. Your words are kept for Paste last dictation."
+                message == "No conversation named \u{201C}keyscribe green\u{201D}. Nothing sent. Try \u{201C}tell keyscribe, \u{2026}\u{201D}. Your words are kept for Paste last dictation."
             } else { false }
         })
-        #expect(entry?.failureReason == "No conversation named \u{201C}frontend\u{201D}. Nothing sent.")
+        #expect(entry?.failureReason == "No conversation named \u{201C}keyscribe green\u{201D}. Nothing sent.")
     }
 
     @Test func aQueuedMessageUpdatesItsOwnEntryWhenItIsSentLater() async {
@@ -3873,15 +3873,15 @@ struct AgentDeliveryWiringTests {
         #expect(!rig.controller.isBusy)
     }
 
-    @Test func aMessageRetryNamesAConversationThatCanReceiveItRatherThanTheHighlightedOneWithoutItsConnector() async {
-        let rig = await rig("Tell frontend to run the tests.", focused: "claude:s1")
+    @Test func aMessageRetryNeverNamesAConversationWithoutItsConnector() async {
+        let rig = await rig("Tell keyscribe green to run the tests.", focused: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.unreachable = ["claude:s1"]
         rig.hub.refresh()
         await take(rig)
         #expect(rig.hud.states.contains {
             if case .error(let message, .openAgents?, _) = $0 {
-                message == "No conversation named \u{201C}frontend\u{201D}. Nothing sent. Try \u{201C}tell keyscribe blue, \u{2026}\u{201D}. Your words are kept for Paste last dictation."
+                message == "No conversation named \u{201C}keyscribe green\u{201D}. Nothing sent. Your words are kept for Paste last dictation."
             } else { false }
         })
     }
@@ -3898,24 +3898,24 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func anOpenRetryStillNamesAConversationWithoutItsConnector() async {
-        let rig = await rig("Open frontend.", focused: "claude:s1")
+        let rig = await rig("Go to session keyscribe review", focused: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.live = false
         rig.hub.refresh()
         await take(rig)
         #expect(rig.hud.states.contains {
-            if case .error("No conversation named \u{201C}frontend\u{201D}. Try \u{201C}open keyscribe\u{201D}", .openAgents?, _) = $0 { true } else { false }
+            if case .error("No conversation named \u{201C}keyscribe review\u{201D}. Try \u{201C}open keyscribe\u{201D}", .openAgents?, _) = $0 { true } else { false }
         })
     }
 
     @Test func aDisconnectedConversationIsNeverOfferedAsTheRetry() async {
-        let rig = await rig("Tell frontend to run the tests.")
+        let rig = await rig("Tell keyscribe green to run the tests.")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.disconnect("claude:s1")
         await take(rig)
         #expect(rig.hud.states.contains {
             if case .error(let message, _, _) = $0 {
-                message == "No conversation named \u{201C}frontend\u{201D}. Nothing sent. Try \u{201C}tell keyscribe blue, \u{2026}\u{201D}. Your words are kept for Paste last dictation."
+                message == "No conversation named \u{201C}keyscribe green\u{201D}. Nothing sent. Your words are kept for Paste last dictation."
             } else { false }
         })
     }

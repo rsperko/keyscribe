@@ -47,7 +47,11 @@ public enum BBBuilds {
 
     public static func serves(runtime: Data?, started: (Int32) -> Date?) -> Bool { localServer(runtime: runtime, started: started) != nil }
 
-    private static func localServer(runtime: Data?, started: (Int32) -> Date?) -> String? {
+    public static func process(runtime: Data?, started: (Int32) -> Date?) -> Int32? { trusted(runtime: runtime, started: started)?.pid }
+
+    private static func localServer(runtime: Data?, started: (Int32) -> Date?) -> String? { trusted(runtime: runtime, started: started)?.server }
+
+    private static func trusted(runtime: Data?, started: (Int32) -> Date?) -> (pid: Int32, server: String)? {
         struct Runtime: Decodable {
             var pid: Int32?
             var serverUrl: String?
@@ -58,7 +62,7 @@ public enum BBBuilds {
               LocalServiceRecord.trusts(processStarted: started(pid), recordedAt: recorded), let text = record.serverUrl,
               LocalServiceRecord.loopback(text) != nil
         else { return nil }
-        return text
+        return (pid, text)
     }
 
     private static func instant(_ text: String) -> Date? {

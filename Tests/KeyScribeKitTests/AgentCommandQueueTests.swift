@@ -722,6 +722,11 @@ struct AgentBridgeCodecTests {
                        after: AgentTurnInput(from: nil, prompt: nil, accepted: [
                            .init(digest: "aaaaaaaaaaaaaaaa", at: Date(timeIntervalSince1970: 5)), .init(digest: "bbbbbbbbbbbbbbbb", at: nil),
                        ]))),
+        (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","accepted":[{"digest":"aaaaaaaaaaaaaaaa","host":true},{"digest":"bbbbbbbbbbbbbbbb","host":false}]}"#,
+         .turnComplete(session: "s1", reason: "answer", answer: "done",
+                       after: AgentTurnInput(from: nil, prompt: nil, accepted: [
+                           .init(digest: "aaaaaaaaaaaaaaaa", at: nil, fromHost: true), .init(digest: "bbbbbbbbbbbbbbbb", at: nil),
+                       ]))),
         (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","accepted":[]}"#,
          .turnComplete(session: "s1", reason: "answer", answer: "done", after: AgentTurnInput(from: nil, prompt: nil, accepted: []))),
         (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","from":"user"}"#,

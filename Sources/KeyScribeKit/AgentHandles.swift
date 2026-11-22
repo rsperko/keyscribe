@@ -414,6 +414,23 @@ public enum AgentAddress: Equatable, Sendable {
         return scored.filter { $0.1 == best }.map(\.0).sorted()
     }
 
+    public static func resembling(_ spoken: String, among names: [String]) -> String? {
+        let said = AgentHandles.normalize(spoken).split(separator: " ").map { AgentHandles.singular(String($0)) }
+        guard !said.isEmpty else { return nil }
+        let scored = names.compactMap { name -> (name: String, distance: Int)? in
+            let words = AgentHandles.normalize(name).split(separator: " ").map { AgentHandles.singular(String($0)) }
+            guard !words.isEmpty else { return nil }
+            if words.starts(with: said) || said.starts(with: words) { return (name, 0) }
+            guard words.count >= said.count else { return nil }
+            let distances = zip(said, words).map { said, word in (editDistance(said, word), max(1, word.count / 3)) }
+            guard distances.allSatisfy({ $0.0 <= $0.1 }) else { return nil }
+            return (name, distances.map(\.0).reduce(0, +))
+        }
+        guard let best = scored.map(\.distance).min() else { return nil }
+        let closest = scored.filter { $0.distance == best }
+        return closest.count == 1 ? closest[0].name : nil
+    }
+
     private static func isNumberLike(_ name: String) -> Bool {
         let words = AgentHandles.normalize(name).split(separator: " ").map(String.init)
         return !words.isEmpty && words.allSatisfy(isRowWord)

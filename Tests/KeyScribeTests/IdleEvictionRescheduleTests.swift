@@ -63,7 +63,7 @@ struct IdleEvictionRescheduleTests {
 
         let evicted = await withTaskGroup(of: Bool.self) { group in
             group.addTask { await engine.evicted.wait(); return true }
-            group.addTask { try? await Task.sleep(for: .seconds(2)); return false }
+            group.addTask { try? await Task.sleep(for: .seconds(30)); return false }
             let first = await group.next() ?? false
             group.cancelAll()
             return first

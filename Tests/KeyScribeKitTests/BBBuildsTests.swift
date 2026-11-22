@@ -52,6 +52,14 @@ struct BBBuildsTests {
         #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: Data("{".utf8), started: Self.ours)["BB_SERVER_URL"] == nil)
     }
 
+    @Test func theProcessACopyRunsIsTheOneItsTrustedRecordNames() {
+        let record = { (pid: String) in Data(#"{"pid":\#(pid),"serverUrl":"http://127.0.0.1:4411","startedAt":"\#(Self.recorded)"}"#.utf8) }
+        #expect(BBBuilds.process(runtime: record("41"), started: Self.ours) == 41)
+        #expect(BBBuilds.process(runtime: record("42"), started: Self.ours) == nil)
+        #expect(BBBuilds.process(runtime: nil, started: Self.ours) == nil)
+        #expect(BBBuilds.process(runtime: Data(#"{"pid":41,"serverUrl":"https://bb.example.com","startedAt":"\#(Self.recorded)"}"#.utf8), started: Self.ours) == nil)
+    }
+
     @Test func theRecordBb0490WritesIsTrustedWhileTheProcessThatWroteItRuns() {
         let record = Data(#"""
             {

@@ -10,6 +10,7 @@ enum AgentFocusResult: Equatable, Sendable {
     case unsupported(String)
     case connectorOutdated(String, noun: String = "tab")
     case notAllowed(String, noun: String = "tab")
+    case refused(String)
     case none
 
     func hudState(handle: String, detail: String, agent: AgentKind? = nil) -> HUDState {
@@ -27,6 +28,7 @@ enum AgentFocusResult: Equatable, Sendable {
                 action: .openAutomationSettings)
         case .connectorOutdated(let app, let noun):
             .advisory(message: "Brought \(app) forward. Update the \(agent?.connectorName ?? "connector") in Settings, then \(Self.reload(agent, in: handle)) to open its \(noun).")
+        case .refused(let why): .advisory(message: "Couldn\u{2019}t open \(handle). \(why)")
         case .none: .advisory(message: "Nothing showing \(handle) could be brought forward.")
         }
     }
@@ -42,6 +44,7 @@ enum AgentFocusResult: Equatable, Sendable {
         case .unsupported(let app): forward(app, "\(handle)\u{2019}s terminal not selected")
         case .notAllowed(let app, let noun): forward(app, "no access to select \(handle)\u{2019}s \(noun)")
         case .connectorOutdated(let app, _): forward(app, "the \(agent?.connectorName ?? "connector") needs an update")
+        case .refused(let why): "Couldn\u{2019}t open \(handle). \(why)"
         case .none: "Nothing showing \(handle) was brought forward"
         }
     }

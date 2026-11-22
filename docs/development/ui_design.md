@@ -514,7 +514,10 @@ like any other. Otherwise the HUD says which name it sounded like.
 
 When the name matches no conversation at all (“No conversation named “architect””), the HUD adds one retry
 it would accept: “Try “tell keyscribe, …”” for a message, “Try “open keyscribe”” after a bring-forward word.
-It names the conversation in front when that one qualifies, otherwise the first that does alphabetically. A
+It names the one qualifying conversation whose name resembles what was said: one that begins with those words,
+that those words begin with, or whose first words are each a near miss of them (`AgentAddress.resembling`). When
+no name resembles them, or several resemble them equally, there is no retry, since naming an unrelated conversation
+reads as a guess at what was meant. A
 message retry offers only a conversation that can take a message now (its connector is live); an open retry
 offers any conversation still running, since bringing a terminal forward needs no connector. Disconnected
 conversations are never offered, and when none qualifies the line ends at the problem. A conversation is
@@ -2411,7 +2414,9 @@ shows it. Only turns the user's own dictation started, or that the user asked to
 not. A conversation that is in front when its turn finishes is neither summarized nor read: the user is already looking
 at the reply. Leaving it afterwards does not bring the reply back. When History keeps the dictation that started the
 turn, its “What happened” steps say so (“Not read aloud: docs was in front when it finished”), so a reply the user
-expected to hear can be explained. A turn the user asked to hear is the exception, with its notices: the user asked, and may have stepped
+expected to hear can be explained. Every other reply dropped before it was heard says why the same way, such as
+“Not read aloud: something newer from docs replaced it” or “Not read aloud: a dictation started before it played”
+(`SpokenResultOutput.Unread` holds the reasons), so no reply the user waited for disappears without a trace. A reply replaced by a newer one for the same dictation is not reported, since that dictation is still answered aloud. A turn the user asked to hear is the exception, with its notices: the user asked, and may have stepped
 away with the terminal still in front. The check uses the same front reading as voice commands, but reads once: voice commands read twice
 and act only on an unchanged view because they act on another app, while a wrong skip costs one summary, so the
 second read and the window lookup it compares are left out. When what is in front cannot

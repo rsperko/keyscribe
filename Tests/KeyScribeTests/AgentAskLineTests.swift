@@ -7,21 +7,24 @@ struct AgentAskLineTests {
     let names = ["two": "a", "api": "b", "web blue": "c"]
 
     @Test func anUnknownNameWithNoConversationToOfferSaysOnlyThat() {
-        #expect(AgentOutput.askLine(.unknownName("architect"), retry: .tell, names: [:], focused: nil)
+        #expect(AgentOutput.askLine(.unknownName("architect"), retry: .tell, names: [:])
             == "No conversation named \u{201C}architect\u{201D}. Nothing sent.")
     }
 
-    @Test func theRetryNamesTheConversationInFrontElseTheFirstAlphabetically() {
-        #expect(AgentOutput.example(names: names, focused: "c") == "web blue")
-        #expect(AgentOutput.example(names: names, focused: nil) == "api")
-        #expect(AgentOutput.example(names: names, focused: "gone") == "api")
+    @Test func theRetryNamesOnlyTheConversationWhoseNameResemblesWhatWasSaid() {
+        #expect(AgentOutput.askLine(.unknownName("web"), retry: .open, names: names)
+            == "No conversation named \u{201C}web\u{201D}. Nothing sent. Try \u{201C}open web blue\u{201D}")
+        #expect(AgentOutput.askLine(.unknownName("apl"), retry: .tell, names: names)
+            == "No conversation named \u{201C}apl\u{201D}. Nothing sent. Try \u{201C}tell api, \u{2026}\u{201D}")
+        #expect(AgentOutput.askLine(.unknownName("zebra"), retry: .tell, names: names)
+            == "No conversation named \u{201C}zebra\u{201D}. Nothing sent.")
     }
 
     @Test func aWordShownOnAConversationOffersThatConversationOnlyWhileItCanBeReached() {
         let reason = AgentRecipient.AskReason.shownOn("marvin", name: "cos", as: "herdr pane title")
-        #expect(AgentOutput.askLine(reason, retry: .tell, names: ["cos": "a", "api": "b"], focused: "b")
+        #expect(AgentOutput.askLine(reason, retry: .tell, names: ["cos": "a", "api": "b"])
             == "\u{201C}marvin\u{201D} is the herdr pane title of \u{201C}cos\u{201D}. Nothing sent. Try \u{201C}tell cos, \u{2026}\u{201D}")
-        #expect(AgentOutput.askLine(reason, retry: .tell, names: ["api": "b"], focused: "b")
+        #expect(AgentOutput.askLine(reason, retry: .tell, names: ["api": "b"])
             == "\u{201C}marvin\u{201D} is the herdr pane title of \u{201C}cos\u{201D}. Nothing sent.")
     }
 
@@ -35,7 +38,7 @@ struct AgentAskLineTests {
     }
 
     @Test func otherReasonsOfferNoRetry() {
-        #expect(AgentOutput.askLine(.noSuchRow(4), retry: .tell, names: names, focused: nil) == "There is no conversation 4. Nothing sent.")
+        #expect(AgentOutput.askLine(.noSuchRow(4), retry: .tell, names: names) == "There is no conversation 4. Nothing sent.")
     }
 
     @Test func adviceComesAfterNothingSentWithOnePeriodEach() {
@@ -48,7 +51,7 @@ struct AgentAskLineTests {
     }
 
     @Test func aConversationSaidAloneAsksForTheInstructionAndNeverTeachesSelect() {
-        let line = AgentOutput.askLine(.nameOnly("backend"), retry: .tell, names: names, focused: nil)
+        let line = AgentOutput.askLine(.nameOnly("backend"), retry: .tell, names: names)
         #expect(line == "Only a name was heard: \u{201C}backend\u{201D}. Nothing sent. Say your instruction after \u{201C}backend\u{201D}, or \u{201C}open backend\u{201D} to bring it forward.")
         #expect(!line.contains("select"))
     }

@@ -2,6 +2,13 @@ import AppKit
 import Foundation
 import KeyScribeKit
 
+enum BBWindows: Equatable, Sendable {
+    case shown
+    case hidden(String)
+    case none
+    case unknown
+}
+
 @MainActor
 final class BBHost: AgentHost {
     typealias Run = @Sendable (_ argv: [String], _ subcommand: String, _ input: Data?, _ environment: [String: String]) async throws -> HostCLI.Output
@@ -38,6 +45,12 @@ final class BBHost: AgentHost {
     private var listChanged: (@MainActor (AgentHostChange) -> Void)?
     private let launchRetries: Int
     private let launchRetryDelay: Duration
+    private let reopen: @MainActor (BBBuild) -> Void
+    private let windows: @MainActor (BBBuild) async -> BBWindows
+    private let shown: @MainActor (BBBuild) -> Bool
+    private let restore: @MainActor (BBBuild, String, @escaping @MainActor () -> Bool) async -> Void
+    private let windowRetries: Int
+    private let windowRetryDelay: Duration
     private var launching: [String: Int] = [:]
     private var known: [String: BBBuild] = [:]
     private var copies: [String: BBBuild?] = [:]
@@ -57,8 +70,19 @@ final class BBHost: AgentHost {
         dataFolder: (@Sendable (String) -> String?)? = nil,
         appsChanging: @escaping @MainActor (@escaping @MainActor (_ app: String, _ launched: Bool) -> Void) -> StopWatching
             = BBBuildFinder.watchLaunches,
-        launchRetries: Int = 8, launchRetryDelay: Duration = .seconds(2)
+        launchRetries: Int = 8, launchRetryDelay: Duration = .seconds(2),
+        reopen: @escaping @MainActor (BBBuild) -> Void = BBBuildFinder.reopen,
+        windows: @escaping @MainActor (BBBuild) async -> BBWindows = BBBuildFinder.windows,
+        shown: @escaping @MainActor (BBBuild) -> Bool = BBBuildFinder.shown,
+        restore: @escaping @MainActor (BBBuild, String, @escaping @MainActor () -> Bool) async -> Void = BBBuildFinder.restore,
+        windowRetries: Int = 16, windowRetryDelay: Duration = .milliseconds(250)
     ) {
+        self.reopen = reopen
+        self.windows = windows
+        self.shown = shown
+        self.restore = restore
+        self.windowRetries = windowRetries
+        self.windowRetryDelay = windowRetryDelay
         self.appsChanging = appsChanging
         self.launchRetries = launchRetries
         self.launchRetryDelay = launchRetryDelay
@@ -218,13 +242,58 @@ final class BBHost: AgentHost {
     }
 
     func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen {
-        guard let (build, thread) = await target(location), isOpen(build),
-              let output = try? await call(build, ["thread", "open", thread, "--json"], subcommand: "thread open"),
-              let windows = BBThreads.openedWindows(status: output.status, stdout: output.stdout), windows > 0,
-              !Task.isCancelled, stillWanted()
-        else { return .failed }
+        guard let (build, thread) = await target(location) else { return .refused("bb no longer lists this thread.") }
+        guard !Task.isCancelled, stillWanted() else { return .failed }
+        guard isOpen(build) else { return .refused("\(build.name) isn\u{2019}t open.") }
+        let noWindow = AgentHostOpen.refused("\(build.name) has no window open to show this thread.")
+        let found = await windows(build)
+        guard !Task.isCancelled, stillWanted() else { return .failed }
+        switch found {
+        case .shown:
+            break
+        case .hidden(let window):
+            Log.agents.info("bb's window was minimized or on another Space; bringing it back")
+            await restore(build, window) { !Task.isCancelled && stillWanted() }
+            guard await waitUntilShown(build, stillWanted) != nil else { return .failed }
+        case .none, .unknown:
+            Log.agents.info("bb had no window to show a thread, or did not say which it has; reopening its window")
+            reopen(build)
+            guard let appeared = await waitUntilShown(build, stillWanted) else { return .failed }
+            guard appeared else { return found == .none ? noWindow : .refused("\(build.name) didn\u{2019}t say which windows it has open.") }
+        }
+        guard !Task.isCancelled, stillWanted() else { return .failed }
+        let output: HostCLI.Output
+        do {
+            output = try await call(build, ["thread", "open", thread, "--json"], subcommand: "thread open")
+        } catch HostCLI.Failure.couldNotStart {
+            return .refused("\(build.name) could not start.")
+        } catch {
+            return Task.isCancelled ? .failed : .refused("\(build.name) didn\u{2019}t answer.")
+        }
+        guard !Task.isCancelled, stillWanted() else { return .failed }
+        guard let windows = BBThreads.openedWindows(status: output.status, stdout: output.stdout) else {
+            if case .refused(let why, let code, _) = BBThreads.delivery(status: output.status, stdout: output.stdout) {
+                Log.agents.notice("bb did not open a thread: \(code ?? "no code", privacy: .public)")
+                return .refused(why)
+            }
+            return .refused("\(build.name) couldn\u{2019}t open the thread.")
+        }
+        guard windows > 0 else { return noWindow }
         activate(build)
         return .requested
+    }
+
+    var openDeadline: Duration { windowRetryDelay * windowRetries + HostCLI.defaultTimeout + HostCLI.defaultGrace + .seconds(1) }
+
+    private func waitUntilShown(_ build: BBBuild, _ stillWanted: @MainActor () -> Bool) async -> Bool? {
+        var tries = 0
+        while true {
+            let visible = shown(build)
+            guard !Task.isCancelled, stillWanted() else { return nil }
+            if visible || tries >= windowRetries { return visible }
+            tries += 1
+            try? await Task.sleep(for: windowRetryDelay)
+        }
     }
 
     func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront {

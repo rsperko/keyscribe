@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { command, type Message } from "./driver.ts"
@@ -16,11 +16,16 @@ export function piMessages(entries: any[]): Message[] {
     if (entry.message?.role === "user") {
       turn = entry.id
       messages.push({ role: "user", text, turn })
-    } else if (entry.message?.role === "assistant" && text) {
-      messages.push({ role: "agent", text, turn })
+    } else if (entry.message?.role === "assistant") {
+      if (text) messages.push({ role: "agent", text, turn })
+      if (entry.message.stopReason && entry.message.stopReason !== "toolUse") messages.push({ role: "ended", text: "", turn })
     }
   }
   return messages
+}
+
+function canonical(path: string): string {
+  try { return realpathSync(path) } catch { return path }
 }
 
 function sessionFiles(folder: string): string[] {
@@ -59,7 +64,7 @@ abstract class PiFamily extends TerminalAgent {
       for (const line of readFileSync(file, "utf8").split("\n")) {
         let entry: any
         try { entry = JSON.parse(line) } catch { continue }
-        if (entry.type === "session" && entry.cwd === this.project) {
+        if (entry.type === "session" && typeof entry.cwd === "string" && canonical(entry.cwd) === this.project) {
           this.file = file
           return entry.id as string
         }

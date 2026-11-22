@@ -840,7 +840,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                 return .done(summary: handle, command: command)
             case .none:
                 break
-            case .app, .pane, .unsupported, .notAllowed, .connectorOutdated:
+            case .app, .pane, .unsupported, .notAllowed, .connectorOutdated, .refused:
                 return .failed(message: result.historySummary(handle: handle), command: command)
             }
         }

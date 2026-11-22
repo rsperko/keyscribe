@@ -49,6 +49,7 @@ final class UltimateHost: AgentHost {
     private let frontApp: @MainActor () -> AgentHostApp?
     private let documentURL: @Sendable (AgentHostApp) async -> URL?
     private let activate: @MainActor (AgentHostApp, @escaping @MainActor () -> Bool) async -> Bool
+    private let openPage: @MainActor (URL) -> Bool
     private var running: [String: Running] = [:]
     private var listed: [String: [UltimateProjects.Conversation]] = [:]
     private var listedByConnector: Set<String> = []
@@ -65,7 +66,8 @@ final class UltimateHost: AgentHost {
         retitle: @escaping Retitle = UltimateHost.retitle,
         frontApp: @escaping @MainActor () -> AgentHostApp? = UltimateHost.frontApp,
         documentURL: @escaping @Sendable (AgentHostApp) async -> URL? = UltimateHost.documentURL,
-        activate: @escaping @MainActor (AgentHostApp, @escaping @MainActor () -> Bool) async -> Bool = UltimateHost.activate
+        activate: @escaping @MainActor (AgentHostApp, @escaping @MainActor () -> Bool) async -> Bool = UltimateHost.activate,
+        openPage: @escaping @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) }
     ) {
         self.home = home
         let usual = (home as NSString).appendingPathComponent(UltimateProjects.setupFolderName)
@@ -77,6 +79,7 @@ final class UltimateHost: AgentHost {
         self.frontApp = frontApp
         self.documentURL = documentURL
         self.activate = activate
+        self.openPage = openPage
     }
 
     private var setups: [String] {
@@ -239,8 +242,27 @@ final class UltimateHost: AgentHost {
             await task.value
             guard !Task.isCancelled, stillWanted() else { return .failed }
         }
-        guard stillWanted(), let window = lastWindow[location.instance], await activate(window, stillWanted) else { return .requested }
-        return .opened
+        if stillWanted(), let window = lastWindow[location.instance], await activate(window, stillWanted) {
+            switch await view(of: project, in: window) {
+            case .page: return .opened
+            case .unknown: return !Task.isCancelled && stillWanted() ? .requested : .failed
+            case .elsewhere: break
+            }
+        }
+        guard !Task.isCancelled, stillWanted(), let page = Self.page(port: project.lock.port, conversation: conversation) else { return .failed }
+        Log.agents.info("\(Self.kind.displayName, privacy: .public) open found no window showing the project's page; opening it")
+        return openPage(page) ? .requested : .refused("No browser opened \(name(project))\u{2019}s page.")
+    }
+
+    nonisolated static func page(port: Int, conversation: Int) -> URL? {
+        URL(string: "http://ultimate.localhost:\(port)/?conversation=\(conversation)")
+    }
+
+    private enum WindowView { case page, elsewhere, unknown }
+
+    private func view(of project: Running, in window: AgentHostApp) async -> WindowView {
+        guard let front = frontApp(), front.pid == window.pid, front.window == window.window, let url = await documentURL(front) else { return .unknown }
+        return Self.isLocalPage(url) && url.port == project.lock.port ? .page : .elsewhere
     }
 
     func rename(_ location: AgentHostLocation, to name: String) async -> Bool {
@@ -338,6 +360,10 @@ final class UltimateHost: AgentHost {
         return AgentHostApp(bundle: bundle, pid: Int(app.processIdentifier), name: app.localizedName ?? bundle, window: window, path: app.bundleURL?.path)
     }
 
+    nonisolated static func pageURL(in seen: [(attribute: String, url: URL)]) -> URL? {
+        seen.first { isLocalPage($0.url) }?.url ?? seen.first { $0.attribute == kAXDocumentAttribute as String }?.url
+    }
+
     nonisolated static func documentURL(_ app: AgentHostApp) async -> URL? {
         await Task.detached {
             let process = AXUIElementCreateApplication(pid_t(app.pid))
@@ -350,6 +376,7 @@ final class UltimateHost: AgentHost {
             var queue: [(AXUIElement, Int)] = [(window, 0)]
             let deadline = Date().addingTimeInterval(0.3)
             var visited = 0
+            var seen: [(attribute: String, url: URL)] = []
             while !queue.isEmpty, visited < 100, Date() < deadline {
                 guard !Task.isCancelled else { return nil }
                 let (element, depth) = queue.removeFirst()
@@ -357,10 +384,10 @@ final class UltimateHost: AgentHost {
                 AXUIElementSetMessagingTimeout(element, 0.02)
                 for attribute in [kAXDocumentAttribute as String, "AXURL"] {
                     var value: CFTypeRef?
-                    if AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success {
-                        if let url = value as? URL, Self.isLocalPage(url) { return url }
-                        if let text = value as? String, let url = URL(string: text), Self.isLocalPage(url) { return url }
-                    }
+                    guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+                          let url = (value as? URL) ?? (value as? String).flatMap(URL.init(string:)) else { continue }
+                    seen.append((attribute, url))
+                    if Self.isLocalPage(url) { return url }
                 }
                 guard depth < 6 else { continue }
                 var children: CFTypeRef?
@@ -368,7 +395,7 @@ final class UltimateHost: AgentHost {
                     queue.append(contentsOf: ((children as? [AXUIElement]) ?? []).prefix(100 - visited).map { ($0, depth + 1) })
                 }
             }
-            return nil
+            return Self.pageURL(in: seen)
         }.value
     }
 

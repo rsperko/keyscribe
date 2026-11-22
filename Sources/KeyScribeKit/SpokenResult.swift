@@ -120,7 +120,7 @@ public enum SpokenResult {
 
     public static func cause(after input: AgentTurnInput?, asked: String?, named: Bool = true) -> Cause? {
         guard let input else { return nil }
-        let last = input.accepted.map { $0.last?.digest } ?? input.prompt
+        let last = input.accepted.map { $0.last { !$0.fromHost }?.digest } ?? input.prompt
         if let asked, last == AgentPromptDigest.of(asked) { return .request(asked, named: named) }
         return input.from.map(Cause.sender)
     }
