@@ -1,4 +1,6 @@
 {
+  "app": { "name": "Ultimate - KeyScribe", "icon": ".ultimate/app-icon.png" },
+  "port": 4748,
   "isolates": {
     "worktree": {
       "setup": ["sh -e .ultimate/worktree-setup.sh"]
