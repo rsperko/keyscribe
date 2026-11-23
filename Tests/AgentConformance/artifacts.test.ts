@@ -24,3 +24,22 @@ test("failure evidence retains the case, app history and agent record without co
     assert.equal(existsSync(join(folder, "auth.json")), false)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test("a reader that returns image bytes leaves a picture beside the other evidence", async () => {
+  const root = mkdtempSync(join(tmpdir(), "verification-evidence-"))
+  try {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const folder = await failureBundle(root, "dialog", new Error("timed out"), { "page-screenshot": () => png })
+    assert.deepEqual(readFileSync(join(folder, "page-screenshot.png")), png)
+    assert.equal(existsSync(join(folder, "page-screenshot.json")), false)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test("a reader with nothing to show says so instead of failing to write", async () => {
+  const root = mkdtempSync(join(tmpdir(), "verification-evidence-"))
+  try {
+    const folder = await failureBundle(root, "setup", new Error("no page yet"), { page: () => undefined })
+    assert.equal(readFileSync(join(folder, "page.txt"), "utf8"), "nothing to show")
+    assert.equal(existsSync(join(folder, "page.error.txt")), false)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

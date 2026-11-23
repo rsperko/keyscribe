@@ -183,6 +183,17 @@ supported Node executable. `ULTIMATE_MODEL` selects the model. It looks away to 
 the background-reply checks, moves foreground focus, preserves the clipboard, and writes each case's
 result to `conformance.json` in its temporary instance folder. A failed run keeps its scratch folders.
 
+It finds its Chrome window by the Chrome it started, not by title, and asks Ultimate which project it serves. When a
+launcher makes Ultimate serve another folder than the scratch project, the lander case, which needs the scratch
+project's own lander, is reported as not applicable and the run exits 3: a partial run, never a full pass. When
+Ultimate serves the scratch project, a missing lander fails the run.
+
+Each case owns its whole run: it executes, keeps its evidence if it failed, cleans up, and then checks the page. A
+cleanup that fails, a dialog left open, or a page that was closed, crashed, left Ultimate or lost its Chrome fails
+that case, named for what happened. The page is then restored at once, with a fresh page or the dialog closed; when
+it cannot be, the run stops. A page found broken before a case fails a check of its own. A failed case's evidence holds the page's open dialogs, its focused element, a
+screenshot of the page, and the app in front.
+
 ## Adding an agent
 
 Write a driver in `lib/` that implements `AgentDriver` (`lib/driver.ts`): set up a scratch folder, start the agent the

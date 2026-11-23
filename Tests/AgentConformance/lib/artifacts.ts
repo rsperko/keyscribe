@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 export const caseKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 
-function tail(path: string, limit = 512 * 1024) {
+export function tail(path: string, limit = 512 * 1024) {
   const fd = openSync(path, "r")
   try {
     const size = statSync(path).size
@@ -38,7 +38,9 @@ export async function failureBundle(
         Promise.resolve().then(read),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("diagnostic reader timed out after 15s")), 15_000) }),
       ])
-      writeFileSync(join(folder, `${caseKey(name)}.json`), JSON.stringify(value, null, 2))
+      if (value === undefined) writeFileSync(join(folder, `${caseKey(name)}.txt`), "nothing to show")
+      else if (value instanceof Uint8Array) writeFileSync(join(folder, `${caseKey(name)}.png`), value)
+      else writeFileSync(join(folder, `${caseKey(name)}.json`), JSON.stringify(value, null, 2))
     }
     catch (failure) { writeFileSync(join(folder, `${caseKey(name)}.error.txt`), String(failure)) }
     finally { clearTimeout(timer) }

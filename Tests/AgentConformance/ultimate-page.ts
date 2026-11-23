@@ -1,14 +1,13 @@
 import assert from "node:assert/strict"
-import { spawn } from "node:child_process"
 import { createRequire } from "node:module"
-import { existsSync, openSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Instance, type TakeResult } from "./lib/instance.ts"
 import { bringAwayForward } from "./lib/driver.ts"
 import { UltimateDriver } from "./lib/ultimate.ts"
 import { awayWindow, terminalHost } from "./lib/terminal.ts"
-import { freePort, run, sha256, shutDown, stopEach, until } from "./lib/util.ts"
+import { run, sha256, shutDown, sleep, stopEach, until } from "./lib/util.ts"
 import { failureBundle } from "./lib/artifacts.ts"
 import { homeChanges, snapshotHome } from "./lib/home-audit.ts"
 import { inputUnseen, voiceOverBlocks, voiceOverOn } from "./lib/preflight.ts"
@@ -33,7 +32,7 @@ let failure: unknown
 let cleaning: Promise<void> | undefined
 let stopping = false
 let stoppedEarly = false
-const results: { case: string; conversation: number; ok: boolean; why?: string }[] = []
+const results: { case: string; conversation: number; ok?: boolean; why?: string; notApplicable?: string }[] = []
 const clipboardFile = join(instance.folder, "clipboard.plist")
 
 function command(tool: string, args: string[], timeout = 30) {
@@ -62,7 +61,7 @@ const request = async (path: string, payload?: object) => {
 }
 const action = async (extension: string, name: string, args: object | null, conversationId?: number) =>
   (await request(`/api/extensions/${extension}/actions/${name}`, { args, conversationId })).result
-async function summaries(): Promise<any[]> {
+async function streamed(event: string): Promise<any> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 10_000)
   try {
@@ -76,15 +75,16 @@ async function summaries(): Promise<any[]> {
       text += decoder.decode(value, { stream: true })
       for (const block of text.split("\n\n").slice(0, -1)) {
         const lines = block.split("\n")
-        if (lines[0] === "event: conversations") return JSON.parse(lines.filter(line => line.startsWith("data: ")).at(-1)!.slice(6))
+        if (lines[0] === `event: ${event}`) return JSON.parse(lines.filter(line => line.startsWith("data: ")).at(-1)!.slice(6))
       }
     }
-    throw new Error("Ultimate's event stream ended before it listed its conversations")
+    throw new Error(`Ultimate's event stream ended before it sent ${event}`)
   } finally {
     clearTimeout(timer)
     controller.abort()
   }
 }
+const summaries = (): Promise<any[]> => streamed("conversations")
 const fileListing = () => JSON.parse(readFileSync(join(agent.projectHome, "conversations.json"), "utf8")) as any[]
 const key = (id: number) => `ultimate:${id}@${agent.projectHome}`
 const name = (id: number) => `ultimate ${id}`
@@ -98,6 +98,8 @@ function record(result: TakeResult) {
 }
 let chromeWindow = ""
 let debugPort = 0
+let page: any
+let main = 0
 
 const windows = () => instance.windows()
 const focus = (spec: string) => instance.focus(spec)
@@ -129,38 +131,145 @@ async function delivered(id: number, text: string, explicit = true, reply = true
   }
   return result
 }
-async function attempt(id: number, label: string, test: () => Promise<void>, kind = "page") {
+const chromeEvidence = async () => ({
+  connected: browser?.isConnected() ?? false,
+  chromeWindowTitles: windows().filter(listed => agent.window.owns(listed)).map(listed => listed.title),
+  pages: browser?.contexts().flatMap((context: any) => context.pages().map((open: any) => ({ url: open.url(), closed: open.isClosed() }))) ?? [],
+  targets: debugPort ? await fetch(`http://127.0.0.1:${debugPort}/json/list`, { signal: AbortSignal.timeout(5000) }).then((answer) => answer.json()).catch((error) => `the debugging port did not answer: ${error}`) : [],
+})
+const pageState = () => page?.evaluate(() => {
+  const describe = (element: Element | null) => element && {
+    tag: element.tagName.toLowerCase(), role: element.getAttribute("role"),
+    label: element.getAttribute("aria-label") ?? element.getAttribute("placeholder") ?? element.getAttribute("title"),
+    text: (element.textContent ?? "").trim().slice(0, 200),
+  }
+  return {
+    url: location.href, title: document.title, focused: document.hasFocus(), visibility: document.visibilityState,
+    active: describe(document.activeElement),
+    dialogs: Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"], dialog[open]'))
+      .filter(dialog => dialog.getClientRects().length).map(describe),
+    editors: Array.from(document.querySelectorAll("textarea[data-conversation]")).map(editor => ({
+      conversation: editor.getAttribute("data-conversation"),
+      visible: !!(editor as HTMLElement).getClientRects().length, active: editor === document.activeElement,
+    })),
+  }
+})
+const pageEvidence = () => ({
+  "windows": () => windows(),
+  "front": () => instance.cli(["--front-probe"], 15).stdout,
+  "chrome": chromeEvidence,
+  "page": pageState,
+  "page-screenshot": () => page?.isClosed() === false ? page.screenshot({ timeout: 10_000 }) : undefined,
+  ...(agent.diagnostics?.() ?? {}),
+})
+let crashed = false
+const debuggerAnswers = async () => !!debugPort && !!(await fetch(`http://127.0.0.1:${debugPort}/json/version`, { signal: AbortSignal.timeout(5000) }).catch(() => null))?.ok
+function usePage(chosen: any) {
+  if (chosen !== page) chosen.on("crash", () => { if (page === chosen) crashed = true })
+  page = chosen
+  crashed = false
+  page.setDefaultTimeout(30_000)
+}
+async function openPage() {
+  if (!(await debuggerAnswers())) {
+    await browser?.close().catch(() => {})
+    browser = undefined
+    await agent.window.close()
+    debugPort = await agent.launchChrome(main)
+    await until("Chrome's debugging endpoint", async () => (await debuggerAnswers()) ? true : undefined, 30)
+  }
+  if (!browser?.isConnected()) browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`)
+  const context = browser.contexts()[0]
+  assert.ok(context, "the conformance Chrome has no browsing context to open the page in")
+  const broken = crashed ? page : undefined
+  const open = context.pages().filter((candidate: any) => !candidate.isClosed() && candidate !== broken)
+  usePage(open.find((candidate: any) => candidate.url().startsWith(agent.url)) ?? open[0] ?? await context.newPage())
+  await broken?.close().catch(() => {})
+  await page.goto(`${agent.url}/?conversation=${main}`)
+  await page.locator(`textarea[data-conversation="${main}"]:visible`).waitFor({ timeout: 60_000 })
+  chromeWindow = await until("the Ultimate page's own Chrome window", () => windows().find(listed => agent.window.owns(listed))?.spec, 30)
+}
+async function pageProblem(): Promise<string | undefined> {
+  if (!agent.chromeRunning()) return "Chrome quit"
+  if (!browser?.isConnected()) return "the debugging connection to Chrome dropped while Chrome kept running"
+  if (crashed) return "the page's renderer crashed"
+  if (!page || page.isClosed()) {
+    const others = browser.contexts().flatMap((context: any) => context.pages()).filter((open: any) => !open.isClosed())
+    return others.length ? "the page was closed while Chrome kept other pages open" : "the page was closed and Chrome has no page left"
+  }
+  if (!page.url().startsWith(agent.url)) return `the page left Ultimate for ${page.url()}`
+  return undefined
+}
+const openDialogs = () => page.locator('[role="dialog"]:visible, [role="alertdialog"]:visible, dialog[open]:visible')
+const dialogsGone = (what: string) => until(what, async () => (await openDialogs().count()) === 0 ? true : undefined, 5, 100)
+async function closeDialogs() {
+  for (let tries = 0; tries < 3 && await openDialogs().count(); tries++) {
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(300)
+  }
+  if (await openDialogs().count()) await openDialogs().getByRole("button", { name: "Close" }).first().click({ timeout: 2000 }).catch(() => {})
+}
+function report(row: typeof results[number], seconds?: number) {
+  results.push(row)
+  const verdict = row.notApplicable !== undefined ? "N/A" : row.ok ? "PASS" : "FAIL"
+  console.log(`${verdict} #${row.conversation} ${row.case}${seconds === undefined ? "" : ` ${seconds.toFixed(1)}s`}${row.why ? ` ${row.why}` : ""}${row.notApplicable ? ` ${row.notApplicable}` : ""}`)
+  writeFileSync(join(instance.folder, "conformance.json"), JSON.stringify(results, null, 2))
+  if (row.ok === false && failFast) stoppedEarly = true
+}
+const why = (error: unknown) => `${String(error)}${error instanceof Error && error.cause ? `; cause: ${String(error.cause)}` : ""}`
+async function leftBehind(): Promise<string | undefined> {
+  const problem = await pageProblem()
+  if (problem) return problem
+  try {
+    const dialogs = await openDialogs().count()
+    return dialogs ? `${dialogs === 1 ? "a dialog was" : `${dialogs} dialogs were`} left open: ${JSON.stringify(await pageState().catch(why))}` : undefined
+  } catch (error) {
+    await sleep(500)
+    return (await pageProblem()) ?? `the page could not be checked: ${why(error)}`
+  }
+}
+async function restored(after: string) {
+  try {
+    if (await pageProblem()) await openPage()
+    else await closeDialogs()
+    const still = await leftBehind()
+    assert.ok(!still, still)
+    return true
+  } catch (error) {
+    report({ case: `the page was restored after "${after}"`, conversation: main, ok: false, why: why(error) })
+    stoppedEarly = true
+    return false
+  }
+}
+async function attempt(id: number, label: string, test: () => Promise<void>, kind = "page", after?: () => Promise<void>) {
   if (stoppedEarly || !matchesPageCase(only, label, kind)) return
   for (let round = 0; round < repeat && !stoppedEarly; round++) {
     assert.ok(!stopping, "conformance interrupted")
     const tag = repeat > 1 ? `${label} [${round + 1}/${repeat}]` : label
-    const started = Date.now()
-    try { await test(); results.push({ case: tag, conversation: id, ok: true }) }
-    catch (error) { results.push({ case: tag, conversation: id, ok: false,
-      why: `${String(error)}${error instanceof Error && error.cause ? `; cause: ${String(error.cause)}` : ""}` })
-      await failureBundle(instance.folder, `${id}/${tag}`, error, {
-        "agent-history": () => agent.messages(id),
-        "discovery": () => instance.cli(["--discovery-report", agent.kind, "--folder", agent.folder], 15),
-        "windows": () => windows(),
-        ...(agent.diagnostics?.() ?? {}),
-        "chrome": async () => ({
-          connected: browser?.isConnected() ?? false,
-          pages: browser?.contexts().flatMap((context: any) => context.pages().map((open: any) => ({ url: open.url(), closed: open.isClosed() }))) ?? [],
-          targets: debugPort ? await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((answer) => answer.json()).catch((error) => `the debugging port did not answer: ${error}`) : [],
-        }),
-        "page": async () => browser?.contexts()[0]?.pages()[0]?.evaluate(() => ({
-          url: location.href, focused: document.hasFocus(), visibility: document.visibilityState,
-          editors: Array.from(document.querySelectorAll("textarea[data-conversation]")).map(editor => ({
-            conversation: editor.getAttribute("data-conversation"),
-            visible: !!(editor as HTMLElement).getClientRects().length, active: editor === document.activeElement,
-          })),
-        })),
-      }).catch(failure => console.error(`Could not capture failure evidence: ${failure}`))
+    const before = await leftBehind()
+    if (before) {
+      const check = `the page was usable before "${tag}"`
+      await failureBundle(instance.folder, check, new Error(before), pageEvidence())
+        .catch(failure => console.error(`Could not capture the page's evidence: ${failure}`))
+      report({ case: check, conversation: main, ok: false, why: before })
+      if (stoppedEarly || !(await restored(check))) return
     }
-    const result = results.at(-1)!
-    console.log(`${result.ok ? "PASS" : "FAIL"} #${id} ${tag} ${((Date.now() - started) / 1000).toFixed(1)}s${result.why ? ` ${result.why}` : ""}`)
-    writeFileSync(join(instance.folder, "conformance.json"), JSON.stringify(results, null, 2))
-    if (!result.ok && failFast) stoppedEarly = true
+    const started = Date.now()
+    const problems: string[] = []
+    let failed: unknown
+    try { await test() } catch (error) { failed = error; problems.push(why(error)) }
+    const evidence = { "agent-history": () => agent.messages(id),
+      "discovery": () => instance.cli(["--discovery-report", agent.kind, "--folder", agent.folder], 15), ...pageEvidence() }
+    if (failed) await failureBundle(instance.folder, `${id}/${tag}`, failed, evidence)
+      .catch(failure => console.error(`Could not capture failure evidence: ${failure}`))
+    if (after) await after().catch(error => problems.push(`cleaning up failed: ${why(error)}`))
+    const left = await leftBehind()
+    if (left) problems.push(`after the case, ${left}`)
+    if (!failed && problems.length) await failureBundle(instance.folder, `${id}/${tag}`, new Error(problems.join("; ")), evidence)
+      .catch(failure => console.error(`Could not capture failure evidence: ${failure}`))
+    report(problems.length ? { case: tag, conversation: id, ok: false, why: problems.join("; ") } : { case: tag, conversation: id, ok: true },
+      (Date.now() - started) / 1000)
+    if (left && !stoppedEarly) await restored(tag)
   }
 }
 
@@ -184,26 +293,12 @@ try {
   assert.notEqual(probe.observesInput, undefined, `the test instance could not answer whether it sees input: ${probe.problem ?? JSON.stringify(probe)}`)
   await agent.start()
   await action("onboarding", "firstRunDone", null)
-  const main = await action("subagents", "standing", { name: "ultimate" }) as number
+  main = await action("subagents", "standing", { name: "ultimate" }) as number
   clipboard("save", clipboardFile)
   clipboardSaved = true
-  debugPort = await freePort()
-  const chromeLog = openSync(join(agent.root, "chrome.log"), "a")
-  spawn(process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [
-    `--user-data-dir=${join(agent.root, "chrome")}`, `--remote-debugging-port=${debugPort}`,
-    "--no-first-run", "--no-default-browser-check", `--app=${agent.url}/?conversation=${main}`,
-  ], { stdio: ["ignore", chromeLog, chromeLog], detached: true })
-  await until("Chrome's debugging endpoint", async () =>
-    (await fetch(`http://127.0.0.1:${debugPort}/json/version`).catch(() => null))?.ok ? true : undefined, 30)
-  browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`)
-  const page = browser.contexts()[0].pages()[0]
-  page.setDefaultTimeout(30_000)
-  await page.goto(`${agent.url}/?conversation=${main}`)
+  await openPage()
   assert.equal(await page.evaluate(() => navigator.webdriver), false, "the conformance page must share navigation like an ordinary browser")
-  await page.locator(`textarea[data-conversation="${main}"]:visible`).waitFor({ timeout: 60_000 })
-  console.log("The standing agent's visible composer is ready")
-  chromeWindow = await until("the native Chrome app window", () => windows().find(w => w.title.includes(agent.project))?.spec, 30)
-  const dialogCountBefore = results.length
+  console.log(`The standing agent's visible composer is ready in "${await page.title()}"`)
   await attempt(main, "first-run dialog holds and names the obstruction", async () => {
     focus(chromeWindow)
     await page.keyboard.press("Meta+k")
@@ -216,9 +311,8 @@ try {
     assert.match(result.hud ?? "", /dialog covers/, JSON.stringify(result))
     assert.ok(!(await agent.messages(main)).some(m => m.text.includes("modalblocked")))
     await page.getByRole("button", { name: "Close", exact: true }).click()
-  }, "dialog")
-  if (results.length > dialogCountBefore) assert.equal(results.at(-1)?.ok, true, "the dialog fixture must close before delivery cases start")
-  const styleCountBefore = results.length
+    await dialogsGone("the Get ready dialog to close from its Close button")
+  }, "dialog", closeDialogs)
   await attempt(main, "a dialog shown by a style change alone holds within a heartbeat", async () => {
     focus(chromeWindow)
     await page.locator(`textarea[data-conversation="${main}"]:visible`).click()
@@ -234,22 +328,17 @@ try {
       dialog.textContent = "A dialog that appears without moving focus"
       document.body.append(dialog)
     })
-    try {
-      await page.waitForTimeout(500)
-      await page.evaluate(() => document.getElementById("ks-quiet")!.classList.remove("ks-quiet"))
-      await page.waitForTimeout(6500)
-      const result = take("Reply with only quietblocked.")
-      assert.equal(result.ok, false, JSON.stringify(result))
-      assert.match(result.hud ?? "", /dialog covers/, JSON.stringify(result))
-      assert.ok(!(await agent.messages(main)).some(m => m.text.includes("quietblocked")))
-    } finally {
-      await page.evaluate(() => {
-        document.getElementById("ks-quiet")?.remove()
-        document.getElementById("ks-quiet-style")?.remove()
-      })
-    }
-  }, "dialog")
-  if (results.length > styleCountBefore) assert.equal(results.at(-1)?.ok, true, "the style-change dialog fixture must close before delivery cases start")
+    await page.waitForTimeout(500)
+    await page.evaluate(() => document.getElementById("ks-quiet")!.classList.remove("ks-quiet"))
+    await page.waitForTimeout(6500)
+    const result = take("Reply with only quietblocked.")
+    assert.equal(result.ok, false, JSON.stringify(result))
+    assert.match(result.hud ?? "", /dialog covers/, JSON.stringify(result))
+    assert.ok(!(await agent.messages(main)).some(m => m.text.includes("quietblocked")))
+  }, "dialog", () => page.evaluate(() => {
+    document.getElementById("ks-quiet")?.remove()
+    document.getElementById("ks-quiet-style")?.remove()
+  }))
   const needsBranch = !selectedTargets || selectedTargets.has("branch") || selectedTargets.has("worker")
   const needsWorker = !selectedTargets || selectedTargets.has("worker")
   const needsSide = !selectedTargets || selectedTargets.has("side")
@@ -298,17 +387,26 @@ try {
     assert.ok(answer, "the new side chat answered its take")
     assert.equal(result.reply!.sha256, sha256(answer.text))
   }, "main")
-  const lander = fileListing().find(c => c.label === "lander")
-  assert.ok(lander, "the project has its standing lander")
-  await attempt(lander.id, "lander hold identifies the conversation", async () => {
-    await request("/api/ui", { set: { "shell.surface": "agent", "shell.conversation": lander.id, "ext.side-chat.front": null } })
-    focus(chromeWindow)
-    await page.waitForURL(new RegExp(`conversation=${lander.id}(?:&|$)`))
-    await page.waitForTimeout(500)
-    const result = take("Reply with only landerblocked.")
-    assert.equal(result.ok, false, JSON.stringify(result))
-    assert.match(result.hud ?? "", /lander/)
-  }, "lander")
+  const landerCase = "lander hold identifies the conversation"
+  if (!stoppedEarly && matchesPageCase(only, landerCase, "lander")) {
+    const served = String((await streamed("system"))?.project?.root ?? "")
+    assert.ok(served, "Ultimate did not say which project it serves")
+    if (realpathSync(served) !== realpathSync(agent.project)) {
+      report({ case: landerCase, conversation: 0, notApplicable: `this Ultimate serves ${served}, not the scratch project whose lander the case uses` })
+    } else {
+      const lander = fileListing().find(c => c.label === "lander")
+      assert.ok(lander, "the project has its standing lander")
+      await attempt(lander.id, landerCase, async () => {
+        await request("/api/ui", { set: { "shell.surface": "agent", "shell.conversation": lander.id, "ext.side-chat.front": null } })
+        focus(chromeWindow)
+        await page.waitForURL(new RegExp(`conversation=${lander.id}(?:&|$)`))
+        await page.waitForTimeout(500)
+        const result = take("Reply with only landerblocked.")
+        assert.equal(result.ok, false, JSON.stringify(result))
+        assert.match(result.hud ?? "", /lander/)
+      }, "lander")
+    }
+  }
   const created = await request("/api/conversations", {})
   const createdCountBefore = results.length
   await attempt(created.id, "new conversation accepts its first foreground take immediately", async () => {
@@ -478,19 +576,19 @@ try {
   const preserved = JSON.parse(readFileSync(join(agent.folder, "settings.json"), "utf8"))
   assert.equal(preserved.onboarding, true)
   assert.ok(preserved.extensions.disable.includes("sample-unrelated-extension"))
-  assert.ok(results.length > 0, "filter matched zero conformance cases")
-  assert.ok(results.every(r => r.ok), `${results.filter(r => !r.ok).length} conformance cases failed`)
+  assert.ok(results.some(r => r.notApplicable === undefined), "filter matched zero conformance cases")
+  assert.ok(!results.some(r => r.ok === false), `${results.filter(r => r.ok === false).length} conformance cases failed`)
 } catch (error) {
   failure = error
   console.error(error)
-  await failureBundle(instance.folder, "ultimate-page/setup-or-completion", error, {
-    ...(agent.diagnostics?.() ?? {}),
-  }).catch(failure => console.error(`Could not capture setup evidence: ${failure}`))
+  await failureBundle(instance.folder, "ultimate-page/setup-or-completion", error, pageEvidence()).catch(failure => console.error(`Could not capture setup evidence: ${failure}`))
 }
 finally {
   await cleanup()
-  console.log(`Ultimate page conformance: ${results.filter(r => r.ok).length} passed, ${results.filter(r => !r.ok).length} failed; ${instance.folder}`)
+  console.log(`Ultimate page conformance: ${results.filter(r => r.ok === true).length} passed, ${results.filter(r => r.ok === false).length} failed, ${results.filter(r => r.notApplicable !== undefined).length} not applicable; ${instance.folder}`)
 }
 const touched = (() => { try { return homeChanges(homeBefore, snapshotHome()) } catch (error) { return [(error as Error).message] } })()
 if (touched.length) console.error(`The run changed the user's own setup outside its scratch folders:\n  ${touched.join("\n  ")}`)
-process.exit(failure || touched.length ? 1 : 0)
+const partial = results.some(r => r.notApplicable !== undefined)
+if (partial && !failure && !touched.length) console.log("Partial run: a case did not apply to the Ultimate under test, so this is not a full pass")
+process.exit(failure || touched.length ? 1 : partial ? 3 : 0)

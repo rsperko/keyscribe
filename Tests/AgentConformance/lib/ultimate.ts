@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { type AgentDriver, type AppWindow, type Message, command, removeScratch, scratch, settled } from "./driver.ts"
 import { traceLimit } from "../../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts"
 import { freePort, run, sleep, stopEach, until } from "./util.ts"
+import { tail } from "./artifacts.ts"
 
 function traceRecords(trace: string): any[] {
   return trace.split("\n").filter(Boolean).map((line) => {
@@ -248,6 +249,26 @@ export class UltimateDriver implements AgentDriver {
 
   private chromeSeen = { at: 0, pids: [] as number[] }
 
+  async launchChrome(conversation = this.id) {
+    this.debugPort = await freePort()
+    this.chromeSeen.at = 0
+    const log = openSync(join(this.root, "chrome.log"), "a")
+    try {
+      spawn(this.chromeBin, [
+        `--user-data-dir=${this.chromeProfile}`, `--remote-debugging-port=${this.debugPort}`,
+        "--no-first-run", "--no-default-browser-check", `--app=${this.origin}/?conversation=${conversation}`,
+      ], { stdio: ["ignore", log, log], detached: true }).unref()
+    } finally {
+      closeSync(log)
+    }
+    return this.debugPort
+  }
+
+  chromeRunning() {
+    this.chromeSeen.at = 0
+    return this.recentChromePids().length > 0
+  }
+
   private recentChromePids() {
     if (Date.now() - this.chromeSeen.at > 1000) this.chromeSeen = { at: Date.now(), pids: this.chromePids() }
     return this.chromeSeen.pids
@@ -261,16 +282,7 @@ export class UltimateDriver implements AgentDriver {
     show: async () => {
       this.chromeSeen.at = 0
       if (!this.chromePids().length) {
-        this.debugPort = await freePort()
-        const log = openSync(join(this.root, "chrome.log"), "a")
-        try {
-          spawn(this.chromeBin, [
-            `--user-data-dir=${this.chromeProfile}`, `--remote-debugging-port=${this.debugPort}`,
-            "--no-first-run", "--no-default-browser-check", `--app=${this.origin}/?conversation=${this.id}`,
-          ], { stdio: ["ignore", log, log], detached: true }).unref()
-        } finally {
-          closeSync(log)
-        }
+        await this.launchChrome()
       } else {
         await this.api("/api/ui", { set: { "shell.surface": "agent", "shell.conversation": this.id } })
       }
@@ -352,9 +364,10 @@ export class UltimateDriver implements AgentDriver {
   }
 
   diagnostics() {
-    const tailText = (path: string, limit = 64 * 1024) => existsSync(path) ? readFileSync(path, "utf8").slice(-limit) : ""
+    const tailText = (path: string, limit = 64 * 1024) => existsSync(path) ? tail(path, limit).toString("utf8") : ""
     return {
       "ultimate-log": () => tailText(join(this.root, "ultimate.log")),
+      "chrome-log": () => tailText(join(this.root, "chrome.log"), 8192),
       "automated-chrome-log": () => tailText(join(this.root, "automated-chrome.log")),
       "bridge-trace": () => tailText(this.tracePath).trim().split("\n").filter(Boolean).slice(-200).map(line => {
         try { return JSON.parse(line) } catch { return line }
