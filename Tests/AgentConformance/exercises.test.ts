@@ -14,14 +14,18 @@ process.on("exit", () => rmSync(project, { recursive: true, force: true }))
 function fakeContext(options: {
   turns?: boolean; cue?: string; sentWhileDown?: boolean; endsBeforeSteering?: string; comments?: boolean; doubted?: boolean
   readTwice?: boolean; clipboardChanged?: boolean; historyLags?: boolean; hint?: string; unlisted?: boolean; keepsBehind?: boolean; declaresBehind?: "kept" | "sent"
-} = {}): Context & { silence: () => void } {
+  automatedTakesFront?: boolean; automatedHoldsBehind?: boolean
+} = {}): Context & { silence: () => void; automatedOpen: () => number; automatedKinds: string[] } {
   const messages: Message[] = []
   const records: any[] = []
   let turns = 0
   let answering = true
   let shown = false
   let front = false
+  let automated = 0
+  const opened: string[] = []
   let draft = ""
+  const inFront = () => front && !(automated > 0 && options.automatedTakesFront)
   const sandboxed = (path: string) => { if (!path.startsWith(`${project}/`)) throw new Error(`the agent may write only inside its project, not ${path}`); writeFileSync(path, "") }
   let noting = false
   let clip = ""
@@ -34,7 +38,7 @@ function fakeContext(options: {
   const settle = () => {
     for (const entry of records.filter((candidate) => candidate.unsettled)) {
       delete entry.unsettled
-      if (front) {
+      if (inFront() || (automated > 0 && options.automatedHoldsBehind)) {
         entry.steps = [{ text: "Not read aloud: kestrel was in front when it finished" }]
         ledger.push({ request: entry.request, read: false, reason: "its conversation was in front when it finished" }, { quiet: true })
       } else {
@@ -106,6 +110,11 @@ function fakeContext(options: {
       look: async () => ({ thread: shown, focused: shown && front, draft }),
       fill: async (text: string) => { draft += text },
       close: async () => { shown = false; front = false },
+      openAutomated: async (kind: string) => {
+        opened.push(kind)
+        automated++
+        return async () => { automated-- }
+      },
     },
     noteFromHost: async () => { noting = true },
     interrupt: async () => {
@@ -150,7 +159,7 @@ function fakeContext(options: {
       }
       if (address) return answer(said, said.slice(address.length).replace(/^,? /, ""), "Its name")
       if (front && said.startsWith("tell kestrol ")) return answer(said, said.slice("tell kestrol ".length), "Sounded like its name")
-      if (!front || said.startsWith("tell ")) return { id: "t", ok: false }
+      if (!inFront() || said.startsWith("tell ")) return { id: "t", ok: false }
       const body = draft ? `${draft} ${said}` : said
       draft = options.hint ?? ""
       return answer(said, body, "The conversation in front")
@@ -165,7 +174,7 @@ function fakeContext(options: {
       } finally { clip = saved }
     },
   }
-  return { instance, agent, replyWait: 1, clipboard, holdSeconds: 0, settleSeconds: 0, silence: () => { answering = false } }
+  return { instance, agent, replyWait: 1, clipboard, holdSeconds: 0, settleSeconds: 0, silence: () => { answering = false }, automatedOpen: () => automated, automatedKinds: opened }
 }
 
 test("every exercise passes again in a later round against the same conversation", async () => {
@@ -260,3 +269,24 @@ for (const [keepsBehind, declaresBehind, passes] of [[true, "kept", true], [fals
     else await assert.rejects(run, /the take behind/)
   })
 }
+
+for (const [options, failure] of [[{}, undefined], [{ automatedTakesFront: true }, /went to/], [{ automatedHoldsBehind: true }, /reply behind was not read/]] as const) {
+  test(`D15 ${failure ? `fails with ${failure}` : "passes"} for ${JSON.stringify(options)}, opens each kind of automated page and closes it either way`, async () => {
+    const context = fakeContext(options)
+    const run = exercises.find((exercise) => exercise.id === "D15")!.run(context)
+    if (failure) await assert.rejects(run, failure)
+    else {
+      await assert.doesNotReject(run)
+      assert.deepEqual(context.automatedKinds, ["webdriver", "headless"])
+    }
+    assert.equal(context.automatedOpen(), 0)
+  })
+}
+
+test("D15 applies only to an agent whose window can open an automated page", () => {
+  const automated = exercises.find((exercise) => exercise.id === "D15")!
+  const { agent } = fakeContext()
+  assert.equal(automated.applies!(agent), true)
+  assert.equal(automated.applies!({ ...agent, window: { ...agent.window!, openAutomated: undefined } } as AgentDriver), false)
+  assert.equal(automated.applies!({ ...agent, window: undefined } as AgentDriver), false)
+})

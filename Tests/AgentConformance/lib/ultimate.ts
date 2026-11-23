@@ -2,7 +2,79 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { type AgentDriver, type AppWindow, type Message, command, removeScratch, scratch, settled } from "./driver.ts"
-import { freePort, run, sleep, until } from "./util.ts"
+import { traceLimit } from "../../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts"
+import { freePort, run, sleep, stopEach, until } from "./util.ts"
+
+function traceRecords(trace: string): any[] {
+  return trace.split("\n").filter(Boolean).map((line) => {
+    try { return JSON.parse(line) } catch { return {} }
+  })
+}
+
+export function reportedPages(trace: string): Set<string> {
+  return new Set(traceRecords(trace).flatMap((entry) => (entry.dir === "page->ext" && typeof entry.page === "string" ? [entry.page] : [])))
+}
+
+export function newPageReported(trace: string, known: Set<string>): boolean {
+  if ([...reportedPages(trace)].some((page) => !known.has(page))) return true
+  if (traceRecords(trace).length >= traceLimit) throw new Error(`the bridge trace reached its limit of ${traceLimit} records, so a new page's report cannot be seen`)
+  return false
+}
+
+export class DevtoolsSession {
+  private next = 0
+  private readonly waiting = new Map<number, { resolve: (message: any) => void; reject: (error: Error) => void }>()
+
+  private readonly socket: WebSocket
+
+  private constructor(socket: WebSocket) {
+    this.socket = socket
+    socket.onmessage = (event) => {
+      const message = JSON.parse(String(event.data))
+      const waiter = this.waiting.get(message.id)
+      if (!waiter) return
+      this.waiting.delete(message.id)
+      if (message.error) waiter.reject(new Error(`${message.error.message ?? "a debugging command failed"}`))
+      else waiter.resolve(message)
+    }
+    socket.onclose = () => {
+      for (const waiter of this.waiting.values()) waiter.reject(new Error("the page's debugging connection closed"))
+      this.waiting.clear()
+    }
+  }
+
+  static open(url: string) {
+    const socket = new WebSocket(url)
+    return new Promise<DevtoolsSession>((resolve, reject) => {
+      const fail = (why: string) => { clearTimeout(timer); socket.close(); reject(new Error(why)) }
+      const timer = setTimeout(() => fail("the page's debugging connection did not open within 10 s"), 10_000)
+      socket.onopen = () => { clearTimeout(timer); resolve(new DevtoolsSession(socket)) }
+      socket.onerror = () => fail("the page's debugging connection failed")
+    })
+  }
+
+  static async ofPage(port: number, matches: (url: string) => boolean): Promise<DevtoolsSession | undefined> {
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) }).catch(() => null))?.json().catch(() => null) as any[] | null
+    const target = targets?.find((candidate) => candidate.type === "page" && matches(String(candidate.url)))
+    return target ? DevtoolsSession.open(target.webSocketDebuggerUrl) : undefined
+  }
+
+  async evaluate(expression: string): Promise<any> {
+    return (await this.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.result?.value
+  }
+
+  send(method: string, params: object = {}): Promise<any> {
+    if (this.socket.readyState !== WebSocket.OPEN) return Promise.reject(new Error(`the page's debugging connection is closed, so ${method} was not sent`))
+    const id = ++this.next
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.waiting.delete(id); reject(new Error(`the page did not answer ${method} within 10 s`)) }, 10_000)
+      this.waiting.set(id, { resolve: (message) => { clearTimeout(timer); resolve(message) }, reject: (error) => { clearTimeout(timer); reject(error) } })
+      this.socket.send(JSON.stringify({ id, method, params }))
+    })
+  }
+
+  close() { this.socket.close() }
+}
 
 type HistoryPage = { entries: any[]; before?: number }
 
@@ -144,34 +216,31 @@ export class UltimateDriver implements AgentDriver {
   }
 
   private get chromeProfile() { return join(this.root, "chrome") }
+  private get automatedProfile() { return join(this.root, "automated-chrome") }
+  private get chromeBin() { return process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" }
 
-  private chromePids(): number[] {
-    return run("/usr/bin/pgrep", ["-f", `--user-data-dir=${this.chromeProfile}`]).stdout.split("\n").filter(Boolean).map(Number)
+  private chromePids(profile = this.chromeProfile): number[] {
+    return run("/usr/bin/pgrep", ["-f", "--", `--user-data-dir=${profile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( |$)`]).stdout.split("\n").filter(Boolean).map(Number)
   }
+
+  private async closeChrome(profile: string) {
+    for (const pid of this.chromePids(profile)) { try { process.kill(pid, "SIGTERM") } catch {} }
+    const closed = await until("the scratch Chrome closed", () => (this.chromePids(profile).length === 0 ? true : undefined), 15, 250).catch(() => false)
+    if (closed) return
+    for (const pid of this.chromePids(profile)) { try { process.kill(pid, "SIGKILL") } catch {} }
+    await until("the scratch Chrome killed", () => (this.chromePids(profile).length === 0 ? true : undefined), 5, 250)
+  }
+
+  private trace() { return existsSync(this.tracePath) ? readFileSync(this.tracePath, "utf8") : "" }
 
   private async page(expression: string): Promise<any> {
     if (this.debugPort === undefined) return undefined
-    const targets = await (await fetch(`http://127.0.0.1:${this.debugPort}/json/list`, { signal: AbortSignal.timeout(5000) }).catch(() => null))?.json().catch(() => null) as any[] | null
-    const target = targets?.find((candidate) => candidate.type === "page" && String(candidate.url).startsWith(this.origin))
-    if (!target) return undefined
-    const socket = new WebSocket(target.webSocketDebuggerUrl)
-    let timer: ReturnType<typeof setTimeout> | undefined
+    const session = await DevtoolsSession.ofPage(this.debugPort, (url) => url.startsWith(this.origin))
+    if (!session) return undefined
     try {
-      const answer = await new Promise<any>((resolve, reject) => {
-        timer = setTimeout(() => reject(new Error("the Ultimate page did not answer within 10 s")), 10_000)
-        socket.onerror = () => reject(new Error("the Ultimate page's debugging connection failed"))
-        socket.onclose = () => reject(new Error("the Ultimate page's debugging connection closed"))
-        socket.onopen = () => socket.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, returnByValue: true, awaitPromise: true } }))
-        socket.onmessage = (event) => {
-          const message = JSON.parse(String(event.data))
-          if (message.id === 1) resolve(message)
-        }
-      })
-      return answer.result?.result?.value
+      return await session.evaluate(expression)
     } finally {
-      clearTimeout(timer)
-      socket.onclose = null
-      socket.close()
+      session.close()
     }
   }
 
@@ -194,7 +263,7 @@ export class UltimateDriver implements AgentDriver {
         this.debugPort = await freePort()
         const log = openSync(join(this.root, "chrome.log"), "a")
         try {
-          spawn(process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [
+          spawn(this.chromeBin, [
             `--user-data-dir=${this.chromeProfile}`, `--remote-debugging-port=${this.debugPort}`,
             "--no-first-run", "--no-default-browser-check", `--app=${this.origin}/?conversation=${this.id}`,
           ], { stdio: ["ignore", log, log], detached: true }).unref()
@@ -224,18 +293,66 @@ export class UltimateDriver implements AgentDriver {
     },
     close: async () => {
       this.chromeSeen.at = 0
-      for (const pid of this.chromePids()) { try { process.kill(pid, "SIGTERM") } catch {} }
-      const closed = await until("the scratch Chrome closed", () => (this.chromePids().length === 0 ? true : undefined), 15, 250).catch(() => false)
-      if (closed) return
-      for (const pid of this.chromePids()) { try { process.kill(pid, "SIGKILL") } catch {} }
-      await until("the scratch Chrome killed", () => (this.chromePids().length === 0 ? true : undefined), 5, 250)
+      await this.closeChrome(this.chromeProfile)
     },
+    openAutomated: async (kind) => {
+      const known = reportedPages(this.trace())
+      const other = await this.otherConversation()
+      const port = await freePort()
+      const log = openSync(join(this.root, "automated-chrome.log"), "a")
+      try {
+        spawn(this.chromeBin, [
+          `--user-data-dir=${this.automatedProfile}`, `--remote-debugging-port=${port}`, "--headless=new",
+          ...(kind === "webdriver" ? ["--enable-automation"] : ["--disable-blink-features=AutomationControlled"]), "--no-first-run", "--no-default-browser-check", "about:blank",
+        ], { stdio: ["ignore", log, log], detached: true }).unref()
+      } finally {
+        closeSync(log)
+      }
+      let session: DevtoolsSession | undefined
+      const close = () => stopEach(async () => session?.close(), () => this.closeChrome(this.automatedProfile))
+      try {
+        session = await until("the automated Chrome's blank page", () => DevtoolsSession.ofPage(port, () => true).catch(() => undefined), 60, 500)
+        await session.send("Emulation.setFocusEmulationEnabled", { enabled: true })
+        if (kind === "webdriver") {
+          const userAgent = await session.evaluate("navigator.userAgent")
+          await session.send("Emulation.setUserAgentOverride", { userAgent: String(userAgent).replace("HeadlessChrome/", "Chrome/") })
+        }
+        await session.send("Page.navigate", { url: `${this.origin}/?conversation=${other}` })
+        const box = `document.querySelector('textarea[data-conversation="${other}"]')`
+        const shown = await until("the automated page showing another conversation while it claims focus", async () => {
+          const seen = await session!.evaluate(`(() => { const box = ${box};
+            return { box: !!box && box.getClientRects().length > 0, focused: document.visibilityState === "visible" && document.hasFocus(),
+              webdriver: navigator.webdriver === true, headless: /HeadlessChrome\\//.test(navigator.userAgent),
+              shows: !!document.querySelector('textarea[data-conversation="${this.id}"]') } })()`).catch(() => undefined)
+          return seen?.box && seen.focused ? seen : undefined
+        }, 90, 500)
+        const signals = kind === "webdriver" ? shown.webdriver && !shown.headless : !shown.webdriver && shown.headless
+        if (!signals) throw new Error(`the automated page does not show only the ${kind} signal: ${JSON.stringify(shown)}`)
+        if (shown.shows) throw new Error(`the automated page also shows the conversation under test: ${JSON.stringify(shown)}`)
+        await until("the automated page's report to the connector", () => (newPageReported(this.trace(), known) ? true : undefined), 90, 500)
+      } catch (error) {
+        await close().catch((closing) => { throw new Error(`${(error as Error).message}; closing the automated Chrome also failed: ${(closing as Error).message}`) })
+        throw error
+      }
+      return close
+    },
+  }
+
+  private other: number | undefined
+
+  private async otherConversation() {
+    if (this.other === undefined) {
+      const created = (await (await this.api("/api/conversations", { title: "automated page" })).json()) as { id: number }
+      this.other = created.id
+    }
+    return this.other
   }
 
   diagnostics() {
     const tailText = (path: string, limit = 64 * 1024) => existsSync(path) ? readFileSync(path, "utf8").slice(-limit) : ""
     return {
       "ultimate-log": () => tailText(join(this.root, "ultimate.log")),
+      "automated-chrome-log": () => tailText(join(this.root, "automated-chrome.log")),
       "bridge-trace": () => tailText(this.tracePath).trim().split("\n").filter(Boolean).slice(-200).map(line => {
         try { return JSON.parse(line) } catch { return line }
       }),
@@ -243,8 +360,7 @@ export class UltimateDriver implements AgentDriver {
   }
 
   async stop(keep: boolean) {
-    await this.window.close().catch(() => {})
-    await this.halt()
+    await stopEach(() => this.window.close(), () => this.closeChrome(this.automatedProfile), () => this.halt())
     removeScratch(this.root, keep)
   }
 }

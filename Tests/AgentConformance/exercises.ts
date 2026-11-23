@@ -1,4 +1,4 @@
-import type { AgentDriver, Message } from "./lib/driver.ts"
+import { automatedKinds, type AgentDriver, type Message } from "./lib/driver.ts"
 import type { Instance, TakeResult } from "./lib/instance.ts"
 import { spawn } from "node:child_process"
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
@@ -105,6 +105,14 @@ async function bringForward(context: Context) {
   if (window.focus) await window.focus()
   else instance.focus(await until("a window of the agent's app", () => instance.windows().find((w) => window.owns(w))?.spec, 30, 500))
   await until("the conversation in front", async () => ((await window.look()).focused ? true : undefined), 15, 500)
+}
+
+async function takeInFront(context: Context, body: string) {
+  const result = await unnamed(context, body)
+  const outcome = await replyOutcome(context, body, result)
+  const chosen = outcome.entry.facts?.find((fact: any) => fact.label === "Chosen by")?.value
+  check(chosen === "The conversation in front", `the take was chosen by ${chosen}`)
+  check(!outcome.read && /in front/.test(outcome.reason ?? ""), `the reply was not held back for being in front: ${outcome.reason ?? "it was read"}`)
 }
 
 async function lookAway(context: Context) {
@@ -220,12 +228,31 @@ export const exercises: Exercise[] = [
     applies: (agent) => agent.window !== undefined,
     async run(context) {
       await bringForward(context)
-      const body = "Reply with only the word quince."
-      const result = await unnamed(context, body)
-      const outcome = await replyOutcome(context, body, result)
-      const chosen = outcome.entry.facts?.find((fact: any) => fact.label === "Chosen by")?.value
-      check(chosen === "The conversation in front", `the take was chosen by ${chosen}`)
-      check(!outcome.read && /in front/.test(outcome.reason ?? ""), `the reply was not held back for being in front: ${outcome.reason ?? "it was read"}`)
+      await takeInFront(context, "Reply with only the word quince.")
+    },
+  },
+  {
+    id: "D15",
+    title: "A page an automated browser opens on the same app never takes over from the conversation in front, and replies behind are still read while it is open",
+    applies: (agent) => agent.window?.openAutomated !== undefined,
+    async run(context) {
+      const { agent } = context
+      const window = agent.window!
+      for (const kind of automatedKinds) {
+        await bringForward(context)
+        const close = await window.openAutomated!(kind)
+        try {
+          check((await window.look()).focused, `the conversation was no longer in front once the ${kind} page opened`)
+          await takeInFront(context, `Reply with only the word ${kind === "webdriver" ? "guava" : "papaya"}.`)
+          await lookAway(context)
+          const body = `Reply with only the word ${kind === "webdriver" ? "lychee" : "durian"}.`
+          const { result, said } = await deliverAndRead(context, body)
+          const outcome = await replyOutcome(context, said, result)
+          check(outcome.read, `the reply behind was not read while the ${kind} page was open: ${outcome.reason}`)
+        } finally {
+          await close()
+        }
+      }
     },
   },
   {

@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises'
 import { request } from 'node:http'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { appNameOf, keyscribe, namedByUser, readAloudReply, readAloudToolName, waitingFor } from './keyscribe.ts'
+import { appNameOf, keyscribe, namedByUser, readAloudReply, readAloudToolName, traceLimit, waitingFor } from './keyscribe.ts'
 import type { Config, Exchange, Image, PageReport, Response, Summary, Waiting } from './keyscribe.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -52,7 +52,6 @@ type Host = {
 }
 let current: ReturnType<typeof start> | null = null
 const traceTarget = process.env.KEYSCRIBE_ULTIMATE_TRACE || null
-const traceLimit = 4000
 let traced = 0
 const traceFields = [
   'op', 'session', 'on', 'draft', 'newConversation', 'pageConversation',

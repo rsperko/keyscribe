@@ -767,7 +767,11 @@ a name goes to the conversation whose message box takes your typing, which is th
 main message box (or opens a new side chat when you switched `@ultimate`'s box to side-chat mode with Tab). If its message box already has text, what you say is added after it and both are sent together.
 When the page can't take it, such as when a dialog covers the message box or the page shows the lander, nothing is
 sent and the panel says why. KeyScribe tells which page is in front from the address the browser reports for its
-window, which Chrome, other Chromium browsers and Safari do and Firefox does not; in Firefox, name the conversation. When a conversation asks you a question, you hear it, and what you dictate to that
+window, which Chrome, other Chromium browsers and Safari do and Firefox does not; in Firefox, name the conversation.
+A page opened by a browser that automation drives, such as an agent checking its own work in a headless browser, never
+takes over from the page on your screen, so dictation and the decision to read a reply aloud follow the page you see.
+For the same reason, a visible browser window that an automation tool launched never counts as the page in front;
+name the conversation when you dictate there. When a conversation asks you a question, you hear it, and what you dictate to that
 conversation waits until you answer the question in Ultimate. “Open” switches Ultimate's open pages to the
 conversation and brings forward the window KeyScribe last saw it in.
 

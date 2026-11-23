@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { joined, runsAsCommand, typingTarget } from './keyscribe.ts'
+import { automatedBrowser, joined, runsAsCommand, typingTarget } from './keyscribe.ts'
 import { actionRef, api, defineWebExtension, fillComposer, useUltimate } from '@/sdk'
 
 const extension = 'keyscribe'
@@ -120,7 +120,8 @@ function subscribe(listener: () => void) {
     window.clearInterval(reread)
   }
 }
-const focusedNow = () => document.visibilityState === 'visible' && document.hasFocus()
+const automated = automatedBrowser(navigator)
+const focusedNow = () => !automated && document.visibilityState === 'visible' && document.hasFocus()
 type Shown = {
   conversation: number | null; draft: boolean; newConversation?: boolean; parent?: number; pageConversation: number | null; problem?: string; focused: boolean
 }

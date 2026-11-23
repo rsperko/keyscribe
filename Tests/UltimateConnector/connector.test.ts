@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import { focusConnectionContract } from "../AgentConformance/lib/focus-contract.ts"
 import {
-  joined, keyscribe, namedByUser, promptDigest, readAloudReply, readAloudToolName, waitingFor,
+  automatedBrowser, joined, keyscribe, namedByUser, promptDigest, readAloudReply, readAloudToolName, waitingFor,
   type Host, type Image, type Summary, type Ultimate,
 } from "../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts"
 
@@ -378,6 +378,15 @@ test("the focused page tells the app which conversation is in front and whether 
   h.connector.page({ page: "p1", focused: false, conversation: 61, draft: true })
   await h.flush()
   assert.equal(h.events("shown").at(-1).on, false)
+})
+
+test("a browser counts as automated when it says automation drives it or when it runs headless", () => {
+  const visible = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+  const headless = visible.replace("Chrome/", "HeadlessChrome/")
+  assert.equal(automatedBrowser({ webdriver: false, userAgent: visible }), false)
+  assert.equal(automatedBrowser({ webdriver: true, userAgent: visible }), true)
+  assert.equal(automatedBrowser({ webdriver: false, userAgent: headless }), true)
+  assert.equal(automatedBrowser({ userAgent: visible }), false)
 })
 
 test("a page that stops reporting no longer counts as in front", async () => {

@@ -201,6 +201,12 @@ export function typingConversation(editors: Array<{ id: number; active: boolean;
   return target.kind === "conversation" ? target.id : null
 }
 
+export const traceLimit = 4000
+
+export function automatedBrowser(browser: { webdriver?: boolean; userAgent: string }): boolean {
+  return browser.webdriver === true || /HeadlessChrome\//.test(browser.userAgent)
+}
+
 export function namedByUser(title: string | undefined, generatedTitle: string | undefined): boolean {
   return title !== undefined && title !== generatedTitle
 }

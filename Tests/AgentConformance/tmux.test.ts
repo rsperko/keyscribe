@@ -11,7 +11,9 @@ test("stopping waits for the agent's processes to finish writing on their way ou
   const tmux = new Tmux(`ks-tmux-test-${process.pid}`)
   try {
     const late = join(folder, "written-on-exit")
-    tmux.start(folder, `sh -c 'trap "sleep 1; touch ${late}; exit 0" HUP TERM; while true; do sleep 0.1; done'`)
+    const ready = join(folder, "ready")
+    tmux.start(folder, `sh -c 'trap "sleep 1; touch ${late}; exit 0" HUP TERM; touch ${ready}; while true; do sleep 0.1; done'`)
+    await until("the agent ready to write on its way out", () => (existsSync(ready) ? true : undefined), 10, 100)
     await tmux.stop()
     assert.ok(existsSync(late), "stop returned before the agent finished exiting")
   } finally {

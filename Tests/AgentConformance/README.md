@@ -135,7 +135,16 @@ go to and draft joining run only against such a driver, move focus between its w
 the run needs one open), and never type into a window: a draft goes in through tmux or the app's own API. Only a
 window its app can open again on its own (`reopens`, bb) runs the exercise for opening with no window open. A window
 also declares what its agent does with a take named to it while it is behind and its box holds a draft
-(`takeBehindDraft`): keeps it, saying so, or sends it alone. D10 fails when the agent does the other. bb's driver installs a test-only plugin,
+(`takeBehindDraft`): keeps it, saying so, or sends it alone. D10 fails when the agent does the other. A window
+that can open a second page of its app in a browser driven by automation offers `openAutomated`, once for each signal
+the connector reads (`automatedKinds`): Ultimate's is a headless Chrome on a scratch profile showing another
+conversation, held through one debugging connection that turns on focus emulation before the page loads (Chrome drops
+it when the connection closes), with only one signal present: `webdriver` (`--enable-automation` and a visible
+browser's user agent) or `headless` (automation detection turned off, the headless user agent). It fails before the exercise unless
+that page claims focus and its report reaches the connector, read from the bridge trace; a trace at its record limit
+without that report fails with that reason. D15 then checks, for each, that a take with no name still goes to
+the conversation in front and is not read over it, and that a reply behind is still read while the page is open.
+Stopping Ultimate closes its Chrome browsers and its server and fails, keeping the scratch folder, if any of them fails. bb's driver installs a test-only plugin,
 `bb-window/`, into its scratch copy of bb for this: `bb thread open` shows the thread, and the plugin answers through
 `bb plugin rpc call` from inside bb's own window, using bb's composer API to fill the box. It is never installed
 anywhere else. A driver whose agent's app can add its own note to a running turn (bb's notice that a child thread

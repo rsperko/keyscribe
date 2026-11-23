@@ -6,6 +6,9 @@ import { run, sleep } from "./util.ts"
 export type Message = { role: "user" | "agent" | "ended"; text: string; turn?: string; mark?: string }
 export type Shown = { thread: boolean; focused: boolean; draft: string | null }
 
+export const automatedKinds = ["webdriver", "headless"] as const
+export type AutomatedKind = typeof automatedKinds[number]
+
 export type ListedWindow = { app: string; spec: string; title: string }
 
 export interface AppWindow {
@@ -18,6 +21,7 @@ export interface AppWindow {
   look(): Promise<Shown>
   fill(text: string): Promise<void>
   close(): Promise<void>
+  openAutomated?(kind: AutomatedKind): Promise<() => Promise<void>>
 }
 
 export interface AgentDriver {

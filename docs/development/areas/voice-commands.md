@@ -493,6 +493,11 @@ every rule above applies to it, with these sharpenings:
   that is not ready holds delivery with its reason. It reacts to
   focus, typing and composer or dialog elements appearing, and re-reads the composer at each heartbeat, so a dialog
   shown by a style change alone is reported within one heartbeat.
+  A page in a browser that automation drives (`navigator.webdriver`) or that runs headless never reports focus
+  (`automatedBrowser`), so a page an agent opens with a browser tool never becomes the page in front, and while the user
+  is in another app no page claims focus and reply checks read no window. A visible browser launched by automation is
+  therefore never in front either; the user names the conversation there. A page that hides both signals is not caught;
+  the host's address check still keeps a take from the wrong conversation, but its reply is read aloud.
   The host keeps only what the connector reported (conversation, page conversation, whether a page is focused or in
   new-side-chat mode, the hold reason) and pairs it with a window at use time through one async `focusInFront` path:
   it reads the front window's document address off the main actor, revalidates the front window afterward, and matches
