@@ -1,0 +1,10 @@
+{
+  "isolates": {
+    "worktree": {
+      "setup": ["sh -e .ultimate/worktree-setup.sh"]
+    }
+  },
+  "lander": {
+    "checks": [{ "command": "make test", "timeout": 600 }]
+  }
+}
