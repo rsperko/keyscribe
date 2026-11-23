@@ -256,7 +256,8 @@ export class UltimateDriver implements AgentDriver {
   readonly window: AppWindow = {
     owns: (listed) => this.recentChromePids().includes(Number(listed.spec.split(":")[0])),
     reopens: false,
-    takeBehindDraft: "kept",
+    takeBehindDraft: "sent",
+    takeInFrontOfDraft: "joined",
     show: async () => {
       this.chromeSeen.at = 0
       if (!this.chromePids().length) {
@@ -317,6 +318,7 @@ export class UltimateDriver implements AgentDriver {
           const userAgent = await session.evaluate("navigator.userAgent")
           await session.send("Emulation.setUserAgentOverride", { userAgent: String(userAgent).replace("HeadlessChrome/", "Chrome/") })
         }
+        await session.send("Page.addScriptToEvaluateOnNewDocument", { source: "sessionStorage.setItem('ultimate.detached', '1')" })
         await session.send("Page.navigate", { url: `${this.origin}/?conversation=${other}` })
         const box = `document.querySelector('textarea[data-conversation="${other}"]')`
         const shown = await until("the automated page showing another conversation while it claims focus", async () => {
@@ -330,6 +332,7 @@ export class UltimateDriver implements AgentDriver {
         if (!signals) throw new Error(`the automated page does not show only the ${kind} signal: ${JSON.stringify(shown)}`)
         if (shown.shows) throw new Error(`the automated page also shows the conversation under test: ${JSON.stringify(shown)}`)
         await until("the automated page's report to the connector", () => (newPageReported(this.trace(), known) ? true : undefined), 90, 500)
+        if (!(await this.window.look()).thread) throw new Error("opening the automated page changed the conversation the page on screen shows")
       } catch (error) {
         await close().catch((closing) => { throw new Error(`${(error as Error).message}; closing the automated Chrome also failed: ${(closing as Error).message}`) })
         throw error

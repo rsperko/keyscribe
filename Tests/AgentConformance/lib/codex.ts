@@ -5,9 +5,18 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { type AgentDriver, type AppWindow, type Message, command, removeScratch, scratch } from "./driver.ts"
 import { ensureExited, pidsListeningOn, sleep, stopEach, texts, until } from "./util.ts"
-import { copyCodexLogin } from "./logins.ts"
+import { codexLoginHome, copyCodexLogin } from "./logins.ts"
 import { terminalWindow } from "./terminal.ts"
-import { Tmux } from "./tmux.ts"
+import { promptText, Tmux } from "./tmux.ts"
+
+export async function unlessUnwritten<T>(read: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await read()
+  } catch (error) {
+    if (/\brollout\b.*\bis empty\b/.test(String(error))) return undefined
+    throw error
+  }
+}
 
 export function codexMessages(newestFirst: any[]): Message[] {
   const messages: Message[] = []
@@ -132,7 +141,7 @@ export class CodexDriver implements AgentDriver {
     this.home = join(root, "codex")
     mkdirSync(this.home)
     this.tmux = new Tmux(`ks-conf-${process.pid}`, command("tmux", "TMUX_BIN"))
-    this.window = terminalWindow(this.tmux, `ks-conf codex ${name} ${process.pid}`, "sent")
+    this.window = terminalWindow(this.tmux, `ks-conf codex ${name} ${process.pid}`, "sent", "alone")
   }
 
   get folder() { return this.home }
@@ -144,7 +153,7 @@ export class CodexDriver implements AgentDriver {
   }
 
   async setUp() {
-    const provider = copyCodexLogin(process.env.CODEX_AUTH_HOME ?? join(homedir(), ".codex"), this.home, "log in to Codex first")
+    const provider = copyCodexLogin(codexLoginHome(process.env), this.home, "log in to Codex first")
     const model = process.env.CODEX_MODEL ?? "gpt-6-luna"
     writeFileSync(join(this.home, "config.toml"), [
       ...provider.top,
@@ -165,8 +174,10 @@ export class CodexDriver implements AgentDriver {
       throw new Error(`Codex started no shared app server at ${this.socket}; KeyScribe reaches Codex only through it, so this setup cannot be tested. Last screen:\n${this.tmux.screen()}`)
     })
     this.daemon = await Daemon.open(this.socket)
-    await this.tmux.type("Reply with only the word ready.")
+    const first = "Reply with only the word ready."
+    await this.tmux.type(first)
     let retype = false
+    let waiting = 0
     this.thread = await until("the scratch thread on the app server", async () => {
       const screen = this.tmux.screen()
       if (this.answerHooks(screen)) {
@@ -174,9 +185,15 @@ export class CodexDriver implements AgentDriver {
         await sleep(1000)
         return undefined
       }
-      if (retype && /ask codex to do anything|for shortcuts/i.test(screen)) {
+      const boxed = promptText(this.tmux.cursorLine())?.includes(first)
+      if (retype && !boxed && /ask codex to do anything|for shortcuts/i.test(screen)) {
         retype = false
-        await this.tmux.type("Reply with only the word ready.")
+        await this.tmux.type(first)
+        return undefined
+      }
+      if (boxed && ++waiting % 5 === 0) {
+        retype = false
+        this.tmux.keys("Enter")
         return undefined
       }
       const loaded: string[] = (await this.daemon!.call("thread/loaded/list", {}))?.data ?? []
@@ -184,6 +201,12 @@ export class CodexDriver implements AgentDriver {
       const listed: any[] = (await this.daemon!.call("thread/list", {}))?.data ?? []
       return listed.find((thread) => typeof thread?.cwd === "string" && existsSync(thread.cwd) && realpathSync(thread.cwd) === this.project)?.id
     }, 90, 500)
+    await this.idle(120)
+    await until("Codex's message box to be empty after setup", () => {
+      if (!promptText(this.tmux.cursorLine())?.includes(first)) return true
+      this.tmux.keys("Enter")
+      return undefined
+    }, 60, 2000)
     await this.idle(120)
     await this.daemon.call("thread/name/set", { threadId: this.thread, name: this.name })
   }
@@ -226,14 +249,15 @@ export class CodexDriver implements AgentDriver {
 
   async idle(seconds: number) {
     await until("the Codex turn to finish", async () => {
-      const read = await this.daemon!.call("thread/read", { threadId: this.thread })
+      const read = await unlessUnwritten(() => this.daemon!.call("thread/read", { threadId: this.thread }))
+      if (read === undefined) return undefined
       const status = JSON.stringify(read?.thread?.status ?? read?.status ?? "")
       return /idle|notLoaded/i.test(status) && !/active|running|inProgress/i.test(status) ? true : undefined
     }, seconds, 500)
   }
 
   async messages(): Promise<Message[]> {
-    const listed = await this.daemon!.call("thread/turns/list", { threadId: this.thread, itemsView: "full" })
+    const listed = await unlessUnwritten(() => this.daemon!.call("thread/turns/list", { threadId: this.thread, itemsView: "full" }))
     return codexMessages(listed?.data ?? [])
   }
 
@@ -254,10 +278,10 @@ export class CodexDriver implements AgentDriver {
   }
 
   async stop(keep: boolean) {
-    await this.window.close().catch(() => {})
     this.daemon?.close()
     const servers = pidsListeningOn(this.socket)
     await stopEach(
+      () => this.window.close(),
       () => this.tmux.stop(),
       async () => {
         for (const pid of servers) { try { process.kill(pid, "SIGTERM") } catch {} }

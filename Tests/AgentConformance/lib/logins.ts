@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process"
 import { chmodSync, copyFileSync, existsSync, readFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { join } from "node:path"
 
 const readToml = `import json, sys, tomllib
@@ -73,4 +74,29 @@ export function claudeCredential(login: Record<string, unknown>, environment: No
   const apiKey = copied.ANTHROPIC_API_KEY ?? environment.ANTHROPIC_API_KEY
   const usable = !!(apiKey || copied.CLAUDE_CODE_OAUTH_TOKEN || environment.CLAUDE_CODE_OAUTH_TOKEN || login.apiKeyHelper)
   return { usable, apiKey }
+}
+
+export function claudeLoginFile(environment: NodeJS.ProcessEnv) {
+  return join(environment.CLAUDE_LOGIN_HOME ?? join(environment.HOME ?? homedir(), ".claude"), "settings.json")
+}
+
+export function codexLoginHome(environment: NodeJS.ProcessEnv) {
+  return environment.CODEX_AUTH_HOME ?? join(environment.HOME ?? homedir(), ".codex")
+}
+
+export function loginProblem(agent: string, environment: NodeJS.ProcessEnv): string | undefined {
+  if (agent === "claude") {
+    const from = claudeLoginFile(environment)
+    const login = claudeLoginSettings(existsSync(from) ? JSON.parse(readFileSync(from, "utf8")) : {})
+    if (claudeCredential(login, environment).usable) return undefined
+    return `a scratch Claude Code folder has no login: set CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) or ANTHROPIC_API_KEY, or give ${from} an apiKeyHelper (or set CLAUDE_LOGIN_HOME)`
+  }
+  if (agent === "codex") {
+    const from = codexLoginHome(environment)
+    if (existsSync(join(from, "auth.json"))) return undefined
+    const config = join(from, "config.toml")
+    if (existsSync(config) && codexLoginConfig(readFileSync(config, "utf8")).top.length) return undefined
+    return `no Codex login at ${from}: neither auth.json nor a model_provider in config.toml (or set CODEX_AUTH_HOME)`
+  }
+  return undefined
 }

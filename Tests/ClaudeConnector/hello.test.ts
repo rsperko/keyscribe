@@ -71,7 +71,7 @@ test('a session the module saw start says hello as fresh and idle', async ($, on
   const h = harness(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
-  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'steer', 'merge'] })
+  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'merge'] })
 })
 
 test('hello reports the zellij pane its session runs in, which only its own process can read', async ($, on) => {
@@ -117,7 +117,7 @@ test('a resumed session says hello as resuming after a gap', async ($, on) => {
   expect(h.events().slice(-1)[0]).toMatchObject({ op: 'hello', session: 's0', gap: true })
 })
 
-test('a turn running when dictation arrives is joined, not interrupted', async ($, on) => {
+test('a turn running when dictation arrives is never interrupted: the dictation is refused as working, for the app to queue', async ($, on) => {
   const h = harness(on)
   await h.connect($)
   await $.turn.start({ text: '', turnId: 't1' })
@@ -127,11 +127,11 @@ test('a turn running when dictation arrives is joined, not interrupted', async (
   expect(h.submits).toEqual([])
   expect(h.events().filter((b) => b.request === 'r1')).toMatchObject([
     { op: 'ack', request: 'r1' },
-    { op: 'submitted', request: 'r1', turn: '' },
+    { op: 'refused', request: 'r1', reason: 'working' },
   ])
 })
 
-test('a connection lost during a turn reconnects busy, holds dictation for the turn, and submits again once the turn ends', async ($, on) => {
+test('a connection lost during a turn reconnects busy, refuses dictation for the turn, and submits again once the turn ends', async ($, on) => {
   const h = harness(on)
   await h.connect($)
   await $.turn.start({ text: 'typed by me', turnId: 't1' })
@@ -151,18 +151,18 @@ test('a connection lost during a turn reconnects busy, holds dictation for the t
   await $.turn.complete({ turnId: 't1', answer: '', durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
   await h.answerEvents()
 
-  expect(h.submits).toEqual(['run the tests'])
+  expect(h.submits).toEqual([])
   const after = h.events().slice(h.events().indexOf(hello.body) + 1)
   expect(after.map((b) => [b.op === 'refused' ? b.reason : b.op, b.connection])).toEqual([
     ['ack', hello.body.connection],
-    ['submitted', hello.body.connection],
+    ['working', hello.body.connection],
     ['turnComplete', hello.body.connection],
   ])
   expect(h.open('/poll').map((r) => r.body.connection)).toEqual([hello.body.connection])
 
   await h.deliver([{ op: 'submit', id: 'r2', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   await h.answerEvents()
-  expect(h.submits).toEqual(['run the tests', 'run the tests'])
+  expect(h.submits).toEqual(['run the tests'])
   expect(h.events().filter((b) => b.request === 'r2').map((b) => [b.op, b.connection])).toEqual([
     ['ack', hello.body.connection],
     ['submitted', hello.body.connection],
@@ -181,7 +181,7 @@ test('an older completion never clears a newer turn', async ($, on) => {
   await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'three' }])
   await h.answerEvents()
   expect(h.submits).toEqual([])
-  expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'submitted'])
+  expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'working'])
 })
 
 test('a hello answered quietly keeps polling but sends nothing about the conversation', async ($, on) => {

@@ -325,6 +325,20 @@ every rule above applies to it, with these sharpenings:
   tab or workspace label of one conversation (`.held`) holds with `AskReason.shownOn`. One another name two
   conversations have asks; one equal to a shown name is dropped. A herdr agent name is grouped only with
   other agent names when deciding whether it is shared.
+- **A conversation keeps answering to the name it had just before.** Whatever displaces the name it answered
+  to records that name as its previous one (`AgentDirectory.formerNames`): a rename, Use Default Name, the agent's own name, a
+  place label that changes or is first read (a tmux session read once the connector reports `TMUX`), and a
+  remembered name that loses to such a label on the first read after a restart. An automatic change keeps only
+  the name it replaced; a rename also keeps the previous name it found unless the name it replaces is one the
+  user chose, so a name the user was using is never pushed out by a label they did not set. Previous names are
+  saved with the remembered name (`RememberedName.previous`, under the same pid and start time), so they
+  survive a restart, an update, and a connector reinstall, and move with a chosen name when the session id
+  changes (`AgentDirectory.carryChosenName`, which takes them from the hub before the rescan that drops the old
+  id). A previous name reaches its conversation only while nothing else answers to it: one that is another
+  conversation's current name, chosen name, or remembered name is that conversation's alone; one that is a place
+  label several conversations share asks, as the label does; one several conversations had is a shared name that
+  asks. All of this is derived in one place, `AgentDirectory.indexPreviousNames`, from the names, place labels
+  and previous lists; routing and the saved file read `previousNames(of:)`, which never holds the current name.
 - **An integration owns its own conversation ids; shared code never reads one.** An integration whose
   conversations have ids people say (a numbered branch, a ticket id) registers an `AgentNativeAddress` on its
   descriptor (`AgentHostIntegration.addresses`, or `AgentIntegration`'s for a terminal agent): a pure, synchronous
@@ -374,7 +388,8 @@ every rule above applies to it, with these sharpenings:
   steer enters the conversation, as `absorbed` at the `message_start` Pi emits while draining steering messages into
   the run (`agent-loop.js`). A steer Pi carries into a new run belongs to that run; a run that starts without a
   prompt digest keeps waiting for the `absorbed` (`AgentHub` `.turnStarted`). A later extension can still consume an
-  accepted steer: it reads as sent, and no reply follows it.
+  accepted steer: it reads as sent, and no reply follows it. Claude Code's connector lists no `steer`, so its
+  takes for a working conversation wait in the hub's queue for the turn to end (below).
 - **In Pi, omp and Ultimate, input that arrives once the agent has answered starts a turn of its own, even inside one run.**
   An extension's message, another agent's, or one typed or steered in after an assistant message that ends without
   a tool call ends the running turn there, so the answer to the dictation is reported at once and is never replaced
@@ -555,9 +570,10 @@ every rule above applies to it, with these sharpenings:
   text that starts with `/` or `!`: Return runs them as a command or in the shell, and the box drops the invisible
   character that keeps a submitted slash from running (measured on 2.1.325, 2026-11-15). The connector puts the same
   character before a submitted `!`, and checks both after leading spaces; that a submitted `!` would otherwise run in
-  the shell is not measured (`claude -p` on 2.1.328, 2026-11-19, passed a leading `!` to the model as words). A steered take follows
-  only a turn that read it: the running turn once the connector reports it absorbed (the `queued_command` attachment
-  row `session.append` stores, carrying the text, reported as `absorbed`), or the turn the message starts when the running one ended
+  the shell is not measured (`claude -p` on 2.1.328, 2026-11-19, passed a leading `!` to the model as words). A steered take,
+  or a prompt-box take whose Return lands while a turn runs, follows only a turn that read it: the running turn once
+  the connector reports it absorbed (for Claude Code, the queued input a later model step carries, read from the
+  conversation and reported as `absorbed`), or the turn the message starts when the running one ended
   first, matched by its prompt digest (`followSteer`). It never claims a turn that did not read it, so its reply is
   heard once. A turn that takes in several dictations, whether one started it and others joined it or all joined it,
   answers the last one it took in (`AgentHub.follow`), for every agent and whatever order their reports arrive in:
@@ -592,26 +608,58 @@ every rule above applies to it, with these sharpenings:
   only while the editor still holds exactly that text, so it is never sent twice. A joined take reads “Sent to docs with the text in its prompt box” (`AgentReceipt.sentWithDraft`) and its
   Delivery line says so (`AgentDelivery.withDraft`). bb's goes through its plugin (below). A connector filed under
   a hosted conversation is never asked: only the host's own plugin joins there (`AgentHub.hostOwned`).
-- **Claude Code's connector steers at the next tool boundary, worded as typed text is.** A `submit` while a turn
-  runs, with the prompt box empty, is held in the connector and confirmed at once, as Pi's is; a draft in the box
-  refuses it as `draft`, or joins it for the conversation in front, as at idle. Once the next main-loop `tool.call` returns, each held take is added with
-  `$.session.append` as its own user row, in the order said, in the frame Claude Code wraps typed mid-turn text
-  in (`steerFrame`, copied from 2.1.325; a Claude Code that rewords its own frame needs it copied again). That is
-  where and how typed text lands (measured on 2.1.325, 2026-11-14 and 2026-11-16). A call the user interrupted
-  (`next.signal` aborted) and a subagent's call never carry it. It is reported `absorbed` only when the next
-  main-loop model step starts (`turn.step`); a row added but not read before the turn ends stays in the
-  conversation for the next turn and is never sent again.
+- **Claude Code's busy takes wait for the turn to end and go in as the user's own prompt.** Claude Code gives a plugin
+  no way to put the user's words into a running turn: `$.prompt.submit` waits behind the turn, and what a plugin
+  appends with `$.session.append` is held as that plugin's note (`plugin_note`) and reaches the model framed as
+  “Note from the … plugin, not from the user” (read from the code of 2.1.326 and 2.1.330, 2026-11-23). In
+  downstream's live run on 2.1.326 (reported 2026-11-23) the model ignored such a row, saying it came from a tool result rather than from
+  the user. The earlier measurement that a dictated approval appended this way was taken as the user's, idle and
+  mid-turn, was made on 2.1.325, before that run. So the connector lists no `steer`, and every busy take waits in
+  the hub's queue (`AgentOutbox`): a take for a working conversation that is not in front reads “Queued for …”, and
+  a `submit` that still meets a running turn (one that raced the turn's start, a `/` or `!` the box must not take,
+  or text the box will not take) is refused as `working`, which the hub queues the same way, back ahead of takes
+  said after it (`AgentOutbox.send` with `ahead`). The refusal leaves the connector before that turn's
+  `turnComplete` does, so the hub never misses the end it waits for; a fill that fails after the turn ended submits
+  instead. The queue releases one take per turn end, oldest first. The user's Esc (`turnComplete` with reason
+  `aborted`) or a message the user sent meanwhile (`typed`) keeps a queued take for review rather than sending it
+  (`needsReview`, read as “didn't take that: its last turn was stopped” or “you sent it a message since”). A draft
+  in the box refuses a take as `draft`, or joins it for the conversation in front, as at idle. Nothing is added to
+  the running turn, and the connector holds nothing. Because a Claude Code turn can run for minutes, that review
+  rule now covers every take to a busy Claude Code conversation that is not in front: typing in it or pressing Esc
+  before the turn ends keeps the take rather than sending it after. Only a Claude Code connector from before this
+  rule still reports a held take late as `filled` or `added`; the hub's `leftInBox`, `onLeftInPromptBox`
+  (`AgentTake.sendLeftInPromptBox`) and those two cases of `refuseSteered` serve nothing else. An app update
+  reinstalls the connector, but a Claude Code session keeps the one it loaded until it restarts, so they can go
+  once a release after this one has shipped; the other late outcomes of `refuseSteered` still serve Pi's steered
+  takes.
 - **Claude Code's connector takes its facts from Claude Code's own events, not its classic hooks.** An organization's
   plugin in the `prepend` tier may continue an event past every personal plugin (`next.to`), and Claude Code then tells
   the model, in every session, that the personal hook was skipped; one did so for `classic.SessionStart`,
-  `classic.UserPromptSubmit` and `prompt.attachment` (2.1.329, 2026-11-20). So the session is `$.session.id()` read when
+  `classic.UserPromptSubmit` and `prompt.attachment` (2.1.329, 2026-11-20), and for `session.append`
+  (2.1.330). The connector hooks only the events `managed-plugin.test.ts` lists, so adding one a managed plugin
+  could pass by is a deliberate choice. So the session is `$.session.id()` read when
   the poll loop starts and after every `command.run`, since a `/clear`, `/resume` or `/branch` ends the old session and
   switches the id inside its own command (measured on 2.1.329: the id is still the old one after `session.end`'s
   `next`, and the new one after the command's); the next prompt reads it again for a switch that came another way. A
   session is fresh when its conversation holds no rows yet (`$.session.messages`), as a launch or `/clear` leaves it,
   and a resumed or branched one is not; its turn is known idle when it is fresh or when a command just switched to it,
-  and unknown after a plugin reload. Mid-turn input comes from the `queued_command` rows `session.append` stores, matched in the order the
-  inputs were submitted (`takeQueued`): Claude Code hands queued input to the model in submit order, and a prompt-box
+  and unknown after a plugin reload. Mid-turn input is read when a main-loop model step starts (`turn.step`), and
+  only while an input noted since the turn began (`prompt.submit` carrying the turn's id) is still unmatched, so a
+  turn nobody typed into reads nothing. The hub needs the report during the turn, not at its end: an `absorbed` take
+  is followed from then on, so an approval the agent asks for afterwards is announced for it. The read is the
+  conversation as the model gets it (`$.session.messages` with `as: 'api'`, since the plain read leaves out the
+  `queued_command` rows), awaited for at most `stepReadLimit`; one that takes longer lets the step go on and is
+  dropped, as is one that finishes after its session or turn changed. On 2.1.330 (read from its code, 2026-11-23)
+  `as: 'api'` converts the whole conversation and only then applies `last`, so a read costs more as the
+  conversation grows, which is why it is gated and bounded; `last: 1` starts at the last user row that carries no
+  tool result, normally the turn's opening prompt, so the read spans the turn. Queued input is merged into the user
+  row that carries the step's tool results, one text block per input in its origin's frame, so the user text after
+  the last assistant message is what that step newly carries (`stepTail`). The turn's first step reads nothing
+  when no assistant message precedes it, since that tail is the opening prompt. A tail read before (a retried step)
+  is skipped (`readTail`). Input that matches nothing noted counts as someone else's only when it carries Claude
+  Code's frame for queued typing (`queuedTyping`, copied from 2.1.330; a Claude Code that rewords it needs it copied
+  again). Inputs are matched in the order they were
+  submitted (`takeQueued`): Claude Code hands queued input to the model in submit order, and a prompt-box
   dictation joins that order only when its Return is submitted, and only the newest fill can own a submission, so a
   message with the same words queued earlier, or a fill left unsent and replaced, is never reported as the dictation. It
   reports no title, since Claude Code gives one only to classic hooks: a name the user sets reaches the hub through
@@ -623,40 +671,19 @@ every rule above applies to it, with these sharpenings:
   for input nowhere else, it runs only when one asks, and it only holds a prompt-box Return during the moment the dialog
   may not be drawn yet, which the box's own readiness check covers once it is. `managed-plugin.test.ts` loads a
   `prepend` plugin that passes those events by.
-- **A held take is delivered once it is confirmed, or reported.** A take still held when its turn ends is
-  submitted as the next prompt, as Claude Code does with queued typing, unless the user has started a draft there.
-  After Esc, Claude Code refuses a plugin's prompt until the user sends one, so the takes are added to the prompt
-  box instead (`leaveInBox`), never one that starts with `/` or `!`, and never over text typed meanwhile (an
-  append, checked as `fillBox` checks it). The take has finished by then, so the hub hands that outcome to
-  `AgentTake.sendLeftInPromptBox`, which presses Return through the same in-front checks as any prompt-box take,
-  and never while a recording is open, since the press could land in the HUD; only when it cannot does the take
-  read as waiting in the prompt box. Takes left in one box are one press: the hub joins every later fill for that
-  conversation to the press already under way and settles them all with its outcome (`AgentHub.leftInBox`), which
-  holds because the connector reports them all before it can answer that press's readiness check. A report a lost
-  connection held back past that press is dropped once the box it describes is sent (`noteBoxSent`). A turn that
-  ends while takes are being added sends the rest as the next
-  prompt from the connector's own loop (`afterTurn`), since Claude Code refuses a prompt submitted from a
-  `tool.call` hook; a row that lands after its turn ended is not reported read, and a take held as that turn ends
-  goes after the batch's rest, in the order said. Like a steer Pi has accepted, a
-  confirmed take is the agent's, not a queued command: a lost connection to the app does not cancel it. The
-  session, Disconnect and retirement are checked again before every append and every turn-end step
-  (`stillFor`); a take held for a conversation disconnected, cleared, replaced or retired meanwhile is dropped,
-  like any command of the old session, and so is one held when the plugin reloads. Whatever else does not go
-  through is reported against its request with a late `refused` (`draft`, `filled`, `added`, `stopped`, or the
-  agent's own reason), kept and sent again across a lost connection as a receipt is, within the receipt's bounds,
-  which the hub turns into a late notice for the take it had already reported sent (`AgentHub.refuseSteered`). A
-  failed read or fill counts as `stopped`. The take's History entry follows it: the app keeps tracking a sent take
-  while the hub says it can still change (`AgentHub.awaitsLateOutcome`), and the hub forgets it, through
+- **A steer confirmed and then not delivered is reported late, against its take.** A connector that lists `steer`
+  confirms a take before the agent reads it, so one that does not go through after all is reported with a late
+  `refused` for the same request (`draft`, `filled`, `added`, `stopped`, or the agent's own reason), which the hub
+  turns into a late notice for the take it had already reported sent (`AgentHub.refuseSteered`). A Claude Code
+  connector from before it stopped listing `steer` still does this until its plugin reloads, leaving takes in the
+  prompt box after Esc; takes left in one box are one press: the hub joins every later fill for that conversation
+  to the press already under way and settles them all with its outcome (`AgentHub.leftInBox`), and
+  `AgentTake.sendLeftInPromptBox` presses Return through the same in-front checks as any prompt-box take, never
+  while a recording is open. Like a steer Pi has accepted, a confirmed take is the agent's, not a queued command: a
+  lost connection to the app does not cancel it. The take's History entry follows it: the app keeps tracking a sent
+  take while the hub says it can still change (`AgentHub.awaitsLateOutcome`), and the hub forgets it, through
   `onForget`, once a turn reads it, its conversation goes, or it is the oldest past the bound. A late notice for a
   hub that has restarted since is not recognized, so History keeps “Sent” then.
-- **A held take looks like queued typing.** While held it shows above the prompt (`AbovePrompt`, the connector's
-  own row of that band), where queued typing shows. Once read, a `❯` row under the tool call that carried it
-  stands for the appended row, which Claude Code does not draw (`ToolGroup` in the compact view, `ToolResult`
-  otherwise), in the engine's own prompt-row theme keys (`userMessageBackground`, `inactive`, which the exported
-  `ThemeKey` list leaves out; they matched a typed row's colours on 2.1.325, 2026-11-16). Held takes and drawn rows
-  live in the connector's memory only, so a plugin reload drops a held take and the drawn rows. Claude Code records
-  the row as the plugin's, not the person's; in auto mode a dictated approval was still taken as the user's, idle
-  and mid-turn (measured on 2.1.325, 2026-11-16).
 - **A lost receipt is not a lost message.** A connector keeps the receipt of a submission the agent already
   has across a lost connection and sends it on the next one, and a deadline overrun by the agent's own stall
   is restarted, not counted as a lost connection. The match is the connector's own mark, never the text or

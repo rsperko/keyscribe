@@ -65,11 +65,8 @@ final class Signal: @unchecked Sendable {
             nextToken += 1
             return nextToken
         }
-        let timer = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled else { return }
-            self?.expire(token)
-        }
+        let timer = DispatchWorkItem { [weak self] in self?.expire(token) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: timer)
         let expired = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             lock.lock()
             if fired {

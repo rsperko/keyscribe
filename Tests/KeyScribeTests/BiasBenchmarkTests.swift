@@ -97,7 +97,7 @@ struct BiasBenchmarkTests {
             passages. FluidBloo and KeyScribe both handle technical vocabulary like eigenvector \
             decomposition and Bayesian inference without trouble.
             """
-        guard ScriptedTakeCLI.speak(passage, into: wav) else { throw CocoaError(.fileWriteUnknown) }
+        guard ScriptedTakeCLI.speak(passage, into: wav) == .spoken else { throw CocoaError(.fileWriteUnknown) }
         return wav
     }
 

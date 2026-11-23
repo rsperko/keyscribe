@@ -22,10 +22,17 @@ and Ultimate's environment variables. Set `KEYSCRIBE_SCREEN_NOTICE_CMD` if you u
 notice script (`<cmd> on "<reason>" <minutes>` / `<cmd> off`). It moves foreground focus and uses the agents'
 models. Missing prerequisites fail the required check; they do not produce a passing gate.
 
-The test instance must see key presses and clicks to confirm the conversation in front: give the build the run uses
-(`KEYSCRIBE_APP`, or the one under `.verification/artifacts/`) Accessibility, and Automation for Terminal, once. It only
-listens and never takes your input. A run whose instance cannot see input stops before its first exercise and names
-the app to allow, rather than failing every exercise that speaks to the conversation in front.
+The test instance must see key presses and clicks to confirm the conversation in front. macOS charges a test
+instance's Accessibility to the app the run was started from (your terminal, or the agent whose shell started it), not
+to the build the run uses, so start the run from a terminal that has Accessibility. It only listens and never takes
+your input. A run whose instance cannot see input stops before its first exercise and names the app it was started
+from, rather than failing every exercise that speaks to the conversation in front.
+
+Terminal agents and the window the run looks away to open in Ghostty when it is installed (`GHOSTTY_APP`), otherwise
+in Terminal; `AGENT_TERMINAL=ghostty` or `terminal` chooses. A Ghostty window is a separate copy of Ghostty without
+your configuration or saved windows, and leaves the tmux or herdr the run was started from, so attaching to the
+agent is not refused as nested. Terminal needs Automation for the app the run was started from; the run checks it can
+drive the chosen terminal before the first exercise and names what to allow.
 
 A run also stops before its first exercise while VoiceOver is on. The instance shows each reply as text, and under
 VoiceOver a reply panel stays open until someone closes it, so the next reply would wait behind it and the exercise
@@ -125,20 +132,28 @@ Return while it loads, the driver presses Return again while the words are still
 
 A driver offers `window` when its conversation can be put in a window of its own: show it there, report whether a
 focused window shows it and what its message box holds, and add text to that box. bb's is its app window; a terminal
-agent's is a Terminal window attached to its private tmux server, found by a title unique to each time it is shown
-and brought forward through Terminal's own scripting (`focus`, since Terminal's windows reach the test instance
-without their titles), with the draft read from the line the cursor is on. Stopping a terminal agent waits for its
+agent's is a terminal window attached to its private tmux server, opened with a title unique to each time it is shown,
+with the draft read from the line the cursor is on. A Terminal window is found by that title and brought forward
+through Terminal's own scripting (`focus`, since Terminal's windows reach the test instance without their titles); a
+Ghostty window is found by its own process and brought forward by the test instance. Stopping a terminal agent waits for its
 processes to exit before its scratch folder is removed, so nothing it writes on the way out is left behind; one that
 ignores the hangup is killed, and one still running after that fails the run and keeps its scratch folder. Ultimate's is a Chrome app window on a scratch profile
 (`CHROME_BIN`), read and filled through Chrome's debugging port. The exercises for the conversation in front, open,
-go to and draft joining run only against such a driver, move focus between its window and another app's window (so
-the run needs one open), and never type into a window: a draft goes in through tmux or the app's own API. Only a
+go to and draft joining run only against such a driver, move focus between its window and an idle window the run
+opens for this, never another app's window (bringing a chat app forward can mark its messages read), and never type
+into a window: a draft goes in through tmux or the app's own API. Only a
 window its app can open again on its own (`reopens`, bb) runs the exercise for opening with no window open. A window
 also declares what its agent does with a take named to it while it is behind and its box holds a draft
-(`takeBehindDraft`): keeps it, saying so, or sends it alone. D10 fails when the agent does the other. A window
+(`takeBehindDraft`): keeps it, saying so, or sends it alone; and what it does with a take while it is in front and
+its box holds a draft (`takeInFrontOfDraft`): sends the two joined, or sends the take alone and leaves the draft
+(Codex, whose box KeyScribe can only send to, not add to). D10 fails when the agent does the other. A driver
+declares what its agent does with a take sent while it works (`busyTake`): it joins the running turn (the default),
+or it waits for that turn to end and the app says it is queued (Claude Code, which offers a plugin no way to add the
+user's own words to a running turn). D2 checks the declared one, and that the agent's last answer follows the take. A window
 that can open a second page of its app in a browser driven by automation offers `openAutomated`, once for each signal
 the connector reads (`automatedKinds`): Ultimate's is a headless Chrome on a scratch profile showing another
-conversation, held through one debugging connection that turns on focus emulation before the page loads (Chrome drops
+conversation in a tab detached from Ultimate's shared view, so opening it never changes what the page on screen shows
+(it fails if it does), held through one debugging connection that turns on focus emulation before the page loads (Chrome drops
 it when the connection closes), with only one signal present: `webdriver` (`--enable-automation` and a visible
 browser's user agent) or `headless` (automation detection turned off, the headless user agent). It fails before the exercise unless
 that page claims focus and its report reaches the connector, read from the bridge trace; a trace at its record limit
@@ -164,7 +179,7 @@ saved one, even when the exercise fails.
 `make test-ultimate-page` exercises Ultimate in a real Chrome app window, using a real branch made by
 the standing agent's branch tool, an owned subagent, the standing agent, an ordinary conversation and a side chat. Set
 `ULTIMATE_CLONE` to an installed checkout, `ULTIMATE_BIN` to its command and `ULTIMATE_NODE` to its
-supported Node executable. `ULTIMATE_MODEL` selects the model. The run needs another app window for
+supported Node executable. `ULTIMATE_MODEL` selects the model. It looks away to an idle window it opens itself for
 the background-reply checks, moves foreground focus, preserves the clipboard, and writes each case's
 result to `conformance.json` in its temporary instance folder. A failed run keeps its scratch folders.
 

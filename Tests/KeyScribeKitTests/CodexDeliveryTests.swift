@@ -3,6 +3,13 @@ import KeyScribeKit
 import Testing
 
 struct CodexDeliveryTests {
+    @Test func onlyARolloutNotWrittenYetIsWorthAskingAgain() {
+        #expect(CodexDelivery.notWrittenYet("rollout at /x/rollout-1.jsonl is empty"))
+        #expect(CodexDelivery.notWrittenYet("rollout is empty"))
+        #expect(!CodexDelivery.notWrittenYet("no thread"))
+        #expect(!CodexDelivery.notWrittenYet(nil))
+    }
+
     private let now = Date(timeIntervalSince1970: 1_795_015_834)
 
     private func data(_ json: String) -> Data { Data(json.utf8) }

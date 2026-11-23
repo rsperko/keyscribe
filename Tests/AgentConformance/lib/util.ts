@@ -25,8 +25,12 @@ export function socketAnswers(path: string): Promise<boolean> {
 export const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex")
 
 export function run(command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeout?: number } = {}) {
-  const result = spawnSync(command, args, { encoding: "utf8", timeout: (options.timeout ?? 60) * 1000, env: options.env ?? process.env, cwd: options.cwd })
-  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
+  const result = spawnSync(command, args, { encoding: "utf8", timeout: Math.ceil((options.timeout ?? 60) * 1000), env: options.env ?? process.env, cwd: options.cwd })
+  const stdout = result.stdout ?? ""
+  const stderr = result.stderr ?? ""
+  const said = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n")
+  const why = said || (result.signal ? `killed by ${result.signal}` : "") || (result.error?.message ?? "") || `exited with ${result.status}`
+  return { status: result.status, stdout, stderr, why }
 }
 
 export function pidsListeningOn(socket: string): number[] {

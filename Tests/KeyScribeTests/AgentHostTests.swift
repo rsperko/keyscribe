@@ -3345,6 +3345,27 @@ struct AgentHostTests {
         #expect(hub.directory.conversations.first { $0.id == "claude:s1" }?.handle == "billing")
     }
 
+    @Test func theNameAChosenNameReplacedFollowsTheConversationIntoItsHostAndBack() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        var turnedOn = false
+        let hub = makeHub(host, allowed: { _ in turnedOn }, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1"]])
+        hub.exclusions.adopt([])
+        await hub.rescan()
+        let original = try #require(hub.directory.conversations.first { $0.id == "claude:s1" }?.handle)
+        try hub.rename("claude:s1", to: "billing")
+        turnedOn = true
+        await hub.rescan(wantingHosts: true)
+        #expect(hub.directory.conversations.first { $0.id == Self.id("t1") }?.handle == "billing")
+        #expect(hub.formerNames == [original: Self.id("t1")])
+        turnedOn = false
+        await hub.rescan()
+        #expect(hub.directory.conversations.first { $0.id == "claude:s1" }?.handle == "billing")
+        #expect(hub.formerNames == [original: "claude:s1"])
+    }
+
     @Test func reconnectingTheHostedConversationAlsoReconnectsTheAgentInsideIt() async {
         let host = FakeHost()
         host.conversations = [Self.thread("t1")]

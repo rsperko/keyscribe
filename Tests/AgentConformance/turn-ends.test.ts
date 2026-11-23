@@ -87,3 +87,18 @@ test("Claude Code ends a turn where its transcript records the turn's duration",
     { role: "ended", text: "", turn: "u1" },
   ])
 })
+
+for (const marker of ["[Request interrupted by user for tool use]", "[Request interrupted by user]"]) {
+  test(`Claude Code ends a stopped turn at its ${marker} row, which is not a message from the user`, () => {
+    const lines = [
+      { type: "user", uuid: "u1", message: { content: "Run it" } },
+      { type: "assistant", message: { content: [{ type: "text", text: "Running it now." }], stop_reason: "tool_use" } },
+      { type: "user", uuid: "u2", message: { content: [{ type: "text", text: marker }] } },
+    ].map((entry) => JSON.stringify(entry)).join("\n")
+    assert.deepEqual(claudeMessages(lines), [
+      { role: "user", text: "Run it", turn: "u1" },
+      { role: "agent", text: "Running it now.", turn: "u1" },
+      { role: "ended", text: "", turn: "u1" },
+    ])
+  })
+}

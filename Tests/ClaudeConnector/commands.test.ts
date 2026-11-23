@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { harness, held, staleReply } from './support'
+import { harness, staleReply } from './support'
 
 test('a check says whether a dictation is still held, handed to the agent, in the conversation, refused or unknown', async ($, on) => {
   const h = harness(on)

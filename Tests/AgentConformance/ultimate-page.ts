@@ -5,8 +5,10 @@ import { existsSync, openSync, readFileSync, readdirSync, symlinkSync, writeFile
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Instance, type TakeResult } from "./lib/instance.ts"
+import { bringAwayForward } from "./lib/driver.ts"
 import { UltimateDriver } from "./lib/ultimate.ts"
-import { freePort, run, sha256, shutDown, until } from "./lib/util.ts"
+import { awayWindow, terminalHost } from "./lib/terminal.ts"
+import { freePort, run, sha256, shutDown, stopEach, until } from "./lib/util.ts"
 import { failureBundle } from "./lib/artifacts.ts"
 import { homeChanges, snapshotHome } from "./lib/home-audit.ts"
 import { inputUnseen, voiceOverBlocks, voiceOverOn } from "./lib/preflight.ts"
@@ -18,6 +20,9 @@ const clone = process.env.ULTIMATE_CLONE
 assert.ok(clone, "set ULTIMATE_CLONE to an installed Ultimate checkout")
 const { chromium } = createRequire(join(resolve(clone), "package.json"))("playwright-core")
 const homeBefore = snapshotHome()
+const host = terminalHost()
+host.check()
+const away = awayWindow(host)
 const instance = new Instance(Instance.locate())
 const agent = new UltimateDriver("kestrel")
 const options = parsePageOptions(process.argv.slice(2), process.env)
@@ -33,7 +38,7 @@ const clipboardFile = join(instance.folder, "clipboard.plist")
 
 function command(tool: string, args: string[], timeout = 30) {
   const answer = run(tool, args, { timeout })
-  assert.equal(answer.status, 0, `${tool} failed: ${answer.stdout}${answer.stderr}`)
+  assert.equal(answer.status, 0, `${tool} failed: ${answer.why}`)
   return answer.stdout
 }
 function cleanup() {
@@ -43,7 +48,7 @@ function cleanup() {
     } finally {
       try { await browser?.close() }
       finally {
-        await shutDown(() => agent.stop(keep || !!failure), (kept) => instance.dispose(kept), keep || !!failure)
+        await shutDown(() => stopEach(() => away.close(), () => agent.stop(keep || !!failure)), (kept) => instance.dispose(kept), keep || !!failure)
       }
     }
   })()
@@ -92,10 +97,11 @@ function record(result: TakeResult) {
   return instance.entry(result.history!)
 }
 let chromeWindow = ""
-let otherWindow = ""
+let debugPort = 0
 
 const windows = () => instance.windows()
 const focus = (spec: string) => instance.focus(spec)
+const lookAway = () => bringAwayForward(away, windows, focus)
 async function shown(page: any, id: number, side?: number) {
   await request("/api/ui", { set: { "shell.surface": "agent", "shell.conversation": id,
     "ext.side-chat.front": side ?? null } })
@@ -137,6 +143,11 @@ async function attempt(id: number, label: string, test: () => Promise<void>, kin
         "discovery": () => instance.cli(["--discovery-report", agent.kind, "--folder", agent.folder], 15),
         "windows": () => windows(),
         ...(agent.diagnostics?.() ?? {}),
+        "chrome": async () => ({
+          connected: browser?.isConnected() ?? false,
+          pages: browser?.contexts().flatMap((context: any) => context.pages().map((open: any) => ({ url: open.url(), closed: open.isClosed() }))) ?? [],
+          targets: debugPort ? await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((answer) => answer.json()).catch((error) => `the debugging port did not answer: ${error}`) : [],
+        }),
         "page": async () => browser?.contexts()[0]?.pages()[0]?.evaluate(() => ({
           url: location.href, focused: document.hasFocus(), visibility: document.visibilityState,
           editors: Array.from(document.querySelectorAll("textarea[data-conversation]")).map(editor => ({
@@ -164,7 +175,7 @@ try {
   const linked = join(agent.root, "linked-setup")
   symlinkSync(agent.folder, linked)
   const installed = instance.connector("install", "ultimate", linked, agent.tool)
-  assert.equal(installed.status, 0, installed.stdout + installed.stderr)
+  assert.equal(installed.status, 0, installed.why)
   const installedPlugin = readdirSync(join(agent.folder, "extensions")).find(name => existsSync(join(agent.folder, "extensions", name, "keyscribe.json")))
   assert.ok(installedPlugin, "the installed connector has its configuration")
   await instance.launch()
@@ -176,7 +187,7 @@ try {
   const main = await action("subagents", "standing", { name: "ultimate" }) as number
   clipboard("save", clipboardFile)
   clipboardSaved = true
-  const debugPort = await freePort()
+  debugPort = await freePort()
   const chromeLog = openSync(join(agent.root, "chrome.log"), "a")
   spawn(process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [
     `--user-data-dir=${join(agent.root, "chrome")}`, `--remote-debugging-port=${debugPort}`,
@@ -192,8 +203,6 @@ try {
   await page.locator(`textarea[data-conversation="${main}"]:visible`).waitFor({ timeout: 60_000 })
   console.log("The standing agent's visible composer is ready")
   chromeWindow = await until("the native Chrome app window", () => windows().find(w => w.title.includes(agent.project))?.spec, 30)
-  otherWindow = windows().find(w => w.app !== "com.google.Chrome" && w.app !== "com.keyscribe.app.dev")!.spec
-  assert.ok(otherWindow, "the run needs another native app window")
   const dialogCountBefore = results.length
   await attempt(main, "first-run dialog holds and names the obstruction", async () => {
     focus(chromeWindow)
@@ -411,7 +420,7 @@ try {
       const since = (await agent.messages(id)).length
       await editor.fill(draft)
       await page.waitForTimeout(300)
-      if (background) focus(otherWindow)
+      if (background) await lookAway()
       const result = take(`tell ${name(id)}, Reply only ready.`, true)
       assert.equal(result.conversation, key(id), JSON.stringify(result))
       const merged = (await agent.messages(id)).slice(since).some(m => m.role === "user" && m.text.includes(draft))
@@ -424,7 +433,7 @@ try {
       assert.equal(result.conversation, undefined)
     })
     await runCase("reply read with another app in front", async () => {
-      await show(); focus(otherWindow)
+      await show(); await lookAway()
       const body = `Reply with only ${token}away.`
       const result = await delivered(id, body)
       await until("the spoken reply in History", () => record(result)?.spoken_reply ? true : undefined, 30)
@@ -435,7 +444,7 @@ try {
     })
     for (const verb of ["open", "go to"]) await runCase(`${verb} brings the conversation forward`, async () => {
       await shown(page, created.id)
-      focus(otherWindow)
+      await lookAway()
       const result = take(`${verb} ${name(id)}`)
       assert.ok(result.ok, JSON.stringify(result))
       assert.ok(instance.cli(["--front-probe"], 15).stdout.includes("front=com.google.Chrome"))
@@ -464,7 +473,7 @@ try {
   }
   await instance.quit()
   const removed = instance.connector("uninstall", "ultimate", agent.folder, agent.tool)
-  assert.equal(removed.status, 0, removed.stdout + removed.stderr)
+  assert.equal(removed.status, 0, removed.why)
   assert.match(instance.connector("status", "ultimate", agent.folder, agent.tool).stdout, /notInstalled/)
   const preserved = JSON.parse(readFileSync(join(agent.folder, "settings.json"), "utf8"))
   assert.equal(preserved.onboarding, true)

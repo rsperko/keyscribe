@@ -408,9 +408,14 @@ gives `marvin claude` and `marvin pi`; a shared name that is the agent's own (`@
 qualified by the agent again and takes a distinguishing word. A host's project (Ultimate's) counts as the
 workspace that tells conversations apart, but never names a conversation or answers to its name on its own.
 A name already given in one of these forms keeps it. When a live conversation's name changes (the agent
-reports a new title, its place is renamed, or the user renames it), the name just before still reaches it
-while no other conversation has that name (`AgentDirectory.formerNames`), so a take said with the name the
-user last saw never falls back to a shorter name that is only its first words. Said bare,
+reports a new title, its place is renamed or first read, or the user renames it), the name just before still
+reaches it while no other conversation answers to that name, as its name or as a place label it shares
+(`AgentDirectory.formerNames`), so a take said with the
+name the user last saw never falls back to a shorter name that is only its first words. A rename also keeps
+the name a change the user did not make had replaced, such as a folder name a tmux session took over, and Use
+Default Name keeps the name the user had chosen. A
+previous name survives an app restart or update while the conversation runs; one that several conversations
+had asks which was meant. Said bare,
 such a label never picks one: “tell cos to run the tests” and “cos, run the tests” are held and ask
 ““cos” could be “cos claude” or “cos pi”. Nothing sent.”, adding “Name the panes in herdr to tell them apart.”
 when only a distinguishing word separates them. This holds for messages, open, and questions alike. Two

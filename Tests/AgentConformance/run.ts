@@ -15,7 +15,8 @@ import { clipboard, withClipboard } from "./lib/clipboard.ts"
 import { parseRunOptions } from "./lib/options.ts"
 import { homeChanges, snapshotHome } from "./lib/home-audit.ts"
 import { inputUnseen, voiceOverBlocks, voiceOverOn } from "./lib/preflight.ts"
-import { shutDown, until } from "./lib/util.ts"
+import { awayWindow, terminalHost } from "./lib/terminal.ts"
+import { shutDown, stopEach, until } from "./lib/util.ts"
 
 const drivers: Record<string, (name: string) => AgentDriver> = {
   claude: (name) => new ClaudeDriver(name),
@@ -52,18 +53,27 @@ if (typeof homeBefore === "string") {
   console.log(`SETUP FAILED\n${homeBefore}`)
   process.exit(1)
 }
+let away: ReturnType<typeof awayWindow>
+try {
+  const host = terminalHost()
+  host.check()
+  away = awayWindow(host)
+} catch (error) {
+  console.log(`SETUP FAILED\n${(error as Error).message}`)
+  process.exit(1)
+}
 const binary = Instance.locate()
 const instance = new Instance(binary)
 const agent = drivers[agentKind]("kestrel")
 const context: Context = {
-  instance, agent, replyWait,
+  instance, agent, away, replyWait,
   clipboard: { set: (kind, value) => clipboard(kind, ...(value === undefined ? [] : [value])), keep: withClipboard },
 }
 const results: { id: string; title: string; ok: boolean; why?: string; seconds: number }[] = []
 let cleaning: Promise<void> | undefined
 function cleanup(preserve: boolean) {
   return cleaning ??= (async () => {
-    await shutDown(() => agent.stop(keep), (kept) => instance.dispose(kept), preserve)
+    await shutDown(() => stopEach(() => away.close(), () => agent.stop(keep)), (kept) => instance.dispose(kept), preserve)
   })()
 }
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

@@ -46,6 +46,10 @@ public enum CodexDelivery {
         }
     }
 
+    public static func notWrittenYet(_ message: String?) -> Bool {
+        message?.range(of: #"\brollout\b.*\bis empty\b"#, options: .regularExpression) != nil
+    }
+
     public static func startedTurn(_ result: Data) -> String? {
         CodexJSON.text((CodexJSON.object(result)?["turn"] as? [String: Any])?["id"])
     }

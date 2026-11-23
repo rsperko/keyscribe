@@ -79,7 +79,7 @@ export class Instance {
 
   focus(spec: string) {
     const result = this.cli(["--windows-probe", "--focus", spec], 15)
-    if (result.status !== 0) throw new Error(`could not bring ${spec} forward: ${result.stdout}${result.stderr}`)
+    if (result.status !== 0) throw new Error(`could not bring ${spec} forward: ${result.why}`)
   }
 
   records(): any[] {
@@ -129,9 +129,10 @@ export class Instance {
     const args = ["--agent-take", text, "--json", "--timeout", String(options.timeout ?? 60)]
     if (options.waitReply) args.push("--wait-reply", String(options.waitReply))
     if (options.mode) args.push("--mode", options.mode)
-    const { stdout, stderr } = this.cli(args, (options.timeout ?? 60) + (options.waitReply ?? 0) + 30)
-    const line = stdout.trim().split("\n").reverse().find((candidate) => candidate.startsWith("{"))
-    if (!line) throw new Error(`agent-take printed no result: ${stdout}${stderr}`)
+    const speaking = 2 * (20 + text.length / 100)
+    const ran = this.cli(args, (options.timeout ?? 60) + (options.waitReply ?? 0) + speaking + 30)
+    const line = ran.stdout.trim().split("\n").reverse().find((candidate) => candidate.startsWith("{"))
+    if (!line) throw new Error(`agent-take printed no result: ${ran.why}`)
     return JSON.parse(line) as TakeResult
   }
 

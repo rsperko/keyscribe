@@ -180,7 +180,13 @@ struct AgentPlaceTrackerTests {
 
         try hub.useDefaultName("claude:a")
         #expect(hub.names == ["architect": "claude:a"])
-        #expect(!(try String(contentsOf: file, encoding: .utf8)).contains("builder"))
+        guard case .names(let chosen, let remembered, _) = AgentNameStore(directory: dir).load() else {
+            Issue.record("\(file.lastPathComponent) did not load")
+            return
+        }
+        #expect(chosen.isEmpty)
+        #expect(remembered["claude:a"]?.name == "architect")
+        #expect(remembered["claude:a"]?.previous == ["builder"])
     }
 }
 

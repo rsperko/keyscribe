@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { type AgentDriver, type AppWindow, type Message, type Shown, removeScratch, scratch } from "./driver.ts"
-import { copyCodexLogin } from "./logins.ts"
+import { codexLoginHome, copyCodexLogin } from "./logins.ts"
 import { freePort, run, sleep, until } from "./util.ts"
 
 const windowPlugin = join(dirname(fileURLToPath(import.meta.url)), "..", "bb-window")
@@ -75,7 +75,7 @@ export class BBDriver implements AgentDriver {
     const env = { HOME: process.env.HOME!, PATH: "/usr/bin:/bin", BB_TELEMETRY: "false", BB_DATA_DIR: this.folder, BB_SERVER_URL: record.serverUrl,
       CODEX_HOME: join(this.root, "codex-home"), PI_CODING_AGENT_DIR: join(this.root, "pi-agent") }
     const result = run(this.tool, args, { env, timeout })
-    if (result.status !== 0) throw new Error(`bb ${args.join(" ")} failed: ${result.stdout}${result.stderr}`)
+    if (result.status !== 0) throw new Error(`bb ${args.join(" ")} failed: ${result.why}`)
     return result.stdout
   }
 
@@ -87,9 +87,9 @@ export class BBDriver implements AgentDriver {
     mkdirSync(this.folder, { recursive: true })
     if (!existsSync(this.source)) throw new Error(`bb is not installed at ${this.source} (or set BB_APP)`)
     const cloned = run("/bin/cp", ["-c", "-R", this.source, this.app], { timeout: 120 })
-    if (cloned.status !== 0) throw new Error(`could not copy ${this.source}: ${cloned.stderr}`)
+    if (cloned.status !== 0) throw new Error(`could not copy ${this.source}: ${cloned.why}`)
     mkdirSync(join(this.root, "codex-home"), { recursive: true })
-    const provider = copyCodexLogin(process.env.CODEX_AUTH_HOME ?? join(process.env.HOME!, ".codex"), join(this.root, "codex-home"), "bb's threads run on Codex")
+    const provider = copyCodexLogin(codexLoginHome(process.env), join(this.root, "codex-home"), "bb's threads run on Codex")
     if (provider.top.length) writeFileSync(join(this.root, "codex-home", "config.toml"), [...provider.top, "", ...provider.tables, ""].join("\n"))
     this.ports = { server: await freePort(), daemon: await freePort() }
     await this.launch()
@@ -140,6 +140,7 @@ export class BBDriver implements AgentDriver {
     owns: (window) => this.appPids.includes(Number(window.spec.split(":")[0])),
     reopens: true,
     takeBehindDraft: "sent",
+    takeInFrontOfDraft: "joined",
     show: async () => {
       const opened = this.json(["thread", "open", this.thread!])
       if (!(opened?.delivered > 0)) throw new Error(`no scratch bb window took the thread: ${JSON.stringify(opened)}`)

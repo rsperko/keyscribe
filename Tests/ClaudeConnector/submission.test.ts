@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { boxCommand, harness, held, outcome, submitCommand, cleared } from './support'
+import { boxCommand, harness, outcome, submitCommand, cleared } from './support'
 
 test('a dictation for the prompt box with no turn running is submitted as usual', async ($, on) => {
   const h = harness(on)
@@ -101,7 +101,7 @@ test('a dictation still being checked when the conversation is disconnected is r
   expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'disconnected'])
 })
 
-test('a turn starting while the draft is being read takes the dictation into that turn', async ($, on) => {
+test('a turn starting while the draft is being read refuses the dictation as working, for the app to queue', async ($, on) => {
   const h = harness(on)
   await h.connect($)
   h.box.held = true
@@ -112,7 +112,7 @@ test('a turn starting while the draft is being read takes the dictation into tha
   h.reads[0]()
   await h.answerEvents()
   expect(h.submits).toEqual([])
-  expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'submitted'])
+  expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'working'])
 })
 
 test('a dictation refused for a draft is delivered when sent again as its next attempt, never under its first id', async ($, on) => {

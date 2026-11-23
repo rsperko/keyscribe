@@ -38,6 +38,7 @@ class Check:
     any_env: tuple = ()
     paths: tuple = ()
     dirs: tuple = ()
+    login: str = ""
 
 
 ENV_ALLOWLIST = frozenset({
@@ -105,9 +106,9 @@ LIVE_PREREQUISITES = {
     "pi": {"commands": (("pi", "PI_BIN"),), "paths": (("Pi login folder", "PI_LOGIN_HOME", "~/.pi/agent", ""),)},
     "bb": {"paths": (("bb.app", "BB_APP", "/Applications/bb.app", ""),)},
     "ultimate": {"commands": (("ultimate", "ULTIMATE_BIN"),)},
-    "claude": {"any_env": (("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"),), "commands": (("claude", "CLAUDE_BIN"),)},
-    "omp": {"commands": (("omp", "OMP_BIN"),), "paths": (("omp login folder", "PI_LOGIN_HOME", "~/.omp/agent", ""),)},
-    "codex": {"commands": (("codex", "CODEX_BIN"),), "paths": (("Codex auth.json", "CODEX_AUTH_HOME", "~/.codex", "auth.json"),)},
+    "claude": {"login": "claude", "commands": (("claude", "CLAUDE_BIN"),)},
+    "omp": {"commands": (("omp", "OMP_BIN"),), "paths": (("omp login folder", "OMP_LOGIN_HOME", "~/.omp/agent", ""),)},
+    "codex": {"login": "codex", "commands": (("codex", "CODEX_BIN"),)},
 }
 
 
@@ -320,7 +321,26 @@ def check_prerequisites(check, env, home=None):
     for cmd_name, var in check.commands:
         if not ((env.get(var) and os.access(env[var], os.X_OK)) or shutil.which(cmd_name, path=path)):
             problems.append(f"{cmd_name} CLI not found (or set {var})")
+    if check.login:
+        problems.extend(login_problems(check.login, env, home))
     return problems
+
+
+LOGIN_CHECK = Path(__file__).resolve().parents[1] / "Tests/AgentConformance/login-check.ts"
+
+
+def login_problems(agent, env, home):
+    node = env.get("NODE") or resolve_node(env, home)
+    if not node:
+        return [f"node {'.'.join(map(str, MIN_NODE_VERSION))} or later not found, so the {agent} login cannot be checked (set NODE)"]
+    try:
+        answer = subprocess.run([node, str(LOGIN_CHECK), agent], capture_output=True, text=True, timeout=30,
+                                env={**env, "HOME": str(home)})
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return [f"could not check the {agent} login: {error}"]
+    if answer.returncode == 0:
+        return []
+    return [(answer.stdout + answer.stderr).strip() or f"the {agent} login check exited with {answer.returncode}"]
 
 
 def stop_group(process):

@@ -14,7 +14,8 @@ process.on("exit", () => rmSync(project, { recursive: true, force: true }))
 function fakeContext(options: {
   turns?: boolean; cue?: string; sentWhileDown?: boolean; endsBeforeSteering?: string; comments?: boolean; doubted?: boolean
   readTwice?: boolean; clipboardChanged?: boolean; historyLags?: boolean; hint?: string; unlisted?: boolean; keepsBehind?: boolean; declaresBehind?: "kept" | "sent"
-  automatedTakesFront?: boolean; automatedHoldsBehind?: boolean
+  automatedTakesFront?: boolean; automatedHoldsBehind?: boolean; automatedStealsFocus?: boolean
+  waits?: boolean; waitsButJoins?: boolean; ignoresBusy?: boolean; sendsAloneInFront?: boolean; awayUnlisted?: boolean; declaresFront?: "joined" | "alone"
 } = {}): Context & { silence: () => void; automatedOpen: () => number; automatedKinds: string[] } {
   const messages: Message[] = []
   const records: any[] = []
@@ -84,19 +85,27 @@ function fakeContext(options: {
       }
       return { id: "t", ok: true, receiptKind: "sent", conversation: "fake:1", history: remember(said, chosen) }
     }
+    const waiting = options.waits && busyTurn !== undefined
+    if (waiting && !options.waitsButJoins) {
+      messages.push({ role: "ended", text: "", turn: busyTurn })
+      busyTurn = undefined
+    }
     const turn = busyTurn ?? (options.turns === false ? undefined : `turn${++turns}`)
     busyTurn = undefined
     messages.push({ role: "user", text: body, turn })
     if (noting) messages.push({ role: "user", text: "[app] a helper finished", turn, mark: "system" })
     noting = false
-    if (answering) messages.push({ role: "agent", text: "ok", turn }, { role: "ended", text: "", turn })
+    const word = options.ignoresBusy || !/cherry/.test(body) ? "ok" : "cherry"
+    if (answering) messages.push({ role: "agent", text: word, turn }, { role: "ended", text: "", turn })
     const request = `request${++turns}`
     const history = remember(said, chosen, request)
-    return { id: "t", ok: true, receiptKind: "sent", conversation: "fake:1", request, history,
-      reply: { kind: "answer", length: 2, sha256: sha256("ok") } }
+    return { id: "t", ok: true, receiptKind: waiting ? "queued" : "sent", conversation: "fake:1", request, history,
+      reply: { kind: "answer", length: word.length, sha256: sha256(word) } }
   }
+  let away = false
+  const focused: string[] = []
   const agent = {
-    kind: "fake", name: "kestrel", folder: "/fake", project, tool: undefined, conversation: "fake:1",
+    kind: "fake", name: "kestrel", busyTake: options.waits ? "waits" : "joins", folder: "/fake", project, tool: undefined, conversation: "fake:1",
     addresses: { said: "fake 1", absent: "fake 9001" },
     owns: (conversation: string | undefined) => conversation === "fake:1",
     idle: async () => {},
@@ -106,6 +115,7 @@ function fakeContext(options: {
       ...(options.unlisted ? { app: "dev.fake", focus: async () => { shown = true; front = true } } : {}),
       reopens: true,
       takeBehindDraft: options.declaresBehind ?? (options.keepsBehind ? "kept" : "sent"),
+      takeInFrontOfDraft: options.declaresFront ?? (options.sendsAloneInFront ? "alone" : "joined"),
       show: async () => { shown = true },
       look: async () => ({ thread: shown, focused: shown && front, draft }),
       fill: async (text: string) => { draft += text },
@@ -113,6 +123,7 @@ function fakeContext(options: {
       openAutomated: async (kind: string) => {
         opened.push(kind)
         automated++
+        if (options.automatedStealsFocus) front = false
         return async () => { automated-- }
       },
     },
@@ -124,8 +135,12 @@ function fakeContext(options: {
     server: { stop: async () => { down = true }, start: async () => { down = false } },
   } as unknown as AgentDriver
   const instance = {
-    windows: () => [{ app: "dev.fake", spec: "7:cg:1", title: "" }, { app: "com.example.other", spec: "8:cg:2", title: "" }],
-    focus: (spec: string) => { front = spec.startsWith("7:") },
+    windows: () => [{ app: "com.example.chat", spec: "6:cg:0", title: "Chat" }, { app: "dev.fake", spec: "7:cg:1", title: "" },
+      ...(away && !options.awayUnlisted ? [{ app: "dev.away", spec: "8:cg:2", title: "away" }] : [])],
+    focus: (spec: string) => {
+      focused.push(spec)
+      front = spec.startsWith("7:")
+    },
     records: () => settle(),
     ledger: () => {
       const unsettled = records.some((entry) => entry.unsettled)
@@ -160,8 +175,9 @@ function fakeContext(options: {
       if (address) return answer(said, said.slice(address.length).replace(/^,? /, ""), "Its name")
       if (front && said.startsWith("tell kestrol ")) return answer(said, said.slice("tell kestrol ".length), "Sounded like its name")
       if (!inFront() || said.startsWith("tell ")) return { id: "t", ok: false }
-      const body = draft ? `${draft} ${said}` : said
-      draft = options.hint ?? ""
+      const joins = draft && !options.sendsAloneInFront
+      const body = joins ? `${draft} ${said}` : said
+      if (joins) draft = options.hint ?? ""
       return answer(said, body, "The conversation in front")
     },
   } as unknown as Instance
@@ -174,7 +190,13 @@ function fakeContext(options: {
       } finally { clip = saved }
     },
   }
-  return { instance, agent, replyWait: 1, clipboard, holdSeconds: 0, settleSeconds: 0, silence: () => { answering = false }, automatedOpen: () => automated, automatedKinds: opened }
+  const lookAway = {
+    ...(options.awayUnlisted ? { focus: async () => { focused.push("away"); front = false } } : {}),
+    show: async () => { away = true },
+    owns: (window: { spec: string }) => window.spec.startsWith("8:"),
+    close: async () => { away = false },
+  }
+  return { instance, agent, away: lookAway, focused, replyWait: 1, clipboard, holdSeconds: 0, settleSeconds: 0, silence: () => { answering = false }, automatedOpen: () => automated, automatedKinds: opened }
 }
 
 test("every exercise passes again in a later round against the same conversation", async () => {
@@ -249,7 +271,7 @@ test("a hint the agent shows in its empty box once the draft is sent does not co
   await assert.doesNotReject(exercises.find((exercise) => exercise.id === "D10")!.run(fakeContext({ hint: 'Try "write a test for half a"' })))
 })
 
-test("a window the instance cannot list is brought forward by its own driver, and another app is chosen to look away to", async () => {
+test("a window the instance cannot list is brought forward by its own driver", async () => {
   const context = fakeContext({ unlisted: true })
   for (const id of ["D9", "D10", "D12", "D13", "N14"]) {
     await assert.doesNotReject(exercises.find((exercise) => exercise.id === id)!.run(context), id)
@@ -270,7 +292,7 @@ for (const [keepsBehind, declaresBehind, passes] of [[true, "kept", true], [fals
   })
 }
 
-for (const [options, failure] of [[{}, undefined], [{ automatedTakesFront: true }, /went to/], [{ automatedHoldsBehind: true }, /reply behind was not read/]] as const) {
+for (const [options, failure] of [[{}, undefined], [{ automatedTakesFront: true }, /went to/], [{ automatedHoldsBehind: true }, /reply behind was not read/], [{ automatedStealsFocus: true }, undefined]] as const) {
   test(`D15 ${failure ? `fails with ${failure}` : "passes"} for ${JSON.stringify(options)}, opens each kind of automated page and closes it either way`, async () => {
     const context = fakeContext(options)
     const run = exercises.find((exercise) => exercise.id === "D15")!.run(context)
@@ -289,4 +311,42 @@ test("D15 applies only to an agent whose window can open an automated page", () 
   assert.equal(automated.applies!(agent), true)
   assert.equal(automated.applies!({ ...agent, window: { ...agent.window!, openAutomated: undefined } } as AgentDriver), false)
   assert.equal(automated.applies!({ ...agent, window: undefined } as AgentDriver), false)
+})
+
+test("to look away the run brings forward a window it opened itself, never another app's window that might be marked read", async () => {
+  const context = fakeContext() as ReturnType<typeof fakeContext> & { focused: string[] }
+  for (const id of ["D9", "D10", "N8", "N14"]) {
+    await assert.doesNotReject(exercises.find((exercise) => exercise.id === id)!.run(context), id)
+  }
+  assert.ok(context.focused.includes("8:cg:2"))
+  assert.ok(!context.focused.includes("6:cg:0"))
+})
+
+test("an agent that declares a take while busy waits for the running turn passes D2 only when the app says it waits and the take arrives after that turn", async () => {
+  const busy = exercises.find((exercise) => exercise.id === "D2")!
+  await assert.doesNotReject(busy.run(fakeContext({ waits: true })))
+  await assert.rejects(busy.run(fakeContext({ waits: true, waitsButJoins: true })), /before the running turn ended/)
+})
+
+test("a take while busy that the agent records but does not follow fails D2", async () => {
+  const busy = exercises.find((exercise) => exercise.id === "D2")!
+  await assert.rejects(busy.run(fakeContext({ ignoresBusy: true })), /did not follow the take while busy/)
+  await assert.rejects(busy.run(fakeContext({ waits: true, ignoresBusy: true })), /did not follow the take while busy/)
+})
+
+for (const [sendsAloneInFront, declaresFront, passes] of [[false, "joined", true], [true, "alone", true], [true, "joined", false], [false, "alone", false]] as const) {
+  test(`a take in front of a draft that is ${sendsAloneInFront ? "sent alone" : "joined"} where the agent's window says ${declaresFront} ${passes ? "passes" : "fails"} D10`, async () => {
+    const run = exercises.find((exercise) => exercise.id === "D10")!.run(fakeContext({ sendsAloneInFront, declaresFront }))
+    if (passes) await assert.doesNotReject(run)
+    else await assert.rejects(run, /the take in front/)
+  })
+}
+
+test("a look-away window the instance lists without its title is brought forward by its own driver", async () => {
+  const context = fakeContext({ awayUnlisted: true }) as ReturnType<typeof fakeContext> & { focused: string[] }
+  for (const id of ["D9", "D10", "N8"]) {
+    await assert.doesNotReject(exercises.find((exercise) => exercise.id === id)!.run(context), id)
+  }
+  assert.ok(context.focused.includes("away"))
+  assert.ok(!context.focused.includes("6:cg:0"))
 })

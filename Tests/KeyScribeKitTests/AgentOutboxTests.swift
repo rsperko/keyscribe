@@ -24,6 +24,16 @@ struct AgentOutboxTests {
         #expect(outbox.held.isEmpty)
     }
 
+    @Test func aMessageSentAgainGoesBackAheadOfWhatItsConversationQueuedAfterItAndBehindOtherConversations() {
+        var outbox = AgentOutbox()
+        _ = outbox.send(message("other", to: "s2"), state: .working)
+        _ = outbox.send(message("m2"), state: .working)
+        #expect(outbox.send(message("m1"), state: .working, ahead: true) == .queue(.working))
+        _ = outbox.send(message("m3"), state: .working)
+        #expect(outbox.held.map(\.id) == ["other", "m1", "m2", "m3"])
+        #expect(outbox.release { _ in .idle }.map(\.message.id) == ["other", "m1"])
+    }
+
     @Test func aMessageBeingSentStaysFirstSoNothingForItsConversationOvertakesIt() {
         var outbox = AgentOutbox()
         _ = outbox.send(message("m1"), state: .working)

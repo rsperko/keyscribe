@@ -97,6 +97,17 @@ struct FrontPanesTests {
         #expect(FrontPanes.read(Self.front("/dev/ttys000"), facts: facts).check(agent: 32, facts: facts) == .shown)
     }
 
+    @Test func aHerdrClientUsingItsOwnConfigFolderReadsItsSessionFromThatFolder() {
+        let facts = Self.herdrSetup()
+        facts.add(12, parent: 11, tty: "/dev/ttys000", ["herdr", "--session", "work"], executable: Self.herdr, environment: ["XDG_CONFIG_HOME": "/nix/config"])
+        let work = "/nix/config/herdr/sessions/work/herdr.sock"
+        facts.outputs[["/usr/bin/env", "XDG_CONFIG_HOME=/nix/config", Self.herdr, "session", "list", "--json"]] =
+            #"{"sessions":[{"name":"work","socket_path":"/nix/config/herdr/sessions/work/herdr.sock"}]}"#
+        facts.outputs[Self.herdrCommand(on: work, "pane", "list")] = Self.panes(("w2:p1", true))
+        facts.outputs[Self.herdrCommand(on: work, "pane", "process-info", "--pane", "w2:p1")] = Self.processInfo(shell: 31)
+        #expect(FrontPanes.read(Self.front("/dev/ttys000"), facts: facts).check(agent: 32, facts: facts) == .shown)
+    }
+
     @Test func herdrWithoutExactlyOneFocusedPaneIsUnknown() {
         let facts = Self.herdrSetup()
         facts.outputs[Self.herdrCommand("pane", "list")] = Self.panes(("w1:p2", true), ("w2:p1", true))

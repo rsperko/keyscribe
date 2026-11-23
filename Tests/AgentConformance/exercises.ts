@@ -1,4 +1,4 @@
-import { automatedKinds, type AgentDriver, type Message } from "./lib/driver.ts"
+import { automatedKinds, bringAwayForward, type AgentDriver, type AwayWindow, type Message } from "./lib/driver.ts"
 import type { Instance, TakeResult } from "./lib/instance.ts"
 import { spawn } from "node:child_process"
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
@@ -6,7 +6,7 @@ import { join } from "node:path"
 import { sha256, sleep, until } from "./lib/util.ts"
 
 export type Clipboard = { set(kind: "text" | "image", value?: string): void; keep<T>(work: (mark: () => () => boolean) => Promise<T>): Promise<T> }
-export type Context = { instance: Instance; agent: AgentDriver; replyWait: number; clipboard: Clipboard; holdSeconds?: number; settleSeconds?: number }
+export type Context = { instance: Instance; agent: AgentDriver; away: AwayWindow; replyWait: number; clipboard: Clipboard; holdSeconds?: number; settleSeconds?: number }
 export type Exercise = {
   id: string
   title: string
@@ -116,13 +116,8 @@ async function takeInFront(context: Context, body: string) {
 }
 
 async function lookAway(context: Context) {
-  const { instance, agent } = context
-  const listed = instance.windows()
-  const ours = agent.window!.app ?? listed.find((w) => agent.window!.owns(w))?.app
-  const others = listed.filter((w) => !agent.window!.owns(w) && !w.app.startsWith("com.keyscribe."))
-  const other = others.find((w) => w.app !== ours) ?? (agent.window!.app === undefined ? others[0] : undefined)
-  check(other, "the run needs another app's window to move focus to")
-  instance.focus(other!.spec)
+  const { instance, agent, away } = context
+  await bringAwayForward(away, () => instance.windows(), (spec) => instance.focus(spec))
   await until("the conversation no longer in front", async () => (!(await agent.window!.look()).focused ? true : undefined), 15, 250)
 }
 
@@ -242,7 +237,7 @@ export const exercises: Exercise[] = [
         await bringForward(context)
         const close = await window.openAutomated!(kind)
         try {
-          check((await window.look()).focused, `the conversation was no longer in front once the ${kind} page opened`)
+          await bringForward(context)
           await takeInFront(context, `Reply with only the word ${kind === "webdriver" ? "guava" : "papaya"}.`)
           await lookAway(context)
           const body = `Reply with only the word ${kind === "webdriver" ? "lychee" : "durian"}.`
@@ -257,7 +252,7 @@ export const exercises: Exercise[] = [
   },
   {
     id: "D10",
-    title: "A draft in the box of the conversation in front is sent with the take, and one in a box behind is left exactly as it was while the take behind is kept or sent alone, as the agent's window declares",
+    title: "A draft in the box of the conversation in front is sent with the take or left in place while the take goes alone, and one in a box behind is left exactly as it was while the take behind is kept or sent alone, as the agent's window declares",
     applies: (agent) => agent.window !== undefined,
     async run(context) {
       const { instance, agent } = context
@@ -288,9 +283,15 @@ export const exercises: Exercise[] = [
       check(result.ok && agent.owns(result.conversation), `the take went to ${result.conversation}: ${show(result)}`)
       await agent.idle(context.replyWait)
       await withoutDoubt(context, body, result)
-      const joined = `${draft} ${body}`
-      check(users((await agent.messages()).slice(since), joined).length === 1, `the agent has no user message "${joined}"`)
-      check(!(await window.look()).draft?.includes(draft), "the draft is still in the box after it was sent")
+      const fresh = (await agent.messages()).slice(since)
+      if (window.takeInFrontOfDraft === "alone") {
+        check(users(fresh, body).length === 1, `the take in front was not sent alone as "${body}"`)
+        check((await window.look()).draft?.includes(draft), "the take in front was sent alone but the draft in its box was not left in place")
+      } else {
+        const joined = `${draft} ${body}`
+        check(users(fresh, joined).length === 1, `the take in front has no user message "${joined}"`)
+        check(!(await window.look()).draft?.includes(draft), "the take in front was joined but its draft is still in the box")
+      }
     },
   },
   {
@@ -308,7 +309,7 @@ export const exercises: Exercise[] = [
   },
   {
     id: "D2",
-    title: "A take while the agent works reaches the running turn, and the reply read is its last answer",
+    title: "A take while the agent works reaches the running turn, or waits for it as the agent declares, is followed, and the reply read is its last answer",
     async run(context) {
       const { instance, agent } = context
       const gate = mkdtempSync(join(agent.project, ".ks-busy-"))
@@ -335,8 +336,14 @@ export const exercises: Exercise[] = [
         const ended = fresh.findIndex((message, index) => index > asked && message.role === "ended")
         const steered = fresh.indexOf(users(fresh, later)[0])
         check(ended !== -1, "the agent's own record never shows the running turn ending")
-        check(steered < ended, "the take while busy reached the agent only after the running turn had ended")
+        if (agent.busyTake === "waits") {
+          check(result.receiptKind === "queued", `the app did not say the take while busy waits for the running turn: ${show(result)}`)
+          check(steered > ended, "the take while busy reached the agent before the running turn ended, though the agent declares it waits")
+        } else {
+          check(steered < ended, "the take while busy reached the agent only after the running turn had ended")
+        }
         const last = fresh.filter((message) => message.role === "agent").at(-1)
+        check(last && /cherry/i.test(last.text), `the agent did not follow the take while busy: its last answer was ${JSON.stringify(last?.text)}`)
         check(result.reply && last && result.reply.sha256 === sha256(last.text), `the reply read is not the agent's last answer: ${show(result)}`)
       } finally {
         rmSync(gate, { recursive: true, force: true })
@@ -538,7 +545,7 @@ export const exercises: Exercise[] = [
       await instance.quit()
       const again = instance.connector("install", agent.kind, agent.folder, agent.tool)
       await instance.launch()
-      check(again.status === 0, `installing again failed: ${again.stdout}${again.stderr}`)
+      check(again.status === 0, `installing again failed: ${again.why}`)
       await until("the conversation known by its name again", () => (instance.take(`check on ${agent.name}`).ok ? true : undefined), 60, 2000)
       await deliverAndRead(context, "Reply with only the word hazel.")
     },
@@ -572,7 +579,7 @@ export const removal: Exercise = {
     const { instance, agent } = context
     await instance.quit()
     const removed = instance.connector("uninstall", agent.kind, agent.folder, agent.tool)
-    check(removed.status === 0, `uninstall failed: ${removed.stdout}${removed.stderr}`)
+    check(removed.status === 0, `uninstall failed: ${removed.why}`)
     const status = instance.connector("status", agent.kind, agent.folder, agent.tool)
     check(/notInstalled/.test(status.stdout), `after uninstall: ${status.stdout}`)
     const leftovers = agent.untouched?.() ?? []

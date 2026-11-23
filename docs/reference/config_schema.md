@@ -456,8 +456,9 @@ a hello on any other protocol is refused with `426` and is never registered or s
   the take and sends it when the turn finishes. A connector whose hello lists `steer` takes it during the turn
   instead, the way typing there would, and reports the turn with `absorbed`: Pi's sends it with `deliverAs: "steer"`
   and confirms it when Pi accepts it, refusing as `working` only while an earlier dictation still awaits its
-  receipt; Claude Code's confirms it at once, adds it to the turn after the next tool call, reports `absorbed`
-  when the model's next step starts, and submits it as the next prompt if the turn ends first. A take it
+  receipt. Claude Code's connector lists no `steer`: it refuses a take that meets a running turn as `working`,
+  even one KeyScribe sent while it believed the agent idle, and KeyScribe sends it once that turn ends, ahead of
+  takes said after it. A take a connector
   confirmed but could not deliver after all gets a late `refused` for the same request (`draft`, `filled` when
   left in the prompt box after the user's Esc, `added` when left there after text the user typed meanwhile,
   `stopped`, or the agent's own reason), which KeyScribe reports as a late outcome of that take. A lost
@@ -641,6 +642,11 @@ state, and a write to it does not reload configuration.
   session. Once the process has exited, or its pid belongs to a process started at another time, the
   name is free for the next new session and the entry is dropped. If the native name changed while
   KeyScribe was closed, the new native name is used instead.
+- An entry's optional `previous` lists the names the conversation answered to just before its current one
+  (`"previous": ["kestrel"]`), so they still reach it after a restart under the same pid and start time. A
+  conversation with a chosen name has an entry only to carry `previous`; its name still comes from `names`.
+  An entry without `previous` has none, and an empty list is not written. `previous` never holds the entry's
+  own name; an entry in it that is not a valid conversation name, or repeats the name, is dropped on load.
 - These names take effect even when they cannot be saved; Conversations then says so, and every later
   refresh tries again. A rename, by contrast, is never applied unsaved.
 - For Claude Code, explicit names come from the connector's custom title, registry names whose

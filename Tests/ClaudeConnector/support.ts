@@ -23,7 +23,7 @@ export function harness(on: any) {
   const submits: string[] = []
   const statuses: string[] = []
   const store = new Map<string, unknown>()
-  const live = { session: 's1', rows: [] as any[] }
+  const live = { session: 's1', rows: [] as any[], api: [] as any[] }
   const env: Record<string, string | undefined> = {}
   const downstream: Record<string, any> = {}
   const reads: Array<() => void> = []
@@ -87,8 +87,10 @@ export function harness(on: any) {
   }))
   const rowReads: Array<() => void> = []
   const rowHold = { on: false }
-  on('session.messages', () => {
-    const answer = { value: live.rows }
+  const apiReads: number[] = []
+  on('session.messages', ($: any, e: any) => {
+    if (e && e.as === 'api') apiReads.push(e.last)
+    const answer = { value: e && e.as === 'api' ? lastOf(live.api, e.last) : live.rows }
     if (!rowHold.on) return answer
     rowHold.on = false
     return new Promise((resolve) => { rowReads.push(() => resolve(answer)) })
@@ -115,7 +117,10 @@ export function harness(on: any) {
     const answer = downstream['prompt.submit']
     return (typeof answer === 'function' ? answer(e) : answer) ?? { text: e.text }
   })
-  on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
+  on('turn.start', ($: any, e: any) => {
+    live.api.push({ role: 'user', content: [{ type: 'text', text: e.text }] })
+    return { turnId: e.turnId }
+  })
   on('turn.complete', () => downstream['turn.complete'] ?? { text: '' })
   on('turn.abort', () => ({ value: undefined }))
   on('tool.check', { tool: 'Bash' }, () => ({ decision: 'ask' }))
@@ -125,8 +130,11 @@ export function harness(on: any) {
   on('prompt.attachment', ($: any, e: any) => ({ text: e.text }))
   const fills: string[] = []
   const fillRefusal: { reason?: string; typedFirst?: string; throws?: boolean } = {}
-  on('prompt.fill', ($: any, e: any) => {
+  const heldFills: Array<() => void> = []
+  const fillHold = { on: false }
+  on('prompt.fill', async ($: any, e: any) => {
     fills.push(e.text)
+    if (fillHold.on && e.text) await new Promise<void>((resolve) => { heldFills.push(resolve) })
     if (fillRefusal.throws && e.text) throw new Error('fill failed')
     if (fillRefusal.reason) return { isFilled: false, refusal: fillRefusal.reason, text: box.text }
     if (fillRefusal.typedFirst) box.text += fillRefusal.typedFirst
@@ -141,11 +149,7 @@ export function harness(on: any) {
   })
 
   const appended: string[] = []
-  const appendHold = { throws: false, gated: false, gates: [] as Array<() => void>, storedAs: undefined as string | undefined }
-  on('session.append', async ($: any, e: any, next: any) => {
-    if (appendHold.throws) return { deny: 'append failed' }
-    if (appendHold.storedAs !== undefined) return next({ ...e, message: { ...e.message, content: [{ type: 'text', text: appendHold.storedAs }] } })
-    if (appendHold.gated) await new Promise<void>((resolve) => { appendHold.gates.push(resolve) })
+  on('session.append', ($: any, e: any, next: any) => {
     appended.push(e.message.content.map((c: any) => c.text).join(''))
     return next(e)
   })
@@ -191,7 +195,20 @@ export function harness(on: any) {
   const ready = (launch?: string, protocol = 2) => { files['/tmp/ks-ready.json'] = launch === undefined ? undefined : JSON.stringify({ launch, protocol }) }
 
   const releaseSubmits = () => { for (const release of heldSubmits.splice(0)) release() }
-  return { rowHold, rowReads, switches, appended, appendHold, runs, run, clockHold, fills, fillRefusal, logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
+  const releaseFills = () => { for (const release of heldFills.splice(0)) release() }
+  return { apiReads, fillHold, releaseFills, rowHold, rowReads, switches, appended, runs, run, clockHold, fills, fillRefusal, logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
+}
+
+function opensTurn(m: any) {
+  return m.role === 'user' && !(Array.isArray(m.content) && m.content.some((block: any) => block.type === 'tool_result'))
+}
+
+function lastOf(rows: any[], last?: number) {
+  if (last === undefined || rows.length <= last) return rows
+  const cut = rows.length - last
+  const before = rows.slice(0, cut + 1).findLastIndex(opensTurn)
+  const start = before === -1 ? rows.findIndex(opensTurn) : before
+  return rows.slice(start === -1 ? cut : start)
 }
 
 export function digest(text: string) {
@@ -268,16 +285,19 @@ async function switched($: any, h: any, command: 'clear' | 'resume', next: strin
   await h.settle()
 }
 
-export const queuedCommand = (text: string) => ({
-  message: { type: 'attachment', name: 'queued_command', isMeta: true, content: [{ type: 'text', text: absorbedText(text) }] },
-  door: 'attachment', origin: { kind: 'engine' }, uuid: 'q-' + text.length,
-})
+export function stored(h: any, ...texts: string[]) {
+  h.live.api.push({ role: 'assistant', content: [{ type: 'tool_use', id: 'tu' + h.live.api.length, name: 'Read', input: {} }] })
+  h.live.api.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu' + (h.live.api.length - 1), content: 'tool output' }, ...texts.map((text) => ({ type: 'text', text: absorbedText(text) }))] })
+}
+
+export async function takenIn($: any, h: any, text: string, turnId = 't1') {
+  stored(h, text)
+  await step($, turnId)
+}
 
 export const absorbedText = (text: string) => `The user sent a new message while you were working:\n${text}\n\nThis is how Claude Code surfaces messages the user sends mid-turn.`
 
 export const mergeCommand = (text = 'run the tests') => ({ ...submitCommand(text), merge: true })
-
-export const steered = (text: string) => `The user sent a new message while you were working:\n${text}\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`
 
 export const toolCall = ($: any, id: string, extra: any = {}) => $.tool.call({ tool: 'Read', input: { file_path: '/work/f' }, tool_use_id: id, ...extra } as any)
 
@@ -288,14 +308,7 @@ export async function step($: any, turnId = 't1', extra: any = {}) {
 
 export const ended = (reason = 'answer') => ({ turnId: 't1', answer: '', durationMs: 5, isAborted: reason === 'aborted', usage: null, reason })
 
-export async function held($: any, h: any, commands = [submitCommand()]) {
-  await h.connect($)
-  await $.turn.start({ text: '', turnId: 't1' })
-  await h.deliver(commands)
-  await h.answerEvents()
-}
 
-export const lateOutcome = (h: any, id: string) => h.events().filter((b: any) => b.request === id && b.op === 'refused').map((b: any) => b.reason)
 
 export async function dropConnection(h: any) {
   h.open('/poll')[0].answer(409)
@@ -306,7 +319,6 @@ export async function dropConnection(h: any) {
   await h.answerEvents()
 }
 
-export const band = { plugin: 'keyscribe-connector-test', component: 'AbovePrompt', requestId: 'band', surface: 'terminal', props: { hasSurvey: false, isCollapsed: false, isWorking: true, bodyRows: 10, bodyColumns: 80 } } as const
 
 export async function staleReply($: any, on: any, released: 'beforeHello' | 'afterHello') {
   const h = harness(on)

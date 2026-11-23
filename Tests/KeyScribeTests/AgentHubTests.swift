@@ -248,6 +248,62 @@ struct AgentHubTests {
         #expect(origins.isEmpty)
     }
 
+    private func claudeCode(idle: Bool) -> AgentEvent.Hello {
+        .init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0,
+              features: ["readiness", "fill", "check", "promptDigest", "box", "merge"], idle: idle, gap: false)
+    }
+
+    @Test func aDictationForAWorkingClaudeCodeConversationNotInFrontIsQueuedRatherThanHandedOff() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, claudeCode(idle: false))
+        let sentBefore = transport.sent.count
+        #expect(await hub.deliver("use the other file", to: "claude:s1", inFront: false) == .queued("keyscribe"))
+        #expect(transport.sent.count == sentBefore)
+    }
+
+    @Test func aClaudeCodeTakeThatMeetsARunningTurnIsSentWhenItEndsAheadOfATakeSaidAfterIt() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        greet(hub, claudeCode(idle: true))
+        let sentBefore = transport.sent.count
+        async let first = hub.deliver("use the other file", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        #expect(await hub.deliver("and run the tests", to: "claude:s1") == .queued("keyscribe"))
+        hub.handle(.refused(request: "r1", reason: "working"))
+        #expect(await first == .queued("keyscribe"))
+
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
+        #expect(transport.sent.dropFirst(sentBefore).map(\.0.id) == ["r1", "r1~1"])
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2", prompt: AgentPromptDigest.of("use the other file")))
+        hub.handle(.submitted(request: "r1~1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it."))
+        #expect(transport.sent.dropFirst(sentBefore).map(\.0.id) == ["r1", "r1~1", "r2"])
+    }
+
+    @Test(arguments: [
+        ("answer", false, nil),
+        ("aborted", false, AgentReceipt.kept("keyscribe", reason: .interrupted)),
+        ("answer", true, AgentReceipt.kept("keyscribe", reason: .typedSince)),
+        ("aborted", true, AgentReceipt.kept("keyscribe", reason: .typedSince)),
+    ] as [(String, Bool, AgentReceipt?)])
+    func aClaudeCodeTakeQueuedForARunningTurnIsSentWhenItEndsUnlessTheUserStoppedItOrSentAMessageMeanwhile(
+        reason: String, typed: Bool, kept: AgentReceipt?
+    ) async {
+        let (hub, transport, registry, notices) = makeHub()
+        await connected(hub, transport, registry)
+        greet(hub, claudeCode(idle: true))
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.refused(request: "r1", reason: "working"))
+        #expect(await receipt == .queued("keyscribe"))
+        if typed { hub.handle(.typed(session: "claude:s1", prompts: 1)) }
+        hub.handle(.turnComplete(session: "claude:s1", reason: reason, answer: ""))
+        #expect(transport.sent.dropFirst(sentBefore).map(\.0.id) == (kept == nil ? ["r1", "r1~1"] : ["r1"]))
+        #expect(notices.items == (kept.map { [$0] } ?? []))
+    }
+
     @Test func takesLeftInOnePromptBoxAreSentWithOneReturnAndShareItsOutcome() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry, status: "busy")
@@ -1913,6 +1969,21 @@ struct AgentHubTests {
         let second = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
         await second.rescan()
         #expect(second.names == ["backend": "claude:a", "keyscribe blue": "claude:b", "keyscribe": "claude:c"])
+    }
+
+    @Test func theNameARenameReplacedStillReachesTheConversationAfterARestart() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-names-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = Registry()
+        registry.set("a", pid: 10, startedAt: 100)
+        let first = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
+        await first.rescan()
+        try first.rename("claude:a", to: "falcon")
+
+        let second = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
+        await second.rescan()
+        #expect(second.names == ["falcon": "claude:a"])
+        #expect(second.formerNames == ["keyscribe": "claude:a"])
     }
 
     @Test func aClosedSessionsGeneratedNameIsDroppedFromTheNameFile() async throws {

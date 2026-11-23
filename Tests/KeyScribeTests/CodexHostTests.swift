@@ -20,6 +20,9 @@ struct CodexHostTests {
         var renameFails = false
         var sentClient: String?
         var emptyReads = 0
+        var failedReads = 0
+        var failure = "rollout is empty"
+        var silentReads = false
         var steerRejects = false
         var agentSaid: String?
         var steeredAgainst: String?
@@ -61,6 +64,11 @@ struct CodexHostTests {
                     if let notice = noticeBeforeTurns {
                         noticeBeforeTurns = nil
                         return .resultAfter(notification: notice, result: #"{"data":[{"id":"turn-ours","status":"\#(lastTurn)","items":[]}],"nextCursor":null}"#)
+                    }
+                    if silentReads { return .silent }
+                    if failedReads > 0 {
+                        failedReads -= 1
+                        return .error(code: -32600, message: failure)
                     }
                     if emptyReads > 0 {
                         emptyReads -= 1
@@ -184,6 +192,44 @@ struct CodexHostTests {
         defer { daemon.stop() }
         _ = await host.scan()
         #expect(await host.deliver("run the tests", images: [], request: "r1", to: location(daemon)) == .accepted)
+    }
+
+    @Test func aTurnListThatFailsBeforeTheRolloutIsWrittenIsAskedAgainUntilItShowsTheMessage() async throws {
+        let script = Script()
+        script.failedReads = 3
+        let (host, daemon, _) = try rig(script, confirmFor: 5)
+        defer { daemon.stop() }
+        _ = await host.scan()
+        #expect(await host.deliver("run the tests", images: [], request: "r1", to: location(daemon)) == .accepted)
+    }
+
+    @Test func aTurnListThatFailsForAnyOtherReasonIsUncertainAtOnce() async throws {
+        let script = Script()
+        script.failedReads = 1000
+        script.failure = "no thread"
+        let (host, daemon, _) = try rig(script, confirmFor: 5)
+        defer { daemon.stop() }
+        _ = await host.scan()
+        let started = Date()
+        #expect(await host.deliver("run the tests", images: [], request: "r1", to: location(daemon)) == .uncertain)
+        #expect(Date().timeIntervalSince(started) < 2)
+        #expect(daemon.methods().filter { $0 == "thread/turns/list" }.count == 1)
+    }
+
+    @Test func aTurnListThatNeverAnswersEndsWithTheConfirmationWindowNotAFullCallLater() async throws {
+        let script = Script()
+        script.silentReads = true
+        let (host, daemon, _) = try rig(script, confirmFor: 0.5)
+        defer { daemon.stop() }
+        _ = await host.scan()
+        let started = Date()
+        #expect(await host.deliver("run the tests", images: [], request: "r1", to: location(daemon)) == .uncertain)
+        #expect(Date().timeIntervalSince(started) < CodexHost.callTimeout)
+    }
+
+    @Test func confirmationWaitsLongEnoughForASharedServerToWriteTheTurn() {
+        #expect(CodexHost.defaultConfirmFor >= 4)
+        #expect(CodexHost.defaultConfirmFor + CodexHost.callTimeout < 8)
     }
 
     @Test func aMessageTheTurnNeverRecordsIsUncertainAfterABoundedWait() async throws {

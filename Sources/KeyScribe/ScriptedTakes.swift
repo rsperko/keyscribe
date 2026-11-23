@@ -489,8 +489,13 @@ enum ScriptedTakeCLI {
         var spoken: URL?
         if clip == nil, let text {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(id).wav")
-            guard speak(text, into: url) else {
+            switch speak(text, into: url) {
+            case .spoken: break
+            case .failed:
                 print("agent-take: macOS couldn\u{2019}t speak the text into a clip")
+                return 1
+            case .tooSlow(let limit):
+                print("agent-take: macOS took longer than \(Int(limit)) s to speak the text into a clip, twice")
                 return 1
             }
             spoken = url
@@ -525,9 +530,18 @@ enum ScriptedTakeCLI {
         return 1
     }
 
+    enum Spoken: Equatable {
+        case spoken, failed, tooSlow(TimeInterval)
+    }
+
+    static func speakingLimit(_ text: String) -> TimeInterval {
+        20 + Double(text.count) / 100
+    }
+
     static func speak(
-        _ text: String, into url: URL, using tool: URL = URL(fileURLWithPath: "/usr/bin/say"), within limit: TimeInterval = 20
-    ) -> Bool {
+        _ text: String, into url: URL, using tool: URL = URL(fileURLWithPath: "/usr/bin/say"), within limit: TimeInterval? = nil
+    ) -> Spoken {
+        let limit = limit ?? speakingLimit(text)
         for _ in 0..<2 {
             try? FileManager.default.removeItem(at: url)
             let say = Process()
@@ -535,14 +549,14 @@ enum ScriptedTakeCLI {
             say.arguments = ["-o", url.path, "--data-format=LEI16@16000", "--", text]
             let exited = DispatchSemaphore(value: 0)
             say.terminationHandler = { _ in exited.signal() }
-            guard (try? say.run()) != nil else { return false }
+            guard (try? say.run()) != nil else { return .failed }
             guard exited.wait(timeout: .now() + limit) == .timedOut else {
-                return say.terminationStatus == 0 && FileManager.default.fileExists(atPath: url.path)
+                return say.terminationStatus == 0 && FileManager.default.fileExists(atPath: url.path) ? .spoken : .failed
             }
             say.terminate()
             if exited.wait(timeout: .now() + 2) == .timedOut { kill(say.processIdentifier, SIGKILL) }
         }
         try? FileManager.default.removeItem(at: url)
-        return false
+        return .tooSlow(limit)
     }
 }

@@ -594,13 +594,15 @@ agent, for example to answer its prompt, say “tell docs cancel”.
 
 ### What happens if I talk to an agent while it's working?
 
-The agent reads it while it works, the same as anything you type there, wherever the conversation is. When a
+Most agents read it while they work, the same as anything you type there, wherever the conversation is. When a
 Claude Code conversation is in front of you, KeyScribe puts your message in its prompt box and presses Return for
-you, only while the box holds just your message and no dialog of the agent's is open. Anywhere else, your message
-waits above Claude Code's prompt, as a message you type while it works does, and joins the work when the step it
-is on finishes; if the work ends first, it is sent as your next message. If you press Esc first, KeyScribe puts
-it in the prompt box and presses Return for you while that conversation is in front of you; otherwise it waits
-in the prompt box. An agent whose connector is out of date gets the message when it finishes.
+you, only while the box holds just your message and no dialog of the agent's is open. Anywhere else, KeyScribe
+says the message is queued and sends it as your next message once Claude Code finishes, since Claude Code takes
+a message from KeyScribe only between turns. Several queued messages go one at a time, each once the agent finishes
+with the one before, in the order you said them. If you press Esc to stop the agent, or send that conversation a
+message yourself before it finishes, KeyScribe doesn't send the queued message, since it may no longer fit, and
+tells you why: “its last turn was stopped” or “you sent it a message since”. An agent whose connector is out of
+date gets the message when it finishes.
 A conversation waiting on you, for an approval or an answer, holds the message until you respond.
 
 ### Can I type part of a message and say the rest?
@@ -609,9 +611,9 @@ Yes, in the conversation in front of you. When its prompt box already has text, 
 after it and sends the whole message, as if you had pressed Return, in Claude Code, Pi, bb and Ultimate; the receipt says
 your typed text went with it. In Claude Code, if the box changed or the conversation left the front before
 KeyScribe could press Return, the joined message stays in the box for you to send. A conversation that is not in
-front of you never gets text you left in its box sent along: KeyScribe says its prompt box already has text and
-sends nothing, or, for an agent whose box it cannot see from behind, sends what you said on its own and leaves your
-text where it was. Nothing is joined when your message or the typed text starts with `/` or `!`.
+front of you never gets text you left in its box sent along. In Claude Code, Pi and omp, KeyScribe says its prompt
+box already has text and sends nothing. In Ultimate, bb and Codex, whose box KeyScribe cannot see from behind, it
+sends what you said on its own and leaves your text where it was. Nothing is joined when your message or the typed text starts with `/` or `!`.
 
 ### Can “open” select a conversation in kitty or WezTerm?
 
@@ -790,7 +792,7 @@ to four words, and it can't be one another conversation already has. Say the nam
 follows it, nothing is renamed or sent, and the panel says why. You can also choose **Manage…** beside
 **Conversations** in **Settings ▸ Modes ▸ Agent**, then **Rename…** from a conversation's **⋯** menu. Renaming only changes the name you say to KeyScribe;
 the agent's own title for the conversation stays as it was. **Use Default Name** in the same sheet goes back
-to the name KeyScribe would choose on its own.
+to the name KeyScribe would choose on its own; the name you gave it still reaches it.
 
 If it runs in herdr, a conversation is called by the name herdr shows on its pane, else the name you gave
 the agent in herdr (`herdr agent rename`, or the name you started it with). Otherwise a conversation you
@@ -809,7 +811,10 @@ you meant. When two conversations in different workspaces show the same name, su
 “marvin” in workspaces “cos” and “web”, each is called by its workspace and that name, “cos marvin” and
 “web marvin”. A conversation keeps its longer name after the other one closes, so what you learned to say
 keeps working, and when a conversation's name changes, its previous name still reaches it while no other
-conversation has that name. Name the panes in herdr to give each its own name. A new conversation started in a named pane
+conversation answers to that name (if a workspace it had to itself now holds another conversation too, saying
+the workspace name asks which one), including after KeyScribe restarts or updates. When you rename a conversation whose
+name had changed on its own (say a tmux session name replaced its folder name), both of the names it answered
+to before still reach it. Name the panes in herdr to give each its own name. A new conversation started in a named pane
 gets that pane's name once the old one has closed. If you say a conversation's herdr tab or workspace name
 after “tell”, “ask” or “open” and that is not its name, nothing is sent: KeyScribe tells you the name to
 say instead. Renaming a pane or workspace takes effect within a few

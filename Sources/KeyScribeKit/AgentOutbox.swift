@@ -36,7 +36,8 @@ public struct AgentOutbox: Sendable {
     public var held: [Message] { queue.map(\.message) }
 
     public mutating func send(
-        _ message: Message, state: AgentLiveState?, canEnterPromptBox: Bool = false, canSteer: Bool = false, keeping: Bool = false
+        _ message: Message, state: AgentLiveState?, canEnterPromptBox: Bool = false, canSteer: Bool = false, keeping: Bool = false,
+        ahead: Bool = false
     ) -> AgentDeliveryDecision {
         var context = AgentDeliveryContext(state: state ?? .disconnected)
         context.canEnterPromptBox = canEnterPromptBox
@@ -48,7 +49,9 @@ public struct AgentOutbox: Sendable {
         }
         let decision = AgentDeliveryPolicy.decide(context)
         switch decision {
-        case .queue: queue.append(Held(message: message))
+        case .queue:
+            let place = ahead ? queue.firstIndex { $0.message.conversation == message.conversation && !$0.sending } : nil
+            queue.insert(Held(message: message), at: place ?? queue.endIndex)
         case .handOff, .enterPromptBox: if keeping { queue.append(Held(message: message, sending: true)) }
         case .needsReview, .disconnected: break
         }

@@ -1196,6 +1196,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyLoginItem(_ enabled: Bool) {
+        guard KeyScribePaths.managesLoginItem() else { return }
         do {
             if enabled { try SMAppService.mainApp.register() }
             else if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }

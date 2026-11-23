@@ -94,7 +94,7 @@ final class AgentHub {
     private var inHosts: [String: String] = [:]
     private var rehelloAsked: Set<String> = []
     private var expected: Set<String> = []
-    private var carriedNames: [String: String] = [:]
+    private var carriedNames: [String: (from: String, previous: [String])] = [:]
     private var processIdentities: [String: ProcessIdentity] = [:]
     private var hostFollows: [String: [HostFollow]] = [:]
     private var endedTurns: [String: [EndedTurn]] = [:]
@@ -2182,7 +2182,7 @@ final class AgentHub {
     private func carry(from old: String, to new: String) {
         if exclusions.isKnown, exclusions.excludes(old), exclusions.insert(new) { saveExclusions() }
         if let used = lastUsed[old], used > lastUsed[new] ?? .distantPast { lastUsed[new] = used }
-        if directory.chosenNames[old] != nil { carriedNames[new] = old }
+        if directory.chosenNames[old] != nil { carriedNames[new] = (old, directory.previousNames(of: old)) }
     }
 
     private func applyCarriedNames() {
@@ -2190,7 +2190,7 @@ final class AgentHub {
         carriedNames = [:]
         guard namesProblem == nil else { return }
         var next = directory
-        let moved = carried.filter { next.carryChosenName(from: $0.value, to: $0.key) }
+        let moved = carried.filter { next.carryChosenName(from: $0.value.from, to: $0.key, previous: $0.value.previous) }
         guard !moved.isEmpty else { return }
         directory = next
         do {
@@ -2436,7 +2436,7 @@ final class AgentHub {
             requests[request] = nil
             retries[request] = entry.retry + 1
             running[entry.message.conversation] = now()
-            _ = outbox.send(entry.message, state: .working)
+            _ = outbox.send(entry.message, state: .working, ahead: true)
             report(.queued(handle), for: request, in: entry.message.conversation)
             return
         case "typedSince": settle(request, .kept(handle, reason: .typedSince))
@@ -2444,7 +2444,8 @@ final class AgentHub {
         case "dialog" where entry.box && !entry.timedOut:
             requests[request] = nil
             retries[request] = entry.retry + 1
-            let held = outbox.send(entry.message, state: AgentLiveState.userDialog.named(by: waitingPrompts[entry.message.conversation]))
+            let held = outbox.send(
+                entry.message, state: AgentLiveState.userDialog.named(by: waitingPrompts[entry.message.conversation]), ahead: true)
             report(.queued(handle, waitingOn: { if case .queue(let reason) = held { reason } else { .userDialog } }()), for: request, in: entry.message.conversation)
             return
         case "filled" where entry.box:

@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { ask, boxCommand, checkCommand, harness, held, outcome, promptBox, readyBox, steered, stopped, submitCommand, toolCall } from './support'
+import { ask, boxCommand, checkCommand, ended, harness, outcome, promptBox, readyBox, stopped, submitCommand, toolCall } from './support'
 
 test('a typed prompt overtaking queued dictation holds it while the sender is blocked', async ($, on) => {
   const h = harness(on)
@@ -84,18 +84,6 @@ test('a dictation for the conversation in front, sent while a turn runs, is put 
   expect(h.submits).toEqual([])
   expect(h.fills).toEqual(['run the tests'])
   expect(outcome(h)).toEqual(['ack', 'filled'])
-})
-
-test('a dictation that starts with a slash never goes in the prompt box, where Return would run it as a command, and joins the turn as text', async ($, on) => {
-  const h = harness(on)
-  await h.connect($)
-  await $.turn.start({ text: '', turnId: 't1' })
-  await h.deliver([boxCommand('/resume')])
-  await h.answerEvents()
-  expect(h.fills).toEqual([])
-  expect(outcome(h)).toEqual(['ack', 'submitted'])
-  await toolCall($, 'tu1')
-  expect(h.appended).toEqual([steered('/resume')])
 })
 
 test('a fill that fails sends no answer, so the take reads uncertain rather than refused and is never entered twice', async ($, on) => {

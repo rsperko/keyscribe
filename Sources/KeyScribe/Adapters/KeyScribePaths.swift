@@ -30,6 +30,10 @@ enum KeyScribePaths {
         configDirOverride ?? defaultSupportDir
     }
 
+    static func managesLoginItem(configDirOverride: URL? = configDirOverride) -> Bool {
+        configDirOverride == nil
+    }
+
     // Downloaded weights are a large shared cache: pinned to the production folder for every variant (never
     // redirected by `--config-dir`), so a dev or sandbox run reuses the real models instead of re-downloading.
     static var modelsDir: URL {

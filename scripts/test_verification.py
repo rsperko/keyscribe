@@ -24,6 +24,7 @@ from verify_agents import (
     load_connector_checks,
     parse_swift_test_log,
     resolve_agent_env,
+    resolve_node,
     run_plan,
     sample_targets,
     select_checks,
@@ -388,17 +389,23 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(check_prerequisites(plain_screen, {"PATH": "/usr/bin:/bin"}), [])
         self.assertTrue(check_prerequisites(plain_screen, {"PATH": "/usr/bin:/bin", "KEYSCRIBE_SCREEN_NOTICE_CMD": "missing-cmd"}))
 
-        env = {"PATH": f"{fake_bin}:/usr/bin:/bin", "KEYSCRIBE_SCREEN_NOTICE_CMD": str(stub)}
+        node = resolve_node(dict(os.environ), Path.home())
+        self.assertIsNotNone(node, "the login check needs node 22.18 or later (set NODE)")
+        env = {"PATH": f"{fake_bin}:/usr/bin:/bin", "KEYSCRIBE_SCREEN_NOTICE_CMD": str(stub), "NODE": node}
         claude = Check(
             "live-claude",
             ("true",),
             screen=True,
             cache=False,
-            any_env=(("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"),),
+            login="claude",
             commands=(("claude", "CLAUDE_BIN"),),
         )
         problems = check_prerequisites(claude, env, home=self.root / "no-home")
         self.assertTrue(any("CLAUDE_CODE_OAUTH_TOKEN" in p or "ANTHROPIC_API_KEY" in p for p in problems))
+        helper_home = self.root / "helper-home"
+        (helper_home / ".claude").mkdir(parents=True)
+        (helper_home / ".claude/settings.json").write_text('{"apiKeyHelper": "~/bin/key"}')
+        self.assertEqual(check_prerequisites(claude, {**env, "CLAUDE_BIN": str(stub)}, home=helper_home), [])
         with contextlib.redirect_stdout(io.StringIO()):
             result = execute(claude, self.root, self.root / ".verification/prereq", env)
         self.assertEqual(result["status"], "failed")

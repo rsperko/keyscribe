@@ -15,7 +15,7 @@ export class Tmux {
 
   start(cwd: string, command: string) {
     const started = this.tmux(["-f", "/dev/null", "new-session", "-d", "-s", "agent", "-x", "200", "-y", "50", "-c", cwd, command])
-    if (started.status !== 0) throw new Error(`tmux could not start: ${started.stderr}`)
+    if (started.status !== 0) throw new Error(`tmux could not start: ${started.why}`)
   }
 
   screen(): string {

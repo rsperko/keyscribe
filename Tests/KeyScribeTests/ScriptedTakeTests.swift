@@ -59,7 +59,7 @@ struct ScriptedTakeTests {
         defer { try? FileManager.default.removeItem(at: folder) }
         let clip = folder.appendingPathComponent("take.wav")
         let started = ContinuousClock.now
-        #expect(ScriptedTakeCLI.speak("hi", into: clip, using: tool, within: 0.5))
+        #expect(ScriptedTakeCLI.speak("hi", into: clip, using: tool, within: 0.5) == .spoken)
         #expect(ContinuousClock.now - started < .seconds(5))
         #expect(FileManager.default.contents(atPath: clip.path) == Data("clip".utf8))
     }
@@ -68,8 +68,15 @@ struct ScriptedTakeTests {
         let (tool, folder) = try speechTool(hangsFirst: true, always: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let started = ContinuousClock.now
-        #expect(!ScriptedTakeCLI.speak("hi", into: folder.appendingPathComponent("take.wav"), using: tool, within: 0.5))
+        #expect(ScriptedTakeCLI.speak("hi", into: folder.appendingPathComponent("take.wav"), using: tool, within: 0.5) == .tooSlow(0.5))
         #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test func aLongTextGetsLongerToSpeakThanAShortOne() {
+        let short = ScriptedTakeCLI.speakingLimit("hi")
+        let long = ScriptedTakeCLI.speakingLimit(String(repeating: "plum orchard ", count: 250))
+        #expect(short >= 20)
+        #expect(long >= short + 30)
     }
 
     @Test func anArmedCaptureServesACopyOfItsClipForOneTakeAndThenTheMicrophoneAgain() async throws {

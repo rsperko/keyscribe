@@ -57,12 +57,14 @@ struct DeadlineTests {
     }
 
     @Test func adoptsALateResultWithinTheGraceWindowButNotPastIt() async throws {
+        let release = Latch()
         await #expect(throws: DeadlineExceeded.self) {
             try await runWithDeadline(seconds: 0.15) {
-                await nonCooperativeBlock(seconds: 1)
+                await nonCooperativeBlock(until: release)
                 return "adopted"
             }
         }
+        release.set()
         let value = try await runWithDeadline(seconds: 0.6) {
             await nonCooperativeBlock(seconds: 0.3)
             return "adopted"

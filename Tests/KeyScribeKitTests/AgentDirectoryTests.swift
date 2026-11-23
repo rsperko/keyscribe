@@ -161,7 +161,10 @@ struct AgentDirectoryTests {
         var directory = AgentDirectory(chosen: ["claude:gone": "old"])
         directory.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200), claude(30, "c")], live: [])
         try directory.rename("claude:a", to: "backend")
-        #expect(directory.remembered == ["claude:b": RememberedName(name: "keyscribe blue", pid: 20, startedAt: 200, native: nil, agent: "claude")])
+        #expect(directory.remembered == [
+            "claude:a": RememberedName(name: "backend", pid: 10, startedAt: 100, native: nil, agent: "claude", previous: ["keyscribe"]),
+            "claude:b": RememberedName(name: "keyscribe blue", pid: 20, startedAt: 200, native: nil, agent: "claude"),
+        ])
     }
 
     @Test func aSessionMissingFromAStartupScanKeepsItsNameUntilItsProcessIsGone() {
@@ -402,15 +405,15 @@ struct AgentDirectoryTests {
         directory.update(entries: [inner], live: [])
         try directory.rename("claude:s1", to: "billing")
         directory.update(entries: [hosted], live: [])
-        let moved1 = directory.carryChosenName(from: "claude:s1", to: "bb:t1@/i")
+        let moved1 = directory.carryChosenName(from: "claude:s1", to: "bb:t1@/i", previous: [])
         #expect(moved1)
         #expect(directory.conversation(handle: "billing")?.id == "bb:t1@/i")
         #expect(directory.chosenNames == ["bb:t1@/i": "billing"])
         directory.update(entries: [inner], live: [])
-        let moved2 = directory.carryChosenName(from: "bb:t1@/i", to: "claude:s1")
+        let moved2 = directory.carryChosenName(from: "bb:t1@/i", to: "claude:s1", previous: [])
         #expect(moved2)
         #expect(directory.conversation(handle: "billing")?.id == "claude:s1")
-        let moved3 = directory.carryChosenName(from: "bb:t1@/i", to: "claude:s1")
+        let moved3 = directory.carryChosenName(from: "bb:t1@/i", to: "claude:s1", previous: [])
         #expect(!moved3)
     }
 
@@ -421,7 +424,7 @@ struct AgentDirectoryTests {
         directory.update(entries: [one, two], live: [])
         try directory.rename("claude:s1", to: "billing")
         try directory.rename("bb:t1@/i", to: "docs")
-        let moved4 = directory.carryChosenName(from: "claude:s1", to: "bb:t1@/i")
+        let moved4 = directory.carryChosenName(from: "claude:s1", to: "bb:t1@/i", previous: [])
         #expect(!moved4)
         #expect(directory.conversation(handle: "docs")?.id == "bb:t1@/i")
     }

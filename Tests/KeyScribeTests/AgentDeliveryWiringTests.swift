@@ -287,7 +287,7 @@ struct AgentDeliveryWiringTests {
             transport: transport, discovery: [ClaudeDiscovery(scan: { entries() }), Unconnected(candidates: unconnected)],
             names: AgentNameStore(directory: agentsDir), focus: focus, front: sessionInFront, glance: glance,
             receiptTimeout: receiptTimeout, scanDeadline: .seconds(30), places: places,
-            hosts: hosts, addresses: addresses, hostAllowed: { _ in true })
+            hosts: hosts, addresses: addresses, hostAllowed: { _ in true }, accessibilityTrusted: { true })
         transport.hub = hub
         await hub.rescan()
 

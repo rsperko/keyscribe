@@ -1,6 +1,9 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { claudeCredential, claudeLoginSettings, codexLoginConfig } from "./lib/logins.ts"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { claudeCredential, claudeLoginSettings, codexLoginConfig, loginProblem } from "./lib/logins.ts"
 
 test("a Codex login set up in its configuration keeps only its chosen provider, however the file is written", () => {
   const config = [
@@ -85,4 +88,21 @@ test("a Claude Code login never carries over the settings the run chooses itself
   assert.deepEqual(claudeLoginSettings({ env: { CLAUDE_CONFIG_DIR: "/Users/me/.claude", ANTHROPIC_MODEL: "opus", ANTHROPIC_BASE_URL: "https://proxy.example" } }),
     { env: { ANTHROPIC_BASE_URL: "https://proxy.example" } })
   assert.deepEqual(claudeLoginSettings({ env: { CLAUDE_CONFIG_DIR: "/Users/me/.claude" } }), {})
+})
+
+test("the gate's login check accepts what the run accepts: a key helper or a token in Claude Code's settings, and Codex's auth file or chosen provider", () => {
+  const home = mkdtempSync(join(tmpdir(), "logins-"))
+  try {
+    mkdirSync(join(home, ".claude"))
+    mkdirSync(join(home, ".codex"))
+    assert.match(loginProblem("claude", { HOME: home }) ?? "", /no login/)
+    assert.match(loginProblem("codex", { HOME: home }) ?? "", /no Codex login/)
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ apiKeyHelper: "~/bin/key" }))
+    writeFileSync(join(home, ".codex", "config.toml"), `model_provider = "proxy"\n[model_providers.proxy]\nname = "proxy"\n`)
+    assert.equal(loginProblem("claude", { HOME: home }), undefined)
+    assert.equal(loginProblem("codex", { HOME: home }), undefined)
+    assert.equal(loginProblem("claude", { HOME: join(home, "none"), CLAUDE_CODE_OAUTH_TOKEN: "token" }), undefined)
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
 })

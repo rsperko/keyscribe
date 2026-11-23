@@ -219,7 +219,7 @@ in the same `Application Support` folder:
   connector's files, the Codex plugin's files, `connectors.json`, the agent folders you connected and which connector installation
   may connect from each, and `names.json`, the names you chose for conversations along with their agent
   session ids and the conversations you disconnected. A conversation's name, whether you chose it or it came
-  from its folder, a terminal tab or pane label, or a bb thread's or Codex conversation's title, may also be remembered there, and
+  from its folder, a terminal tab or pane label, or a bb thread's or Codex conversation's title, may also be remembered there, along with the name it had just before, and
   appears in Settings, in History lines about that conversation, and in KeyScribe's logs on this Mac. The Pi and omp
   connectors' files live in the extensions folder of each folder you connected, because that is where the agent loads
   them from; they hold the same connection settings and nothing else. To find the conversations on your Mac and the

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { markKept, scratchPrefixes } from "./scratch.ts"
-import { run, sleep } from "./util.ts"
+import { run, sleep, until } from "./util.ts"
 
 export type Message = { role: "user" | "agent" | "ended"; text: string; turn?: string; mark?: string }
 export type Shown = { thread: boolean; focused: boolean; draft: string | null }
@@ -15,6 +15,7 @@ export interface AppWindow {
   owns(window: ListedWindow): boolean
   readonly reopens: boolean
   readonly takeBehindDraft: "kept" | "sent"
+  readonly takeInFrontOfDraft: "joined" | "alone"
   readonly app?: string
   focus?(): Promise<void>
   show(): Promise<void>
@@ -22,6 +23,19 @@ export interface AppWindow {
   fill(text: string): Promise<void>
   close(): Promise<void>
   openAutomated?(kind: AutomatedKind): Promise<() => Promise<void>>
+}
+
+export interface AwayWindow {
+  focus?(): Promise<void>
+  show(): Promise<void>
+  owns(window: ListedWindow): boolean
+  close(): Promise<void>
+}
+
+export async function bringAwayForward(away: AwayWindow, windows: () => ListedWindow[], focus: (spec: string) => void) {
+  await away.show()
+  if (away.focus) return away.focus()
+  focus(await until("the run's own window to look away to", () => windows().find((w) => away.owns(w))?.spec, 15, 250))
 }
 
 export interface AgentDriver {
@@ -32,6 +46,7 @@ export interface AgentDriver {
   readonly tool: string | undefined
   readonly conversation: string | undefined
   readonly addresses?: { said: string; absent: string }
+  readonly busyTake?: "joins" | "waits"
   readonly window?: AppWindow
   owns(conversation: string | undefined): boolean
   setUp(): Promise<void>

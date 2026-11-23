@@ -233,6 +233,71 @@ struct TerminalRoutesTests {
         ] + ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys009"]))
     }
 
+    @Test func aHerdrSessionKeptUnderItsOwnConfigFolderIsListedFromThatFolderToFindItsClient() {
+        let socket = "/nix/config/herdr/sessions/work/herdr.sock"
+        let facts = herdrFacts(sessions: #"{"sessions":[{"name":"default","socket_path":"/Users/me/.config/herdr/herdr.sock"}]}"#, socket: socket)
+        facts.table[40]?.environment["XDG_CONFIG_HOME"] = "/nix/config"
+        facts.table[50]?.environment["XDG_CONFIG_HOME"] = "/nix/config"
+        facts.table[36]?.environment["XDG_CONFIG_HOME"] = "/nix/config"
+        facts.outputs[["/usr/bin/env", "XDG_CONFIG_HOME=/nix/config", Self.herdr, "session", "list", "--json"]] =
+            #"{"sessions":[{"name":"work","socket_path":"/nix/config/herdr/sessions/work/herdr.sock"}]}"#
+        #expect(TerminalRoutes.plan(agent: 50, facts: facts) == [
+            Self.herdrLayer(socket: socket),
+        ] + ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys009"]))
+    }
+
+    @Test func twoHerdrConfigFoldersWithTheSameSessionNameEachBringForwardTheirOwnClient() {
+        let socket = "/nix/config/herdr/herdr.sock"
+        let facts = herdrFacts(socket: socket)
+        facts.table[40]?.environment["XDG_CONFIG_HOME"] = "/nix/config"
+        facts.add(38, parent: 22, tty: "/dev/ttys011", [Self.herdr], environment: ["XDG_CONFIG_HOME": "/nix/config"])
+            .add(22, parent: 10, tty: "/dev/ttys011", ["/usr/bin/login"])
+        facts.outputs[["/usr/bin/env", "XDG_CONFIG_HOME=/nix/config", Self.herdr, "session", "list", "--json"]] =
+            #"{"sessions":[{"name":"default","socket_path":"/nix/config/herdr/herdr.sock"}]}"#
+        #expect(TerminalRoutes.plan(agent: 50, facts: facts) == [
+            Self.herdrLayer(socket: socket),
+        ] + ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys011"]))
+        #expect(TerminalRoutes.plan(agent: 50, facts: herdrFacts()).suffix(2) == ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys000"])[...])
+    }
+
+    @Test func theHerdrServersConfigFolderWinsOverOneAToolInThePaneSet() {
+        let socket = "/nix/config/herdr/sessions/work/herdr.sock"
+        let facts = herdrFacts(sessions: #"{"sessions":[]}"#, socket: socket)
+        facts.table[40]?.environment["XDG_CONFIG_HOME"] = "/nix/config"
+        facts.table[50]?.environment["XDG_CONFIG_HOME"] = "/elsewhere"
+        facts.table[36]?.environment["XDG_CONFIG_HOME"] = "/nix/config"
+        facts.outputs[["/usr/bin/env", "XDG_CONFIG_HOME=/nix/config", Self.herdr, "session", "list", "--json"]] =
+            #"{"sessions":[{"name":"work","socket_path":"/nix/config/herdr/sessions/work/herdr.sock"}]}"#
+        #expect(TerminalRoutes.plan(agent: 50, facts: facts).suffix(2) == ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys009"])[...])
+    }
+
+    @Test func aHerdrServerOnTheDefaultConfigFolderIsNotMovedByOneAToolInThePaneSet() {
+        let facts = herdrFacts()
+        facts.table[50]?.environment["XDG_CONFIG_HOME"] = "/tmp/scratch"
+        #expect(TerminalRoutes.plan(agent: 50, facts: facts) == [
+            Self.herdrLayer(),
+        ] + ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys000"]))
+    }
+
+    @Test func aHerdrServerWhoseEnvironmentCannotBeReadUsesThePanesConfigFolder() {
+        let socket = "/nix/config/herdr/sessions/work/herdr.sock"
+        let facts = herdrFacts(sessions: #"{"sessions":[]}"#, socket: socket)
+        facts.table[40]?.argumentsReadable = false
+        facts.table[50]?.environment["XDG_CONFIG_HOME"] = "/nix/config"
+        facts.table[36]?.environment["XDG_CONFIG_HOME"] = "/nix/config"
+        facts.outputs[["/usr/bin/env", "XDG_CONFIG_HOME=/nix/config", Self.herdr, "session", "list", "--json"]] =
+            #"{"sessions":[{"name":"work","socket_path":"/nix/config/herdr/sessions/work/herdr.sock"}]}"#
+        #expect(TerminalRoutes.plan(agent: 50, facts: facts).suffix(2) == ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys009"])[...])
+    }
+
+    @Test func anEmptyHerdrConfigFolderIsTheDefaultOne() {
+        let facts = herdrFacts()
+        facts.table[50]?.environment["XDG_CONFIG_HOME"] = ""
+        #expect(TerminalRoutes.plan(agent: 50, facts: facts) == [
+            Self.herdrLayer(),
+        ] + ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys000"]))
+    }
+
     @Test func aHerdrPaneThatCannotBeIdentifiedStaysAnUnselectedLayer() {
         #expect(TerminalRoutes.plan(agent: 50, facts: herdrFacts(pane: nil)) == [
             .layer(.unresolved("herdr")),
@@ -510,7 +575,7 @@ struct TerminalRoutesTests {
 
     @Test func onlyTheEnvironmentOpenAndTheFrontCheckReadIsKept() {
         #expect(ResolvedSurfaces.builtIn.environmentKeys == [
-            "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX", "ZELLIJ_PANE_ID", "WARP_FOCUS_URL", "CMUX_SURFACE_ID",
+            "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "XDG_CONFIG_HOME", "TMUX", "ZELLIJ_PANE_ID", "WARP_FOCUS_URL", "CMUX_SURFACE_ID",
             "WEZTERM_PANE", "WEZTERM_UNIX_SOCKET", "KITTY_WINDOW_ID", "KITTY_LISTEN_ON", "REX_SERVER", "REX_SESSION", "REX_BLOCK",
         ])
     }

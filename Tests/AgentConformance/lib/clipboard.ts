@@ -16,7 +16,7 @@ function helper() {
     mkdirSync(folder, { recursive: true })
     const building = `${binary}.${process.pid}`
     const built = run("xcrun", ["swiftc", "-O", source, "-o", building], { timeout: 180 })
-    if (built.status !== 0) throw new Error(`the clipboard helper did not compile: ${built.stdout}${built.stderr}`)
+    if (built.status !== 0) throw new Error(`the clipboard helper did not compile: ${built.why}`)
     renameSync(building, binary)
   }
   return compiled = binary
@@ -24,7 +24,7 @@ function helper() {
 
 export function clipboard(...args: string[]) {
   const answer = run(helper(), args, { timeout: 30 })
-  if (answer.status !== 0) throw new Error(`clipboard ${args[0]} failed: ${answer.stdout}${answer.stderr}`)
+  if (answer.status !== 0) throw new Error(`clipboard ${args[0]} failed: ${answer.why}`)
 }
 
 export type ClipboardMark = () => () => boolean
@@ -39,7 +39,7 @@ export async function withClipboard<T>(work: (mark: ClipboardMark) => Promise<T>
     return () => {
       const answer = run(helper(), ["same", marked], { timeout: 30 })
       if (answer.status === 3) return false
-      if (answer.status !== 0) throw new Error(`clipboard same failed: ${answer.stdout}${answer.stderr}`)
+      if (answer.status !== 0) throw new Error(`clipboard same failed: ${answer.why}`)
       return true
     }
   }

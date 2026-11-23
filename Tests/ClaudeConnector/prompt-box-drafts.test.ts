@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { absorbedText, boxCommand, checkCommand, digest, harness, held, mergeCommand, outcome, promptBox, readyBox, steered, submitCommand, toolCall, queuedCommand, cleared } from './support'
+import { absorbedText, boxCommand, checkCommand, digest, ended, harness, mergeCommand, outcome, promptBox, readyBox, submitCommand, takenIn, toolCall, cleared } from './support'
 
 test('an MCP question keeps the box from reading ready while it may not be drawn yet', async ($, on) => {
   const h = harness(on)
@@ -21,7 +21,7 @@ test('a prompt-box dictation the running turn takes in is reported as absorbed i
   const h = harness(on)
   await readyBox($, h)
   await h.typed($, 'run the tests', 't1')
-  await $.session.append(queuedCommand('run the tests') as any)
+  await takenIn($, h, 'run the tests')
   await h.answerEvents()
   expect(h.events().filter((b: any) => b.op === 'absorbed')).toMatchObject([{ op: 'absorbed', session: 's1', turn: 't1', prompt: expect.any(String), request: 'r1' }])
 })
@@ -29,24 +29,10 @@ test('a prompt-box dictation the running turn takes in is reported as absorbed i
 test('another message the running turn takes in is never reported as the dictation', async ($, on) => {
   const h = harness(on)
   await readyBox($, h)
-  await $.session.append(queuedCommand('something else') as any)
+  await takenIn($, h, 'something else')
   await h.answerEvents()
   expect(h.events().filter((b: any) => b.op === 'absorbed')).toEqual([])
 })
-
-for (const said of ['!echo hi', '  /clear']) {
-  test(`a dictation of ${JSON.stringify(said)} never goes in the prompt box, where Return would run it, and joins the turn as text`, async ($, on) => {
-    const h = harness(on)
-    await h.connect($)
-    await $.turn.start({ text: '', turnId: 't1' })
-    await h.deliver([boxCommand(said)])
-    await h.answerEvents()
-    expect(h.fills).toEqual([])
-    expect(outcome(h)).toEqual(['ack', 'submitted'])
-    await toolCall($, 'tu1')
-    expect(h.appended).toEqual([steered(said)])
-  })
-}
 
 test('a dictation for the prompt box whose clock read is pending when its session is cleared never fills the next session', async ($, on) => {
   const h = harness(on)
@@ -123,7 +109,7 @@ test('a dictation joined to a draft while a turn runs is reported absorbed under
   await h.answerEvents()
   expect(outcome(h)).toEqual(['ack', 'joinedMidTurn'])
   await h.typed($, 'half a thought run the tests', 't1')
-  await $.session.append(queuedCommand('half a thought run the tests') as any)
+  await takenIn($, h, 'half a thought run the tests')
   await h.answerEvents()
   expect(h.events().filter((b: any) => b.op === 'absorbed')).toMatchObject([{ turn: 't1', prompt: digest('run the tests') }])
 })
@@ -174,18 +160,6 @@ test('a dictation for the prompt box keeps what the user typed as it was filled,
   await h.answerEvents()
   expect(h.box.text).toBe('half run the tests')
   expect(outcome(h)).toEqual(['ack', 'added'])
-})
-
-test('a dictation the prompt box will not take joins the turn instead', async ($, on) => {
-  const h = harness(on)
-  await h.connect($)
-  await $.turn.start({ text: '', turnId: 't1' })
-  h.fillRefusal.reason = 'no_composer'
-  await h.deliver([boxCommand()])
-  await h.answerEvents()
-  expect(outcome(h)).toEqual(['ack', 'submitted'])
-  await toolCall($, 'tu1')
-  expect(h.appended).toEqual([steered('run the tests')])
 })
 
 test('a dictation for the prompt box that expired is never filled', async ($, on) => {

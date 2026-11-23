@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { command, type Message } from "./driver.ts"
-import { claudeCredential, claudeLoginSettings } from "./logins.ts"
+import { claudeCredential, claudeLoginFile, claudeLoginSettings, loginProblem } from "./logins.ts"
 import { TerminalAgent } from "./terminal.ts"
 import { texts } from "./util.ts"
 
@@ -17,6 +17,10 @@ export function claudeMessages(transcript: string): Message[] {
     if (entry.type === "user") {
       const parts = typeof content === "string" ? [content] : (content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text)
       if (!parts.length) continue
+      if (parts.length === 1 && /^\[Request interrupted by user[^\]]*\]$/.test(parts[0].trim())) {
+        messages.push({ role: "ended", text: "", turn })
+        continue
+      }
       turn = entry.uuid
       messages.push({ role: "user", text: parts.join("\n"), turn })
     } else if (entry.type === "assistant") {
@@ -31,6 +35,7 @@ export function claudeMessages(transcript: string): Message[] {
 
 export class ClaudeDriver extends TerminalAgent {
   readonly kind = "claude"
+  readonly busyTake = "waits"
   readonly tool = command("claude", "CLAUDE_BIN")
   readonly folder: string
   protected ready = /\? for shortcuts|bypass permissions|accept edits|auto mode on|shift\+tab to cycle|^\s*[>❯]\s*$/m
@@ -47,12 +52,11 @@ export class ClaudeDriver extends TerminalAgent {
   }
 
   async setUp() {
-    const from = join(process.env.CLAUDE_LOGIN_HOME ?? join(homedir(), ".claude"), "settings.json")
+    const from = claudeLoginFile(process.env)
     const login = claudeLoginSettings(existsSync(from) ? JSON.parse(readFileSync(from, "utf8")) : {})
     const credential = claudeCredential(login, process.env)
-    if (!credential.usable) {
-      throw new Error(`a scratch Claude Code folder has no login: set CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) or ANTHROPIC_API_KEY, or give ${from} an apiKeyHelper (or set CLAUDE_LOGIN_HOME)`)
-    }
+    const problem = loginProblem("claude", process.env)
+    if (problem) throw new Error(problem)
     mkdirSync(this.folder, { recursive: true })
     const key = credential.apiKey
     writeFileSync(join(this.folder, ".claude.json"), JSON.stringify({

@@ -25,6 +25,7 @@ final class CodexHost: AgentHost {
     }()
 
     nonisolated static let callTimeout: TimeInterval = 3
+    nonisolated static let defaultConfirmFor: TimeInterval = 4
     nonisolated static let stopCheckTimeout: TimeInterval = 1
     nonisolated static let pageLimit = 10
     nonisolated static let paneLifetime: TimeInterval = 5
@@ -60,7 +61,7 @@ final class CodexHost: AgentHost {
         enrolled: @escaping @MainActor () -> [String], installed: @escaping () -> Bool = { CodexInstall.find() != nil },
         connect: @escaping Connect = CodexHost.connect, panes: Panes? = nil,
         frontmost: @escaping @MainActor () -> (app: AgentHostApp, title: String)? = HostFront.window,
-        confirmEvery: TimeInterval = 0.1, confirmFor: TimeInterval = 2,
+        confirmEvery: TimeInterval = 0.1, confirmFor: TimeInterval = CodexHost.defaultConfirmFor,
         now: @escaping () -> Date = Date.init
     ) {
         self.enrolled = enrolled
@@ -538,14 +539,21 @@ final class CodexHost: AgentHost {
         }
         let deadline = now().addingTimeInterval(confirmFor)
         while true {
-            guard let listed = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.callTimeout),
-                  let turns = CodexDelivery.turns(listed)?.turns
-            else { return .uncertain }
-            if let placed = CodexDelivery.placement(in: turns, clientUserMessageId: messageId) {
+            let listed: Data?
+            do {
+                listed = try await client.call(
+                    "thread/turns/list", List(threadId: id), timeout: min(Self.callTimeout, max(confirmEvery, deadline.timeIntervalSince(now()))))
+            } catch CodexDaemonClient.Failure.rejected(_, let message) where CodexDelivery.notWrittenYet(message) {
+                listed = nil
+            } catch {
+                return .uncertain
+            }
+            if let turns = listed.flatMap({ CodexDelivery.turns($0)?.turns }),
+               let placed = CodexDelivery.placement(in: turns, clientUserMessageId: messageId) {
                 changed?(.delivered(request: request, at: location, turn: placed.turn, position: placed.position))
                 return .accepted
             }
-            guard now() < deadline else { return .uncertain }
+            guard now() < deadline, !Task.isCancelled else { return .uncertain }
             try? await Task.sleep(for: .seconds(confirmEvery))
         }
     }
