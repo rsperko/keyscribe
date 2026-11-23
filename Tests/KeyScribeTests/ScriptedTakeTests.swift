@@ -122,6 +122,13 @@ struct ScriptedTakeTests {
         var receipt: AgentReceipt? = .sent("docs")
         var recipient: ScriptedTakeRecipient? = ScriptedTakeRecipient(conversation: "claude:abc-123", agent: "claude", request: "req-1")
         var hudSays: String? = "Sent to docs"
+        var acted = 0
+        var actedOn: ScriptedTakeRecipient?
+        var actsOn: ScriptedTakeRecipient?
+        var observesInput = true
+        var historyEntry: String?
+        var writesHistory: String?
+        var duringFinish: (() -> Void)?
         var modes = ["agent-mode": ScriptedTakeMode(id: "agent-mode", sendsToAgents: true), "": ScriptedTakeMode(id: "agent-mode", sendsToAgents: true)]
         func scriptedTakeMode(_ named: String?) -> ScriptedTakeMode? { modes[named ?? ""] }
         func setNextModeOverride(id: String?) { steps.append("mode \(id ?? "-")") }
@@ -138,14 +145,22 @@ struct ScriptedTakeTests {
         var isIdleForScriptedTake: Bool { idle }
         func finishScriptedTake() async {
             steps.append("finish")
+            duringFinish?()
             idle = true
+            if let writesHistory { historyEntry = writesHistory }
             published += 1
             receipts += receipt == nil ? 0 : 1
+            if let actsOn {
+                acted += 1
+                actedOn = actsOn
+            }
         }
         var scriptedTakeMarks: ScriptedTakeMarks {
             var record = DictationRecord(modeName: "Agent")
             record.outcome = outcome
-            return ScriptedTakeMarks(records: published, record: record, receipts: receipts, receipt: receipt, recipient: recipient, hud: hudSays)
+            return ScriptedTakeMarks(
+                records: published, record: record, receipts: receipts, receipt: receipt, recipient: recipient, hud: hudSays,
+                acted: acted, actedOn: actedOn, observesInput: observesInput, historyEntry: historyEntry)
         }
     }
 
@@ -188,6 +203,31 @@ struct ScriptedTakeTests {
         #expect(result.problem == nil)
         #expect(result.conversation == nil)
         #expect(result.receipt == nil)
+    }
+
+    @Test func anAgentCommandReportsTheConversationItActedOnAndNoRequest() async throws {
+        let target = Target()
+        target.receipt = nil
+        target.outcome = .command
+        target.actsOn = ScriptedTakeRecipient(conversation: "pi:s-9", agent: "pi", request: nil)
+        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1))
+        let result = try await take(runner, ScriptedTakeRequest(id: "status", wav: try wav().path, transcript: "check on docs", mode: nil, caller: getpid(), issued: Date()))
+        #expect(result.ok)
+        #expect(result.conversation == "pi:s-9")
+        #expect(result.agent == "pi")
+        #expect(result.request == nil)
+        #expect(result.receiptKind == nil)
+        target.actsOn = nil
+        let next = try await take(runner, ScriptedTakeRequest(id: "status2", wav: try wav().path, transcript: "check on all", mode: nil, caller: getpid(), issued: Date()))
+        #expect(next.conversation == nil)
+    }
+
+    @Test func everyResultSaysWhetherTheInstanceSeesInputSoAnUnconfirmableFrontIsCaughtUpFront() async throws {
+        let target = Target()
+        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1))
+        #expect(try await take(runner, ScriptedTakeRequest(id: "i1", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date())).observesInput == true)
+        target.observesInput = false
+        #expect(try await take(runner, ScriptedTakeRequest(id: "i2", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date())).observesInput == false)
     }
 
     @Test func everyReceiptHasAStableKindName() {
@@ -263,6 +303,77 @@ struct ScriptedTakeTests {
         #expect(replies.reply(for: "a") == ScriptedReply(kind: "ended", length: 8, sha256: ScriptedReplies.digest("Stopped."), ending: "Stopped."))
         #expect(replies.reply(for: "b")?.ending == nil)
         #expect(ScriptedReplies.digest("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    }
+
+    private func ledgerLines(_ ledger: URL) throws -> [String] {
+        try String(contentsOf: ledger, encoding: .utf8).split(separator: "\n").map(String.init)
+    }
+
+    @Test func eachReadAndEachReplyNotReadIsWrittenInOrderForItsRequest() throws {
+        let ledger = FileManager.default.temporaryDirectory.appendingPathComponent("reads-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: ledger) }
+        let replies = ScriptedReplies(ledger: ledger)
+        replies.noteRead(origin: "r1")
+        replies.noteUnread(origin: "r2", reason: "reading replies was stopped")
+        replies.noteRead(origin: "r1")
+        replies.flush()
+        let written = try ledgerLines(ledger).filter { !$0.contains("quiet") }.map { try JSONDecoder().decode(ScriptedRead.self, from: Data($0.utf8)) }
+        #expect(written == [
+            ScriptedRead(request: "r1", read: true), ScriptedRead(request: "r2", read: false, reason: "reading replies was stopped"),
+            ScriptedRead(request: "r1", read: true),
+        ])
+    }
+
+    @Test func aReadThatArrivesWhileTheTakeIsStillFinishingIsWritten() async throws {
+        let ledger = FileManager.default.temporaryDirectory.appendingPathComponent("reads-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: ledger) }
+        let replies = ScriptedReplies(ledger: ledger)
+        let target = Target()
+        target.duringFinish = {
+            replies.noteUnread(origin: "req-1", reason: "the conversation is in front")
+            replies.noteRead(origin: "req-1")
+        }
+        let runner = ScriptedTakeRunner(
+            target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1), replies: replies)
+        _ = try await take(runner, ScriptedTakeRequest(id: "f1", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date()))
+        replies.flush()
+        let written = try ledgerLines(ledger).filter { !$0.contains("quiet") }.map { try JSONDecoder().decode(ScriptedRead.self, from: Data($0.utf8)) }
+        #expect(written == [ScriptedRead(request: "req-1", read: false, reason: "the conversation is in front"), ScriptedRead(request: "req-1", read: true)])
+    }
+
+    @Test func eachChangeBetweenBusyAndQuietIsWrittenAndAnOutcomeWhileQuietIsFollowedByQuiet() throws {
+        let ledger = FileManager.default.temporaryDirectory.appendingPathComponent("reads-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: ledger) }
+        let replies = ScriptedReplies(ledger: ledger)
+        replies.noteBusy(true)
+        replies.noteRead(origin: "r1")
+        replies.noteBusy(false)
+        replies.noteBusy(false)
+        replies.noteRead(origin: "r2")
+        replies.noteBusy(true)
+        replies.flush()
+        #expect(try ledgerLines(ledger) == [
+            #"{"quiet":false}"#, #"{"read":true,"request":"r1"}"#, #"{"quiet":true}"#,
+            #"{"read":true,"request":"r2"}"#, #"{"quiet":true}"#, #"{"quiet":false}"#,
+        ])
+    }
+
+    @Test(arguments: [(true, false), (false, true)])
+    func onlyAnInstanceThatTakesNoInputKeepsTheLedger(listensForInput: Bool, keeps: Bool) {
+        let support = URL(fileURLWithPath: "/tmp/support")
+        let ledger = ScriptedReplies.ledger(supportDir: support, listensForInput: listensForInput)
+        #expect(ledger == (keeps ? support.appendingPathComponent(ScriptedReplies.ledgerName) : nil))
+    }
+
+    @Test func aTakeReportsTheHistoryEntryItWroteAndNoneFromAnEarlierTake() async throws {
+        let target = Target()
+        target.historyEntry = "earlier"
+        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1))
+        let unwritten = try await take(runner, ScriptedTakeRequest(id: "h1", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date()))
+        #expect(unwritten.history == nil)
+        target.writesHistory = "entry-2"
+        let written = try await take(runner, ScriptedTakeRequest(id: "h2", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date()))
+        #expect(written.history == "entry-2")
     }
 
     @Test func repliesAreKeptOnlyForTheMostRecentRequests() {

@@ -124,13 +124,15 @@ public enum DevCLI {
                                       install and uninstall refuse while the app using that folder runs, because it
                                       reads its connectors only at launch. Exits non-zero unless the connector ends
                                       ready (install) or gone (uninstall).
-                --folder <dir>          The agent's configuration folder (default: the agent's usual one).
+                --folder <dir>          The agent's configuration folder (default: the agent's usual one, never the one
+                                        the login shell names, so a shell setting cannot redirect what gets installed).
                 --tool <path>           The agent's command, when it is not where it is usually found.
               --discovery-report <agent>
                                       Print how this app finds <agent> (the report Settings copies with Copy Details):
                                       the command it would run and why, the login shell's answer, the configuration
                                       folders it knows, and the running processes it saw. Changes nothing.
-                --folder <dir>          Report for this configuration folder (default: the agent's usual one).
+                --folder <dir>          Report for this configuration folder (default: the one the login shell names
+                                        for the agent's configuration folder, else the agent's usual one).
               --title-probe           List every running agent process with the title of the terminal tab or
                                       pane it runs in, as Open and in front read it, then exit. Read-only;
                                       never asks for Automation access.

@@ -13,6 +13,13 @@ enum AgentFocusResult: Equatable, Sendable {
     case refused(String)
     case none
 
+    var broughtForward: Bool {
+        switch self {
+        case .exact, .requested, .app, .pane: true
+        case .unsupported, .connectorOutdated, .notAllowed, .refused, .none: false
+        }
+    }
+
     func hudState(handle: String, detail: String, agent: AgentKind? = nil) -> HUDState {
         switch self {
         case .exact: .commandDone(summary: "Opened \(handle)", detail: detail)

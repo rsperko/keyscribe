@@ -47,10 +47,11 @@ abstract class PiFamily extends TerminalAgent {
 
   protected abstract copyLogin(from: string): void
   protected abstract userFolder: string
+  protected abstract loginVariable: string
 
   async setUp() {
-    const from = process.env.PI_LOGIN_HOME ?? this.userFolder
-    if (!existsSync(from)) throw new Error(`no ${this.kind} login at ${from}: log in first, or set PI_LOGIN_HOME`)
+    const from = process.env[this.loginVariable] ?? this.userFolder
+    if (!existsSync(from)) throw new Error(`no ${this.kind} login at ${from}: log in first, or set ${this.loginVariable}`)
     mkdirSync(this.folder, { recursive: true })
     this.copyLogin(from)
   }
@@ -89,6 +90,7 @@ export class PiDriver extends PiFamily {
   readonly kind = "pi"
   readonly tool = command("pi", "PI_BIN")
   protected userFolder = join(homedir(), ".pi", "agent")
+  protected loginVariable = "PI_LOGIN_HOME"
 
   protected copyLogin(from: string) {
     for (const name of ["auth.json", "models.json"]) {
@@ -105,13 +107,14 @@ export class OmpDriver extends PiFamily {
   readonly kind = "omp"
   readonly tool = command("omp", "OMP_BIN")
   protected userFolder = join(homedir(), ".omp", "agent")
+  protected loginVariable = "OMP_LOGIN_HOME"
 
   protected copyLogin(from: string) {
     for (const name of ["config.yml", "models.yml"]) {
       if (existsSync(join(from, name))) copyFileSync(join(from, name), join(this.folder, name))
     }
     for (const database of ["agent.db", "models.db"]) {
-      if (existsSync(join(from, database))) run("/usr/bin/sqlite3", [join(from, database), `.backup '${join(this.folder, database)}'`])
+      if (existsSync(join(from, database))) run(process.env.SQLITE_BIN ?? "/usr/bin/sqlite3", [join(from, database), `.backup '${join(this.folder, database)}'`])
     }
   }
 }

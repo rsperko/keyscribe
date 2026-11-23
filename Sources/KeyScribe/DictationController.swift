@@ -217,6 +217,7 @@ final class DictationController {
         captureTruncated || (session?.captureLoss.isLost ?? false)
     }
     private(set) var lastRecord: DictationRecord?
+    private(set) var lastHistoryEntry: String?
     private(set) var recordsPublished = 0
     private(set) var nextModeOverrideID: String?
     // Bumped by anything that must stop voice-command work already under way; every action re-checks it.
@@ -1984,7 +1985,9 @@ final class DictationController {
         entry.shortcutCandidates = candidates.isEmpty ? nil : candidates
         guard reporter.keepsHistory else { return false }
         onRecorded?(entry)
-        return reporter.append(entry, retentionDays: settings.history.retentionDays, confirm: confirmWrite)
+        let written = reporter.append(entry, retentionDays: settings.history.retentionDays, confirm: confirmWrite)
+        if written { lastHistoryEntry = entry.id }
+        return written
     }
 
     private enum FinalText {
@@ -2723,6 +2726,8 @@ extension DictationController: ScriptedTakeTarget {
     var scriptedTakeMarks: ScriptedTakeMarks {
         ScriptedTakeMarks(
             records: recordsPublished, record: lastRecord, receipts: agentTake.receiptCount, receipt: agentTake.lastReceipt,
-            recipient: agentTake.lastRecipient, hud:hud.lastPresented.map { String(describing: $0) })
+            recipient: agentTake.lastRecipient, hud: hud.lastPresented.map { String(describing: $0) },
+            acted: agentTake.actedCount, actedOn: agentTake.lastActedOn, observesInput: UserInput.isObserved,
+            historyEntry: lastHistoryEntry)
     }
 }

@@ -28,10 +28,17 @@ public enum ToolSearch {
     public struct Result: Equatable, Sendable {
         public var tool: Place?
         public var searched: [Place]
+        public var alsoHere: [Place]
 
-        public init(tool: Place?, searched: [Place]) {
+        public init(tool: Place?, searched: [Place], alsoHere: [Place] = []) {
             self.tool = tool
             self.searched = searched
+            self.alsoHere = alsoHere
+        }
+
+        public func checkingTheRest(_ isExecutable: (String) -> Bool) -> Result {
+            guard tool != nil else { return self }
+            return Result(tool: tool, searched: searched, alsoHere: searched.filter { $0 != tool && isExecutable($0.path) })
         }
     }
 

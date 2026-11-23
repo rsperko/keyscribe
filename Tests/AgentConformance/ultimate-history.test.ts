@@ -39,3 +39,22 @@ test("the recorded reply contains visible message text without thinking or provi
     { role: "ended", text: "", turn: "1" },
   ])
 })
+
+test("an entry's tool results and the app's own messages are not part of the reply or the take", async () => {
+  const messages = await ultimateMessages(async () => ({ entries: [
+    { id: 1, kind: "pi.user", input: true, model: [
+      { role: "user", content: "Say ready" },
+      { role: "custom", customType: "note", content: "a helper finished" },
+    ] },
+    { id: 2, kind: "pi.assistant", model: [
+      { role: "assistant", content: [{ type: "text", text: "Checking." }], stopReason: "toolUse" },
+      { role: "toolResult", content: [{ type: "text", text: "tool output" }] },
+      { role: "assistant", content: [{ type: "text", text: "ready" }], stopReason: "stop" },
+    ] },
+  ] }))
+  assert.deepEqual(messages, [
+    { role: "user", text: "Say ready", turn: "1" },
+    { role: "agent", text: "Checking.\nready", turn: "1" },
+    { role: "ended", text: "", turn: "1" },
+  ])
+})

@@ -2423,9 +2423,12 @@ struct AgentHubTests {
         #expect(hub.directory.conversations.map(\.id) == ["fake:f1"])
         fake.blocked = true
         fake.result = .found([])
+        let waits = RequestedWaits()
+        hub.sleep = { await waits.record($0); try await Task.sleep(for: $0) }
         let started = ContinuousClock.now
         await hub.rescan()
-        #expect(ContinuousClock.now - started < .seconds(10))
+        #expect(await waits.all == [.milliseconds(50)])
+        #expect(ContinuousClock.now - started < .seconds(30))
         #expect(hub.directory.conversations.map(\.id) == ["fake:f1"])
         #expect(hub.discoveryProblems == ["fake": "Fake\u{2019}s session list is not answering, so these are the sessions last seen."])
         fake.blocked = false
@@ -3279,4 +3282,9 @@ struct AgentHubTests {
         hub.disconnect("fake:f1")
         #expect(hub.readAloud.isEmpty && hub.readNextAloud.isEmpty)
     }
+}
+
+actor RequestedWaits {
+    private(set) var all: [Duration] = []
+    func record(_ wait: Duration) { all.append(wait) }
 }

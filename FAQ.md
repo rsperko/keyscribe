@@ -533,7 +533,7 @@ open in it now and future ones that use it; other folders are left alone. No fla
 own configuration is needed. A conversation that is already open picks the connector up when you run
 `/reload` in Pi or `/reload-plugins` in Claude Code, or restart it (omp has no reload command, so quit an open
 omp conversation and reopen it with `omp --resume`, which keeps the conversation); its row says so until it connects. The Pi connector needs Pi 1.4.0 or later, and the omp
-connector omp 18.22.2 or later.
+connector omp 18.22.2 or later, the oldest omp it has been checked against.
 
 If a conversation is not listed, choose **Check Again** below that list. KeyScribe recognizes an agent by the
 program or script it runs, so a wrapper script, a Nix-style wrapped binary, or another JavaScript runtime is
@@ -610,7 +610,8 @@ after it and sends the whole message, as if you had pressed Return, in Claude Co
 your typed text went with it. In Claude Code, if the box changed or the conversation left the front before
 KeyScribe could press Return, the joined message stays in the box for you to send. A conversation that is not in
 front of you never gets text you left in its box sent along: KeyScribe says its prompt box already has text and
-sends nothing. Nothing is joined when your message or the typed text starts with `/` or `!`.
+sends nothing, or, for an agent whose box it cannot see from behind, sends what you said on its own and leaves your
+text where it was. Nothing is joined when your message or the typed text starts with `/` or `!`.
 
 ### Can “open” select a conversation in kitty or WezTerm?
 

@@ -70,7 +70,7 @@ final class SpokenVoiceModel: ObservableObject {
     func makeSpeech(
         player: any AudioPlaying = WAVPlayer(), fallback: any SpeechSynthesizing = SystemSpeech(), attempts: SpokenAttempts? = nil,
         preview: Bool = false, details: @escaping @Sendable (Bool) -> [SpokenAttempt.Detail] = SpokenAttempts.environment,
-        reportsOutcome: Bool = true, sentenceAtATime: Bool = false
+        reportsOutcome: Bool = true, sentenceAtATime: Bool = false, synthesisLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit
     ) -> NaturalSpeech {
         let installer = installer
         let speech = NaturalSpeech(
@@ -96,7 +96,7 @@ final class SpokenVoiceModel: ObservableObject {
                 self.fallbackReason = shown
                 self.fallbackAttempt = shown == nil ? nil : attempt
                 self.fallbackEntry = nil
-            }, attempts: attempts, details: details, sentenceAtATime: sentenceAtATime)
+            }, synthesisLimit: synthesisLimit, attempts: attempts, details: details, sentenceAtATime: sentenceAtATime)
         speakers = speakers.filter { $0.speech != nil } + [WeakSpeech(speech: speech)]
         return speech
     }

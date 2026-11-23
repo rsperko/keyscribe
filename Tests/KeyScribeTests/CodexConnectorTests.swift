@@ -72,6 +72,15 @@ struct CodexConnectorTests {
         rig.codex.installedPath = rig.connector.pluginFolder(for: rig.home).path
     }
 
+    @Test(arguments: [("/opt/tools/bin/codex", true), ("/Applications/Codex.app/Contents/Resources/codex", false), ("/opt/tools/bin/missing", false)])
+    func theReportAndTheSearchJudgeACodexByTheSameTest(path: String, runs: Bool) throws {
+        let present: Set<String> = ["/opt/tools/bin/codex", "/Applications/Codex.app/Contents/Resources/codex"]
+        let tools = ToolEnvironment(home: "/Users/a", appEnvironment: ["PATH": "/opt/tools/bin"], shell: "/bin/zsh", isExecutable: { present.contains($0) })
+        let connector = CodexConnector(agentsDir: URL(fileURLWithPath: "/tmp/agents"), pluginName: "keyscribe", tools: tools)
+        #expect(connector.runs(tool: path) == runs)
+        #expect(CodexInstall.runs(path, in: tools) == runs)
+    }
+
     @Test func aCodexConversationCountsAsConnectedSinceItReportsThroughHooksRatherThanAConnection() async throws {
         let rig = try rig()
         let model = AgentsSettingsModel(

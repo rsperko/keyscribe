@@ -46,7 +46,12 @@ enum ConnectorCLI {
             succeeded = setup.state == .status(.notInstalled)
         }
         let enrolled = registry.setups?.setup(agent: agent, folder: chosen.path).map { $0.removing ? "removing" : "enrolled" } ?? "not enrolled"
-        return Outcome(code: succeeded ? 0 : 1, lines: ["\(agent)\t\(chosen.path)\t\(describe(setup.state))\t\(enrolled)"])
+        return Outcome(code: succeeded ? 0 : 1, lines: ["\(agent)\t\(chosen.path)\t\(describe(setup.state, copy: connector.copy))\t\(enrolled)"])
+    }
+
+    static func describe(_ state: AgentConnectorModel.State, copy: AgentConnectorCopy) -> String {
+        guard case .toolTooOld(let version) = state, case let advice = copy.toolTooOldAdvice(version), !advice.isEmpty else { return describe(state) }
+        return "\(describe(state)) (\(advice))"
     }
 
     static func describe(_ state: AgentConnectorModel.State) -> String {

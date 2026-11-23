@@ -877,6 +877,31 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.spokenReply == nil)
     }
 
+    @Test(arguments: [
+        ("check on keyscribe blue", "claude:s2"), ("check on this conversation", "claude:s1"), ("open session keyscribe blue", "claude:s2"),
+        ("rename this conversation to otter", "claude:s1"),
+    ])
+    func anAgentCommandThatSendsNothingNamesTheConversationItActedOn(said: String, conversation: String) async {
+        let rig = await rig(said, focused: "claude:s1", focus: Focus())
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let before = rig.controller.scriptedTakeMarks
+        await take(rig)
+        let after = rig.controller.scriptedTakeMarks
+        #expect(after.receipts == before.receipts)
+        #expect(after.acted == before.acted + 1)
+        #expect(after.actedOn?.conversation == conversation)
+        #expect(after.actedOn?.agent == "claude")
+        #expect(after.actedOn?.request == nil)
+    }
+
+    @Test func anOpenThatBroughtNothingForwardNamesNoConversation() async {
+        let rig = await rig("open session keyscribe blue", focused: "claude:s1", focus: Focus(.none))
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let before = rig.controller.scriptedTakeMarks
+        await take(rig)
+        #expect(rig.controller.scriptedTakeMarks.acted == before.acted)
+    }
+
     @Test func aReplyToATakeHistoryLeftOutIsNotKeptAnywhere() async {
         var excluded = agentMode()
         excluded.excludeFromHistory = true

@@ -772,7 +772,7 @@ struct DictationPipelineWiringTests {
     }
 
     @Test func theTriggerDuringARewriteDoesNothingBeforeInsertWithoutRewritingIsOffered() async {
-        let rig = rewriteRig()
+        let rig = rewriteRig(escapeDelay: .seconds(3600))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await startRewrite(rig)
         rig.controller.handleStart()

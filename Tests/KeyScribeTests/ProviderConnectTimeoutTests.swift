@@ -66,22 +66,39 @@ private func post(to url: URL) -> URLRequest {
     return request
 }
 
+private actor ConnectWaits {
+    private(set) var all: [Duration] = []
+    func record(_ wait: Duration) { all.append(wait) }
+}
+
 @Suite(.serialized)
 struct ProviderConnectTimeoutTests {
-    @Test func aServiceThatNeverConnectsGivesUpAtTheConnectTimeout() async {
+    @Test func aServiceThatNeverConnectsGivesUpAtTheConfiguredConnectTimeout() async {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SilentStubProtocol.self]
-        let t = transport(session: URLSession(configuration: config), connectTimeout: .milliseconds(300))
-        let clock = ContinuousClock()
-        let start = clock.now
+        var t = transport(session: URLSession(configuration: config), connectTimeout: .milliseconds(300))
+        let waits = ConnectWaits()
+        t.sleep = { await waits.record($0) }
+        let started = ContinuousClock.now
         var caught: Error?
         do { _ = try await t.send(post(to: URL(string: "http://192.0.2.1/v1/chat/completions")!)) } catch { caught = error }
-        let elapsed = clock.now - start
         guard case .unreachable? = caught as? ProviderTransportError else {
             Issue.record("expected unreachable, got \(String(describing: caught))")
             return
         }
-        #expect(elapsed < .seconds(2))
+        #expect(await waits.all == [.milliseconds(300)])
+        #expect(ContinuousClock.now - started < .seconds(30))
+    }
+
+    @Test func givingUpBeforeTheSessionHasMadeItsTaskStillCancelsThatTask() {
+        let session = URLSession(configuration: .ephemeral)
+        let task = session.dataTask(with: URL(string: "http://192.0.2.1/")!)
+        let watch = ConnectWatch(task.originalRequest?.url)
+        watch.giveUpIfNotConnected()
+        watch.urlSession(session, didCreateTask: task)
+        #expect(task.state == .canceling || task.state == .completed)
+        #expect(watch.gaveUp)
+        task.cancel()
     }
 
     @Test func aConnectedServiceThatAnswersSlowlyIsNotCutOff() async throws {

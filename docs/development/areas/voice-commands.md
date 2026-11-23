@@ -157,6 +157,12 @@ every rule above applies to it, with these sharpenings:
   (`HistoryEntry.spokenReply`), never in `heard`, `transformed` or `result`, so nothing that learns from the user's
   speech reads it. It joins the dictation that asked for it only when that dictation was kept, and otherwise stands
   alone only under the Agent mode's History choice. It is still never logged.
+- **The log says what became of each reply, never what it said.** `SpokenResultOutput` notes, as public `agents` log
+  lines, each reply queued, read aloud or shown, and each one not read with its reason (`Unread.reason`, the same
+  reasons History gives as `Unread.line`), naming only the request the take sent and the agent's kind, which the hub
+  passes in. Conversation names, handles and reply text stay out of every line, so nothing private has to be hidden
+  for the line to be read. Notices and answers to a check are not replies and are not noted, and a reply that
+  arrives while reading replies is off never enters the queue, so it is not noted either.
 - **Text only changes delivery, never the queue.** With `text_only` on, `SpokenResultOutput.play` shows an item instead
   of speaking it and holds it as the playing item until the panel reports it closed (`dismissed()`), so relevance,
   order, supersession, the in-front skip and stop all stay the code paths a spoken reply takes. A shown item waits
@@ -399,7 +405,10 @@ every rule above applies to it, with these sharpenings:
   2026-11-18). Anything else is Pi: omp is never inferred from something missing, and a name both agents' packages
   export never decides it. omp's adapter reads its version from the package omp puts on the API (`pi.pi.VERSION`)
   and reports an empty one when that is missing. A fix in the core is a fix for both: run both suites
-  (`make test-pi-connector`, `make test-omp-connector`). omp's adapter rests on behavior observed on omp 18.22.2
+  (`make test-pi-connector`, `make test-omp-connector`). omp's floor (`OmpCLI.minimumVersion`) is the oldest omp the connector has run
+  against, and the copy says so when it reports omp too old. Older packages expose the same events and API members
+  back to omp 18.20.1, the first with `session_clear` (packages compared, not run, 2026-11-21); lower the floor only
+  after `make test-omp-connector` and the live omp run pass against that version. omp's adapter rests on behavior observed on omp 18.22.2
   (2026-11-18), not on its docs: an idle conversation is never sent a follow-up (omp holds it until some later
   run); a steer is confirmed when its send resolves, which is when omp queues it (omp gives an extension's message no
   `input` event; an idle send resolves only when its run ends); while a tool approval or the `ask` tool is open, a

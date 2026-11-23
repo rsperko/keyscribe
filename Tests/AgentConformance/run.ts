@@ -13,7 +13,9 @@ import { UltimateDriver } from "./lib/ultimate.ts"
 import { failureBundle } from "./lib/artifacts.ts"
 import { clipboard, withClipboard } from "./lib/clipboard.ts"
 import { parseRunOptions } from "./lib/options.ts"
-import { until } from "./lib/util.ts"
+import { homeChanges, snapshotHome } from "./lib/home-audit.ts"
+import { inputUnseen, voiceOverBlocks, voiceOverOn } from "./lib/preflight.ts"
+import { shutDown, until } from "./lib/util.ts"
 
 const drivers: Record<string, (name: string) => AgentDriver> = {
   claude: (name) => new ClaudeDriver(name),
@@ -42,6 +44,14 @@ if (agentKind === "all") {
 }
 const { only, failFast, repeat, keep, replyWait } = options
 
+function auditHome(): ReturnType<typeof snapshotHome> | string {
+  try { return snapshotHome() } catch (error) { return (error as Error).message }
+}
+const homeBefore = auditHome()
+if (typeof homeBefore === "string") {
+  console.log(`SETUP FAILED\n${homeBefore}`)
+  process.exit(1)
+}
 const binary = Instance.locate()
 const instance = new Instance(binary)
 const agent = drivers[agentKind]("kestrel")
@@ -53,8 +63,7 @@ const results: { id: string; title: string; ok: boolean; why?: string; seconds: 
 let cleaning: Promise<void> | undefined
 function cleanup(preserve: boolean) {
   return cleaning ??= (async () => {
-    try { await agent.stop(keep) }
-    finally { await instance.dispose(preserve) }
+    await shutDown(() => agent.stop(keep), (kept) => instance.dispose(kept), preserve)
   })()
 }
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
@@ -77,7 +86,7 @@ async function attempt(exercise: Exercise): Promise<boolean> {
     results.push({ id: exercise.id, title: exercise.title, ok: false, why: (error as Error).message, seconds: (Date.now() - started) / 1000 })
     await failureBundle(instance.folder, `${agentKind}/${exercise.id}`, error, {
       "agent-history": () => agent.messages(),
-      "discovery": () => instance.cli(["--discovery-report"], 15),
+      "discovery": () => instance.cli(["--discovery-report", agent.kind, "--folder", agent.folder], 15),
       ...(agent.diagnostics?.() ?? {}),
     }).catch(failure => console.error(`Could not capture failure evidence: ${failure}`))
   }
@@ -88,10 +97,17 @@ async function attempt(exercise: Exercise): Promise<boolean> {
 }
 
 let setupFailure: string | undefined
+let stopFailure: string | undefined
 try {
   console.log(`agent-conformance: ${agentKind}, KeyScribe ${binary}, instance ${instance.folder}`)
-  await agent.setUp()
+  if (voiceOverOn()) throw new Error(voiceOverBlocks)
   await instance.prepare()
+  await instance.launch()
+  const probe = instance.take("check on all")
+  if (probe.observesInput === false) throw new Error(inputUnseen(binary))
+  if (probe.observesInput === undefined) throw new Error(`the test instance could not answer whether it sees input: ${probe.problem ?? JSON.stringify(probe)}`)
+  await instance.quit()
+  await agent.setUp()
   const installed = instance.connector("install", agent.kind, agent.folder, agent.tool)
   console.log(`install: ${installed.stdout.trim() || installed.stderr.trim()}`)
   await instance.launch()
@@ -115,10 +131,16 @@ try {
   }).catch(failure => console.error(`Could not capture setup evidence: ${failure}`))
 } finally {
   const preserve = keep || !!setupFailure || results.some(result => !result.ok)
-  await cleanup(preserve)
-  if (preserve) console.log(`kept: ${instance.folder}${keep ? `, ${agent.folder}` : ""}`)
+  await cleanup(preserve).catch((error) => {
+    stopFailure = (error as Error).message
+    console.log(`FAIL the run could not stop the agent: ${stopFailure}`)
+  })
+  if (preserve || stopFailure) console.log(`kept: ${instance.folder}${keep || stopFailure ? `, ${agent.folder}` : ""}`)
 }
 
+const homeAfter = auditHome()
+const touched = typeof homeAfter === "string" ? [homeAfter] : homeChanges(homeBefore, homeAfter)
+if (touched.length) console.log(`FAIL the run changed the user's own setup outside its scratch folders:\n     ${touched.join("\n     ")}`)
 const failed = results.filter((result) => !result.ok).length
-console.log(`agent-conformance: ${results.length - failed} passed, ${failed} failed${setupFailure ? ", setup failed" : ""}`)
-process.exit(setupFailure || failed ? 1 : 0)
+console.log(`agent-conformance: ${results.length - failed} passed, ${failed} failed${setupFailure ? ", setup failed" : ""}${stopFailure ? ", agent not stopped" : ""}${touched.length ? ", user's setup changed" : ""}`)
+process.exit(setupFailure || stopFailure || failed || touched.length ? 1 : 0)

@@ -61,7 +61,8 @@ public struct DiscoveryReport: Equatable, Sendable {
             }
             lines.append("Looked in:")
             for place in search.searched {
-                lines.append("  \(place.path) (\(place.source.label)): \(place == search.tool ? "found" : "not found")")
+                let seen = place == search.tool ? "found, in use" : search.alsoHere.contains(place) ? "also here" : "not found"
+                lines.append("  \(place.path) (\(place.source.label)): \(seen)")
             }
             lines.append("")
         }

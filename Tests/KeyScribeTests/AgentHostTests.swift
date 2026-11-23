@@ -3566,11 +3566,16 @@ struct AgentHostTests {
         let hub = makeHub(host)
         await hub.rescan()
         host.hangs = true
+        let waits = RequestedWaits()
+        hub.sleep = { await waits.record($0); try await Task.sleep(for: $0) }
         let started = ContinuousClock.now
         #expect(await hub.deliver("fix the test", to: Self.id("t1")) == .uncertain("docs"))
         #expect(await hub.open(Self.id("t1")) == .refused("Example didn\u{2019}t answer in time."))
         #expect(await hub.sessionInFront() == nil)
-        #expect(ContinuousClock.now - started < .seconds(10))
+        let requested = await waits.all
+        #expect(requested.count >= 3)
+        #expect(Set(requested) == [.milliseconds(50)])
+        #expect(ContinuousClock.now - started < .seconds(30))
         #expect(host.delivered.count == 1)
     }
 

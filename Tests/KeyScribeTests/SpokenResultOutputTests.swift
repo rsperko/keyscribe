@@ -42,9 +42,10 @@ struct SpokenResultOutputTests {
         var isSpeaking = false
         var spoken: [(text: String, voice: String?)] = []
         var stops = 0
+        var refuses = false
         func speak(_ text: String, voice: String?) {
             spoken.append((text, voice))
-            isSpeaking = true
+            isSpeaking = !refuses
         }
         func stop() {
             stops += 1
@@ -80,14 +81,14 @@ struct SpokenResultOutputTests {
         settings: SpokenResultSettings = SpokenResultSettings(enabled: true, connection: "omlx"), llm: FakeLLM = FakeLLM(), permits: Bool = true,
         silencer: SpeechSilencer = SpeechSilencer(), deadlineSeconds: Double = 30, describeDeadlineSeconds: Double = 30,
         inFront: @escaping @MainActor (String) async -> Bool = { _ in false }, duck: @escaping (Bool) -> Void = { _ in },
-        duckGrace: Duration = .seconds(60)
+        duckGrace: Duration = .seconds(60), note: @escaping (String) -> Void = { _ in }
     ) -> (SpokenResultOutput, FakeSpeech, FakeLLM) {
         let speech = FakeSpeech()
         let connection = connection
         let output = SpokenResultOutput(
             client: llm, permits: { _ in permits }, speech: speech, silencer: silencer, settings: { settings },
             connection: { $0 == connection.id ? connection : nil }, deadlineSeconds: deadlineSeconds,
-            describeDeadlineSeconds: describeDeadlineSeconds, inFront: inFront, duck: duck, duckGrace: duckGrace)
+            describeDeadlineSeconds: describeDeadlineSeconds, inFront: inFront, duck: duck, duckGrace: duckGrace, note: note)
         return (output, speech, llm)
     }
 
@@ -190,6 +191,7 @@ struct SpokenResultOutputTests {
         case .disconnected: "disconnected"
         case .stopped: "stopped"
         case .notStarted: "not started"
+        case .noText: "no text"
         }
     }
 
@@ -308,6 +310,58 @@ struct SpokenResultOutputTests {
         return { heard }
     }
 
+    @Test func theLogSaysWhichTakesReplyWasReadHeldOrDroppedAndWhyWithoutItsNameOrText() async {
+        var lines: [String] = []
+        let (output, speech, _) = make(inFront: { $0 == "pi:front" }, note: { lines.append($0) })
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Secret result.", origin: "r1", agent: "pi")
+        await settled()
+        speech.start()
+        output.finished(conversation: "claude:s2", handle: "docs", answer: "Second.", origin: "r2", agent: "claude")
+        await settled()
+        output.finished(conversation: "pi:front", handle: "web", answer: "Shown already.", origin: "r3", agent: "pi")
+        output.finished(conversation: "nocolon", handle: "cli", answer: "   ", origin: "r4")
+        await settled()
+        output.stop()
+        await settled()
+        #expect(lines == [
+            "reply to request r1 from pi queued to be read",
+            "reply to request r1 from pi read aloud",
+            "reply to request r2 from claude queued to be read",
+            "reply to request r4 from an agent not read aloud: it had no text",
+            "reply to request r3 from pi not read aloud: its conversation was in front when it finished",
+            "reply to request r2 from claude not read aloud: reading replies was stopped",
+        ])
+        #expect(!lines.contains { $0.contains("api") || $0.contains("docs") || $0.contains("Secret") || $0.contains("nocolon") })
+    }
+
+    @Test func aReplyWithNoTextOneTheVoiceNeverStartedAndOneLeftWhenReadingWasTurnedOffAreEachReportedForTheirTake() async {
+        var unread: [String] = []
+        let (empty, _, _) = make()
+        empty.onUnread = { unread.append("\($1) \($0.reason)") }
+        empty.finished(conversation: "pi:s1", handle: "api", answer: "  ", origin: "a")
+        await settled()
+        let (refused, speech, _) = make()
+        speech.refuses = true
+        refused.onUnread = { unread.append("\($1) \($0.reason)") }
+        refused.finished(conversation: "pi:s1", handle: "api", answer: "Done.", origin: "b")
+        await settled()
+        let box = SettingsBox(SpokenResultSettings(enabled: true, connection: "omlx"))
+        let playing = FakeSpeech()
+        let switched = SpokenResultOutput(
+            client: FakeLLM(), permits: { _ in true }, speech: playing, silencer: SpeechSilencer(), settings: { box.value },
+            connection: { _ in nil })
+        switched.onUnread = { unread.append("\($1) \($0.reason)") }
+        switched.finished(conversation: "pi:s0", handle: "cli", answer: "Playing.")
+        await settled()
+        switched.finished(conversation: "pi:s1", handle: "api", answer: "Queued.", origin: "c")
+        await settled()
+        box.value.enabled = false
+        playing.start()
+        playing.finish()
+        await settled()
+        #expect(unread == ["a it had no text", "b it did not start playing", "c reading replies was stopped"])
+    }
+
     @Test func aReplyIsReportedAsHeardOnceItIsAudibleWithTheTakeThatAskedForIt() async {
         let (output, speech, _) = make()
         let heard = listening(output)
@@ -318,6 +372,45 @@ struct SpokenResultOutputTests {
         #expect(heard() == [.init(conversation: "pi:s1", name: "api", text: "api: Done.", connection: nil, origin: "r1")])
         speech.finish()
         #expect(heard().count == 1)
+    }
+
+    @Test func theOutputSaysItIsBusyUntilEachReplyHasAnOutcomeAndAgainWhenALaterOneArrives() async {
+        let (output, speech, _) = make()
+        var busy: [Bool] = []
+        output.onBusyChange = { busy.append($0) }
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", origin: "r1")
+        await settled()
+        #expect(busy == [true])
+        speech.start()
+        await settled()
+        #expect(busy == [true, false])
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done again.", origin: "r1")
+        await settled()
+        #expect(busy == [true, false, true])
+        speech.finish()
+        await settled()
+        speech.start()
+        await settled()
+        #expect(busy == [true, false, true, false])
+    }
+
+    @Test func aReplyShownAsTextLeavesTheOutputQuietWhileItsPanelIsStillShowing() async {
+        let (output, _, _) = make(settings: SpokenResultSettings(enabled: true, connection: "omlx", textOnly: true))
+        var busy: [Bool] = []
+        output.onBusyChange = { busy.append($0) }
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", origin: "r1")
+        await settled()
+        #expect(busy == [true, false])
+        #expect(output.isIdle == false)
+    }
+
+    @Test func aReplyHeldBecauseItsConversationIsInFrontEndsBusyOnceItIsReported() async {
+        let (output, _, _) = make(inFront: { _ in true })
+        var busy: [Bool] = []
+        output.onBusyChange = { busy.append($0) }
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", origin: "r1")
+        await settled()
+        #expect(busy == [true, false])
     }
 
     @Test func aReplyIsReportedWithWhatItAnswered() async {

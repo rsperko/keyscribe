@@ -22,6 +22,28 @@ and Ultimate's environment variables. Set `KEYSCRIBE_SCREEN_NOTICE_CMD` if you u
 notice script (`<cmd> on "<reason>" <minutes>` / `<cmd> off`). It moves foreground focus and uses the agents'
 models. Missing prerequisites fail the required check; they do not produce a passing gate.
 
+The test instance must see key presses and clicks to confirm the conversation in front: give the build the run uses
+(`KEYSCRIBE_APP`, or the one under `.verification/artifacts/`) Accessibility, and Automation for Terminal, once. It only
+listens and never takes your input. A run whose instance cannot see input stops before its first exercise and names
+the app to allow, rather than failing every exercise that speaks to the conversation in front.
+
+A run also stops before its first exercise while VoiceOver is on. The instance shows each reply as text, and under
+VoiceOver a reply panel stays open until someone closes it, so the next reply would wait behind it and the exercise
+judging that reply would fail. Keep the pointer off the reply panel during a run for the same reason.
+
+A test instance (one started with `--no-input`) records, for each request a take sent, whether its reply was read or
+why not, and each time it has nothing left to read (`scripted-reads.jsonl` in its support folder, request ids and
+reasons only). The exercises count reads by request rather than by what a reply said, and look a take's History entry
+up by the id its result names rather than by its words or its time. An exercise judges a reply once the instance has
+gone quiet after it and stayed quiet for `settleSeconds` (1 s by default). Waiting for quiet covers a reply still
+being summarized or spoken, however long that takes; the extra second covers only a second turn-end event that the
+connector sends with the first one and that arrives just after the first was handled.
+
+A run leaves your own setup as it found it. It records the agents' configuration files in your home folder (the list
+is `watchedInHome` in `lib/home-audit.ts`) before it starts and fails afterwards, naming each file it changed, added
+or removed. Conversation logs and histories are not compared, since you may be using your agents meanwhile; a linked
+extension is compared by where its link points, and `.git` and `node_modules` folders by their presence only.
+
 The runner limits concurrent jobs (`JOBS=2` by default), serializes SwiftPM/build work and screen use,
 and reports progress without another process polling its logs. It refuses a second verification run in
 the same checkout or a Swift build already active there. A silence deadline captures process diagnostics
@@ -89,30 +111,44 @@ agent in a scratch project folder called `kestrel`, which is the name the exerci
 
 | Agent | Login it uses | Choose the model or command |
 |---|---|---|
-| Claude Code | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY`, since a new configuration folder has no login | `CLAUDE_MODEL` (default `haiku`), `CLAUDE_BIN` |
+| Claude Code | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY`, or the `apiKeyHelper` and `env` of `~/.claude/settings.json` (or `CLAUDE_LOGIN_HOME`), since a new configuration folder has no login | `CLAUDE_MODEL` (default `haiku`), `CLAUDE_BIN` |
 | Pi | `auth.json` and `models.json` copied from `~/.pi/agent` (or `PI_LOGIN_HOME`), plus your default model | `PI_MODEL`, `PI_BIN` |
-| omp | `config.yml`, `models.yml` and a backup of `agent.db` from `~/.omp/agent` (or `PI_LOGIN_HOME`) | `OMP_BIN` |
-| Codex | `auth.json` copied from `~/.codex` (or `CODEX_AUTH_HOME`) | `CODEX_MODEL`, `CODEX_BIN` |
+| omp | `config.yml`, `models.yml` and a backup of `agent.db` from `~/.omp/agent` (or `OMP_LOGIN_HOME`) | `OMP_BIN`, `SQLITE_BIN` |
+| Codex | `auth.json` copied from `~/.codex` (or `CODEX_AUTH_HOME`), and the provider its `config.toml` chooses (`model_provider` and that provider's table, read with Python 3.11 or later, `PYTHON_BIN`), so a provider with its own auth command works without `auth.json`. KeyScribe reaches Codex only through its shared app server, so a Codex that starts none fails setup saying so | `CODEX_MODEL`, `CODEX_BIN` |
 | bb | a second copy of `bb.app` (`BB_APP`), cloned into the scratch folder so it runs from a location of its own as a separate copy of bb does, and started on a scratch data folder, its own ports and its own Electron profile (bb runs one copy per profile, so without one it quits at once beside yours). The driver marks bb's first-run setup guide done, as for a scratch Ultimate home, since the guide covers the window. The run stops it with SIGKILL, never a quit, and keeps killing every process whose arguments or environment name its scratch folder until none is left, because a packaged bb installs a downloaded update into its app when it quits, and that app is yours; its threads run on Codex with a copy of your Codex login (`CODEX_AUTH_HOME`) in a scratch `CODEX_HOME`, and its Pi folder is scratch too, so nothing the scratch copy runs is recorded in your own Codex or omp history | `BB_MODEL` (default `gpt-6-luna`), `BB_APP` |
 | Ultimate | your Pi login, which Ultimate shares | `ULTIMATE_MODEL`, `ULTIMATE_BIN` |
 
-A terminal agent runs in a private tmux server, and the driver answers the screens a fresh setup shows (trust this
-folder, review hooks, an update notice) the way a person would.
+A terminal agent runs in a private tmux server (`TMUX_BIN` names tmux), started without your `~/.tmux.conf`, and the
+driver answers the screens a fresh setup shows (trust this folder, review hooks, an update notice) the way a person
+would. A screen it does not know fails setup with that screen in the failure bundle. If the agent drops the first
+Return while it loads, the driver presses Return again while the words are still in its prompt.
 
-A driver whose agent has an app window of its own offers `window`: show its conversation there, report whether a
-focused window shows it and what its message box holds, and add text to that box. The exercises for the conversation
-in front, open and draft joining run only against such a driver, move focus between its window and another app's
-window (so the run needs one open), and never type into a window. bb's driver installs a test-only plugin,
+A driver offers `window` when its conversation can be put in a window of its own: show it there, report whether a
+focused window shows it and what its message box holds, and add text to that box. bb's is its app window; a terminal
+agent's is a Terminal window attached to its private tmux server, found by a title unique to each time it is shown
+and brought forward through Terminal's own scripting (`focus`, since Terminal's windows reach the test instance
+without their titles), with the draft read from the line the cursor is on. Stopping a terminal agent waits for its
+processes to exit before its scratch folder is removed, so nothing it writes on the way out is left behind; one that
+ignores the hangup is killed, and one still running after that fails the run and keeps its scratch folder. Ultimate's is a Chrome app window on a scratch profile
+(`CHROME_BIN`), read and filled through Chrome's debugging port. The exercises for the conversation in front, open,
+go to and draft joining run only against such a driver, move focus between its window and another app's window (so
+the run needs one open), and never type into a window: a draft goes in through tmux or the app's own API. Only a
+window its app can open again on its own (`reopens`, bb) runs the exercise for opening with no window open. A window
+also declares what its agent does with a take named to it while it is behind and its box holds a draft
+(`takeBehindDraft`): keeps it, saying so, or sends it alone. D10 fails when the agent does the other. bb's driver installs a test-only plugin,
 `bb-window/`, into its scratch copy of bb for this: `bb thread open` shows the thread, and the plugin answers through
 `bb plugin rpc call` from inside bb's own window, using bb's composer API to fill the box. It is never installed
 anywhere else. A driver whose agent's app can add its own note to a running turn (bb's notice that a child thread
 finished) offers `noteFromHost`, which R7 uses. One whose app can be
 made unreachable offers `server` to stop and start it (bb: its server is killed, then the scratch copy is started
-again on the same folder and ports). bb's scratch threads run on a small model at a low reasoning level, since every exercise asks
+again on the same folder and ports; Ultimate: its server is stopped and started again on the same port and
+project). One whose running turn the user can stop offers `interrupt` (a terminal agent: Escape). bb's scratch threads run on a small model at a low reasoning level, since every exercise asks
 for one short reply.
 
 Exercises that copy something set the clipboard through the context (`clipboard.set`) inside `clipboard.keep`, which
-saves your clipboard first and restores it afterwards, through `clipboard.swift`.
+saves your clipboard first and restores it afterwards, through `clipboard.swift`. The `mark` it hands the exercise
+records the clipboard at that moment and checks later that a take put it back exactly; its copy is removed with the
+saved one, even when the exercise fails.
 
 ## Ultimate page conformance
 
@@ -137,5 +173,5 @@ Add it to `exercises.ts` with an id from its family (D delivery, I images, R rep
 P discovery, C connection, L install, S safety). Assert what the agent recorded. An exercise for something only some
 agents' conversations have, such as an address of their own in their app (a driver's `addresses`), sets `applies`
 and reports N/A for the others; anything a user could ask of every agent still runs against every agent. An exercise
-that needs a driver capability (`window`, `noteFromHost`, `server`) sets `applies` the same way, and `exercises.test.ts` gives
+that needs a driver capability (`window`, `noteFromHost`, `server`, `interrupt`) sets `applies` the same way, and `exercises.test.ts` gives
 its fake agent every capability, so each exercise's own logic is checked without an agent.

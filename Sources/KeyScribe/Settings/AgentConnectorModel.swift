@@ -57,6 +57,7 @@ protocol AgentConnector: AnyObject {
     var folderVariable: String? { get }
     var keepsConnection: Bool { get }
     func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result?
+    func runs(tool path: String) -> Bool
     func checkTool(_ tool: String) async -> ToolCheck?
     func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State
     func install(tool: String, target: ConnectorTarget) async throws
@@ -74,6 +75,7 @@ extension AgentConnector {
     var toolProgram: String? { nil }
     var folderVariable: String? { nil }
     var keepsConnection: Bool { true }
+    func runs(tool path: String) -> Bool { FileManager.default.isExecutableFile(atPath: path) }
     func checkTool(_ tool: String) async -> ToolCheck? { nil }
     func undoesOnUninstall(in target: ConnectorTarget) -> Bool { false }
     func uninstall(tool: String, target: ConnectorTarget, undoing: Bool) async throws { try await uninstall(tool: tool, target: target) }
@@ -201,7 +203,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
     }
 
     func details(folders: [DiscoveryReport.Folder]) async -> String {
-        let found = search ?? connector.findTool(in: folder, chosen: chosenTool)
+        let found = (search ?? connector.findTool(in: folder, chosen: chosenTool))?.checkingTheRest { [connector] in connector.runs(tool: $0) }
         var check: ToolCheck?
         if case .toolNotWorking(let failed) = state { check = failed }
         else if let tool = found?.tool?.path { check = await connector.checkTool(tool) }

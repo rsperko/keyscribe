@@ -17,6 +17,12 @@ case "restore":
         for (type, data) in values { item.setData(data, forType: NSPasteboard.PasteboardType(type)) }
         return item
     })
+case "same":
+    let saved = try PropertyListDecoder().decode([[String: Data]].self, from: Data(contentsOf: URL(fileURLWithPath: args[2])))
+    let now = (board.pasteboardItems ?? []).map { item in
+        Dictionary(uniqueKeysWithValues: item.types.compactMap { type in item.data(forType: type).map { (type.rawValue, $0) } })
+    }
+    exit(now == saved ? 0 : 3)
 case "text":
     board.clearContents()
     board.setString(args[2], forType: .string)

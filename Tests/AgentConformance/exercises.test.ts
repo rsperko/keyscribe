@@ -1,12 +1,20 @@
 import assert from "node:assert/strict"
-import { writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { test } from "node:test"
 import { exercises, type Context } from "./exercises.ts"
 import type { AgentDriver, Message } from "./lib/driver.ts"
 import type { Instance, TakeResult } from "./lib/instance.ts"
 import { sha256 } from "./lib/util.ts"
 
-function fakeContext(options: { turns?: boolean; cue?: string; sentWhileDown?: boolean; endsBeforeSteering?: string; comments?: boolean } = {}): Context & { silence: () => void } {
+const project = mkdtempSync(join(tmpdir(), "ks-fake-project-"))
+process.on("exit", () => rmSync(project, { recursive: true, force: true }))
+
+function fakeContext(options: {
+  turns?: boolean; cue?: string; sentWhileDown?: boolean; endsBeforeSteering?: string; comments?: boolean; doubted?: boolean
+  readTwice?: boolean; clipboardChanged?: boolean; historyLags?: boolean; hint?: string; unlisted?: boolean; keepsBehind?: boolean; declaresBehind?: "kept" | "sent"
+} = {}): Context & { silence: () => void } {
   const messages: Message[] = []
   const records: any[] = []
   let turns = 0
@@ -14,16 +22,54 @@ function fakeContext(options: { turns?: boolean; cue?: string; sentWhileDown?: b
   let shown = false
   let front = false
   let draft = ""
+  const sandboxed = (path: string) => { if (!path.startsWith(`${project}/`)) throw new Error(`the agent may write only inside its project, not ${path}`); writeFileSync(path, "") }
   let noting = false
   let clip = ""
   let down = false
+  let running = true
   let busyTurn: string | undefined
+  const ledger: { request?: string; read?: boolean; reason?: string; quiet?: boolean }[] = []
+  const late: string[] = []
+  let entries = 0
+  const settle = () => {
+    for (const entry of records.filter((candidate) => candidate.unsettled)) {
+      delete entry.unsettled
+      if (front) {
+        entry.steps = [{ text: "Not read aloud: kestrel was in front when it finished" }]
+        ledger.push({ request: entry.request, read: false, reason: "its conversation was in front when it finished" }, { quiet: true })
+      } else {
+        entry.spoken_reply = { text: `kestrel${options.cue ?? ""}: ok` }
+        ledger.push({ request: entry.request, read: true }, { quiet: true })
+        if (options.readTwice) late.push(entry.request)
+      }
+      if (options.doubted) entry.summary = "May not have reached kestrel: check its terminal"
+    }
+    return records.filter((entry) => !(entry.lagging-- > 0))
+  }
+  const remember = (said: string, chosen: string, request?: string) => {
+    const timestamp = new Date().toISOString()
+    if (options.historyLags) {
+      records.push({ id: `entry${++entries}`, heard: said, timestamp, facts: [{ label: "Chosen by", value: "Its name" }],
+        steps: [{ text: "Not read aloud: something newer from kestrel replaced it" }], spoken_reply: { text: "kestrel: an earlier round" } })
+    }
+    const id = `entry${++entries}`
+    records.push({ id, heard: said, timestamp, facts: [{ label: "Chosen by", value: chosen }], unsettled: !!request, request,
+      lagging: options.historyLags ? 3 : 0 })
+    return id
+  }
   const answer = (said: string, rawBody: string, chosen: string): TakeResult => {
     const body = rawBody.replace("insert clipboard contents", clip)
     if (down) return options.sentWhileDown ? { id: "t", ok: true, receiptKind: "sent", conversation: "fake:1" } : { id: "t", ok: false }
+    const stoppable = body.match(/touch (\S+); sleep/)
+    if (stoppable) {
+      sandboxed(stoppable[1])
+      busyTurn = `turn${++turns}`
+      messages.push({ role: "user", text: body, turn: busyTurn })
+      return { id: "t", ok: true, receiptKind: "sent", conversation: "fake:1", history: remember(said, chosen) }
+    }
     const gated = body.match(/touch (\S+); .*-f (\S+) \]/)
     if (gated) {
-      writeFileSync(gated[1], "")
+      sandboxed(gated[1])
       busyTurn = options.turns === false ? undefined : `turn${++turns}`
       messages.push({ role: "user", text: body, turn: busyTurn })
       if (options.comments) messages.push({ role: "agent", text: "I'll run that command now.", turn: busyTurn })
@@ -32,7 +78,7 @@ function fakeContext(options: { turns?: boolean; cue?: string; sentWhileDown?: b
         messages.push({ role: "ended", text: "", turn: busyTurn })
         busyTurn = undefined
       }
-      return { id: "t", ok: true, receiptKind: "sent", conversation: "fake:1" }
+      return { id: "t", ok: true, receiptKind: "sent", conversation: "fake:1", history: remember(said, chosen) }
     }
     const turn = busyTurn ?? (options.turns === false ? undefined : `turn${++turns}`)
     busyTurn = undefined
@@ -40,50 +86,86 @@ function fakeContext(options: { turns?: boolean; cue?: string; sentWhileDown?: b
     if (noting) messages.push({ role: "user", text: "[app] a helper finished", turn, mark: "system" })
     noting = false
     if (answering) messages.push({ role: "agent", text: "ok", turn }, { role: "ended", text: "", turn })
-    records.push({ heard: said, facts: [{ label: "Chosen by", value: chosen }],
-      ...(front ? { steps: [{ text: "Not read aloud: kestrel was in front when it finished" }] } : { spoken_reply: { text: `kestrel${options.cue ?? ""}: ok` } }) })
-    return { id: "t", ok: true, receiptKind: "sent", conversation: "fake:1", request: `request${++turns}`,
+    const request = `request${++turns}`
+    const history = remember(said, chosen, request)
+    return { id: "t", ok: true, receiptKind: "sent", conversation: "fake:1", request, history,
       reply: { kind: "answer", length: 2, sha256: sha256("ok") } }
   }
   const agent = {
-    kind: "fake", name: "kestrel", folder: "/fake", tool: undefined, conversation: "fake:1",
+    kind: "fake", name: "kestrel", folder: "/fake", project, tool: undefined, conversation: "fake:1",
     addresses: { said: "fake 1", absent: "fake 9001" },
     owns: (conversation: string | undefined) => conversation === "fake:1",
     idle: async () => {},
     messages: async () => [...messages],
     window: {
-      pids: () => [7],
+      owns: (window: { spec: string }) => !options.unlisted && window.spec.startsWith("7:"),
+      ...(options.unlisted ? { app: "dev.fake", focus: async () => { shown = true; front = true } } : {}),
+      reopens: true,
+      takeBehindDraft: options.declaresBehind ?? (options.keepsBehind ? "kept" : "sent"),
       show: async () => { shown = true },
       look: async () => ({ thread: shown, focused: shown && front, draft }),
       fill: async (text: string) => { draft += text },
       close: async () => { shown = false; front = false },
     },
     noteFromHost: async () => { noting = true },
+    interrupt: async () => {
+      messages.push({ role: "ended", text: "", turn: busyTurn })
+      busyTurn = undefined
+    },
     server: { stop: async () => { down = true }, start: async () => { down = false } },
   } as unknown as AgentDriver
   const instance = {
     windows: () => [{ app: "dev.fake", spec: "7:cg:1", title: "" }, { app: "com.example.other", spec: "8:cg:2", title: "" }],
     focus: (spec: string) => { front = spec.startsWith("7:") },
-    record: (text: string) => records.filter(entry => entry.heard === text || entry.heard.endsWith(text)).at(-1),
+    records: () => settle(),
+    ledger: () => {
+      const unsettled = records.some((entry) => entry.unsettled)
+      settle()
+      if (!unsettled) for (const request of late.splice(0)) ledger.push({ request, read: true }, { quiet: true })
+      return [...ledger]
+    },
+    entry: (id: string) => settle().filter((entry) => entry.id === id).at(-1),
+    quit: async () => { running = false },
+    launch: async () => { running = true },
+    connector: (action: string) => (action !== "status" && running
+      ? { status: 1, stdout: "connector: the KeyScribe using it is running. Quit it first", stderr: "" }
+      : { status: 0, stdout: "", stderr: "" }),
     take(said: string): TakeResult {
+      if (said === "check on kestrel") return { id: "t", ok: true, conversation: "fake:1" }
+      if (said === "check on this conversation") return front ? { id: "t", ok: true, conversation: "fake:1" } : { id: "t", ok: false }
+      if (said === "go to kestrel") {
+        shown = true
+        front = true
+        return { id: "t", ok: true, conversation: "fake:1" }
+      }
       if (said === "open kestrel") {
         shown = true
         front = true
         return { id: "t", ok: true }
       }
-      const address = ["tell kestrel", "tell fake 1", "ask kestrel"].find(name => said.startsWith(`${name} `) || said.startsWith(`${name}, `))
+      const address = ["please tell kestrel", "tell kestrel", "tell fake 1", "ask kestrel", "kestrel"].find(name => said.startsWith(`${name} `) || said.startsWith(`${name}, `))
+      if (address && draft && !front && options.keepsBehind) {
+        return { id: "t", ok: false, receiptKind: "kept", conversation: "fake:1", history: remember(said, "Its name"),
+          hud: "advisory(message: \"Not sent to kestrel: its prompt box already has text. Send or clear that text there, then say this again\")" }
+      }
       if (address) return answer(said, said.slice(address.length).replace(/^,? /, ""), "Its name")
+      if (front && said.startsWith("tell kestrol ")) return answer(said, said.slice("tell kestrol ".length), "Sounded like its name")
       if (!front || said.startsWith("tell ")) return { id: "t", ok: false }
       const body = draft ? `${draft} ${said}` : said
-      draft = ""
+      draft = options.hint ?? ""
       return answer(said, body, "The conversation in front")
     },
   } as unknown as Instance
   const clipboard = {
     set: (kind: "text" | "image", value?: string) => { clip = kind === "image" ? "/tmp/keyscribe/clipboard-1.png" : value ?? "" },
-    keep: async <T,>(work: () => Promise<T>) => { const saved = clip; try { return await work() } finally { clip = saved } },
+    keep: async <T,>(work: (mark: () => () => boolean) => Promise<T>) => {
+      const saved = clip
+      try {
+        return await work(() => { const marked = clip; return () => !options.clipboardChanged && clip === marked })
+      } finally { clip = saved }
+    },
   }
-  return { instance, agent, replyWait: 1, clipboard, holdSeconds: 0, silence: () => { answering = false } }
+  return { instance, agent, replyWait: 1, clipboard, holdSeconds: 0, settleSeconds: 0, silence: () => { answering = false } }
 }
 
 test("every exercise passes again in a later round against the same conversation", async () => {
@@ -128,3 +210,53 @@ test("commentary before the blocked command does not end the running turn", asyn
   const busy = exercises.find((exercise) => exercise.id === "D2")!
   await assert.doesNotReject(busy.run(fakeContext({ comments: true })))
 })
+
+test("a take the app says may not have reached the agent fails even though the agent recorded it", async () => {
+  for (const id of ["D1", "N11", "N12", "D12"]) {
+    await assert.rejects(exercises.find((exercise) => exercise.id === id)!.run(fakeContext({ doubted: true })), /may not have reached/, id)
+  }
+})
+
+test("copying something said as the clipboard's contents fails when the clipboard is not put back exactly", async () => {
+  for (const id of ["I1", "I2"]) {
+    await assert.rejects(exercises.find((exercise) => exercise.id === id)!.run(fakeContext({ clipboardChanged: true })), /put back exactly/, id)
+  }
+})
+
+test("a reply kept as read more than once fails", async () => {
+  for (const id of ["B8", "D12"]) {
+    await assert.rejects(exercises.find((exercise) => exercise.id === id)!.run(fakeContext({ readTwice: true })), /was read 2 times/, id)
+  }
+})
+
+test("each take's reply is judged by its own request and its own History entry, even when an earlier round said the same and History lags", async () => {
+  const context = fakeContext({ historyLags: true })
+  for (const id of ["B8", "D9", "D12", "D14", "R7"]) {
+    await assert.doesNotReject(exercises.find((exercise) => exercise.id === id)!.run(context), id)
+  }
+})
+
+test("a hint the agent shows in its empty box once the draft is sent does not count as the draft left behind", async () => {
+  await assert.doesNotReject(exercises.find((exercise) => exercise.id === "D10")!.run(fakeContext({ hint: 'Try "write a test for half a"' })))
+})
+
+test("a window the instance cannot list is brought forward by its own driver, and another app is chosen to look away to", async () => {
+  const context = fakeContext({ unlisted: true })
+  for (const id of ["D9", "D10", "D12", "D13", "N14"]) {
+    await assert.doesNotReject(exercises.find((exercise) => exercise.id === id)!.run(context), id)
+  }
+})
+
+test("a near-miss name is judged with another app in front, since one that sounds like the conversation in front is sent there", async () => {
+  const context = fakeContext()
+  await exercises.find((exercise) => exercise.id === "N14")!.run(context)
+  await assert.doesNotReject(exercises.find((exercise) => exercise.id === "N13")!.run(context))
+})
+
+for (const [keepsBehind, declaresBehind, passes] of [[true, "kept", true], [false, "sent", true], [true, "sent", false], [false, "kept", false]] as const) {
+  test(`a take behind a draft that is ${keepsBehind ? "kept" : "sent"} where the agent's window says ${declaresBehind} ${passes ? "passes" : "fails"} D10, and the draft stays`, async () => {
+    const run = exercises.find((exercise) => exercise.id === "D10")!.run(fakeContext({ keepsBehind, declaresBehind }))
+    if (passes) await assert.doesNotReject(run)
+    else await assert.rejects(run, /the take behind/)
+  })
+}

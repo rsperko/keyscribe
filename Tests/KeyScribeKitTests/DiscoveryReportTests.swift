@@ -63,4 +63,25 @@ struct DiscoveryReportTests {
         #expect(text.contains("Using /Users/a/bin/pi (a running conversation)"))
         #expect(text.contains("--version: did not finish within 10 seconds"))
     }
+
+    @Test func placesBesideTheOneInUseThatAlsoHoldTheCommandSaySoRatherThanNotFound() {
+        let places = [
+            ToolSearch.Place(path: "/Users/a/bin/claude", source: .session),
+            ToolSearch.Place(path: "/Users/a/.nix-profile/bin/claude", source: .shell),
+            ToolSearch.Place(path: "/usr/bin/claude", source: .app),
+        ]
+        var checked: [String] = []
+        let first = ToolSearch.find(places) { checked.append($0); return $0 != "/usr/bin/claude" }
+        #expect(checked == [places[0].path])
+        #expect(first.alsoHere.isEmpty)
+        let found = first.checkingTheRest { $0 != "/usr/bin/claude" }
+        #expect(found.tool == places[0])
+        #expect(found.alsoHere == [places[1]])
+        let text = DiscoveryReport(
+            app: "KeyScribeDev", agent: "Claude Code", folder: "/Users/a/.claude", search: found, check: nil, shell: .notRun, folders: [], sightings: []
+        ).text
+        #expect(text.contains("/Users/a/bin/claude (a running conversation): found, in use"))
+        #expect(text.contains("/Users/a/.nix-profile/bin/claude (login shell PATH): also here"))
+        #expect(text.contains("/usr/bin/claude (app PATH): not found"))
+    }
 }

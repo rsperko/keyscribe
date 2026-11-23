@@ -6,8 +6,10 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Instance, type TakeResult } from "./lib/instance.ts"
 import { UltimateDriver } from "./lib/ultimate.ts"
-import { freePort, run, sha256, until } from "./lib/util.ts"
+import { freePort, run, sha256, shutDown, until } from "./lib/util.ts"
 import { failureBundle } from "./lib/artifacts.ts"
+import { homeChanges, snapshotHome } from "./lib/home-audit.ts"
+import { inputUnseen, voiceOverBlocks, voiceOverOn } from "./lib/preflight.ts"
 import { clipboard } from "./lib/clipboard.ts"
 import { matchesPageCase, parsePageOptions, type PageTargetKind } from "./lib/options.ts"
 
@@ -15,6 +17,7 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const clone = process.env.ULTIMATE_CLONE
 assert.ok(clone, "set ULTIMATE_CLONE to an installed Ultimate checkout")
 const { chromium } = createRequire(join(resolve(clone), "package.json"))("playwright-core")
+const homeBefore = snapshotHome()
 const instance = new Instance(Instance.locate())
 const agent = new UltimateDriver("kestrel")
 const options = parsePageOptions(process.argv.slice(2), process.env)
@@ -40,8 +43,7 @@ function cleanup() {
     } finally {
       try { await browser?.close() }
       finally {
-        try { await agent.stop(keep || !!failure) }
-        finally { await instance.dispose(keep || !!failure) }
+        await shutDown(() => agent.stop(keep || !!failure), (kept) => instance.dispose(kept), keep || !!failure)
       }
     }
   })()
@@ -85,7 +87,10 @@ const take = (text: string, reply = false) => {
   assert.ok(!stopping, "conformance interrupted")
   return instance.take(text, { timeout: 45, ...(reply ? { waitReply: replyWait } : {}) })
 }
-const record = (text: string) => instance.record(text)
+function record(result: TakeResult) {
+  assert.ok(result.history, JSON.stringify(result))
+  return instance.entry(result.history!)
+}
 let chromeWindow = ""
 let otherWindow = ""
 
@@ -129,7 +134,7 @@ async function attempt(id: number, label: string, test: () => Promise<void>, kin
       why: `${String(error)}${error instanceof Error && error.cause ? `; cause: ${String(error.cause)}` : ""}` })
       await failureBundle(instance.folder, `${id}/${tag}`, error, {
         "agent-history": () => agent.messages(id),
-        "discovery": () => instance.cli(["--discovery-report"], 15),
+        "discovery": () => instance.cli(["--discovery-report", agent.kind, "--folder", agent.folder], 15),
         "windows": () => windows(),
         ...(agent.diagnostics?.() ?? {}),
         "page": async () => browser?.contexts()[0]?.pages()[0]?.evaluate(() => ({
@@ -154,6 +159,7 @@ try {
   writeFileSync(join(agent.folder, "settings.json"), JSON.stringify({ onboarding: true, extensions: { disable: ["sample-unrelated-extension"] } }))
   command("git", ["-C", agent.project, "fetch", "--depth=1", repository, "HEAD"])
   command("git", ["-C", agent.project, "reset", "--hard", "FETCH_HEAD"])
+  assert.ok(!voiceOverOn(), voiceOverBlocks)
   await instance.prepare()
   const linked = join(agent.root, "linked-setup")
   symlinkSync(agent.folder, linked)
@@ -162,6 +168,9 @@ try {
   const installedPlugin = readdirSync(join(agent.folder, "extensions")).find(name => existsSync(join(agent.folder, "extensions", name, "keyscribe.json")))
   assert.ok(installedPlugin, "the installed connector has its configuration")
   await instance.launch()
+  const probe = instance.take("check on all")
+  assert.notEqual(probe.observesInput, false, inputUnseen(instance.binary))
+  assert.notEqual(probe.observesInput, undefined, `the test instance could not answer whether it sees input: ${probe.problem ?? JSON.stringify(probe)}`)
   await agent.start()
   await action("onboarding", "firstRunDone", null)
   const main = await action("subagents", "standing", { name: "ultimate" }) as number
@@ -341,9 +350,10 @@ try {
     await runCase("unnamed front take and silent reply", async () => {
       await show()
       const body = `Reply with only ${token}front.`
-      await delivered(id, body, false)
-      assert.equal(record(body)?.facts.find((f: any) => f.label === "Chosen by")?.value, "The conversation in front")
-      assert.ok(record(body)?.steps.some((s: any) => /was in front when it finished/.test(s.text)))
+      const result = await delivered(id, body, false)
+      assert.equal(record(result)?.facts.find((f: any) => f.label === "Chosen by")?.value, "The conversation in front")
+      await until("History saying the reply was not read over the conversation in front", () =>
+        record(result)?.steps?.some((s: any) => /was in front when it finished/.test(s.text)) ? true : undefined, 30)
       if (side && id === side.id) assert.ok(!(await agent.messages(main)).some(m => m.text === body))
     })
     await runCase("named idle delivery and exact reply", async () => { await show(); await delivered(id, `Reply with only ${token}idle.`) })
@@ -416,8 +426,8 @@ try {
     await runCase("reply read with another app in front", async () => {
       await show(); focus(otherWindow)
       const body = `Reply with only ${token}away.`
-      await delivered(id, body)
-      await until("the spoken reply in History", () => record(body)?.spoken_reply ? true : undefined, 30)
+      const result = await delivered(id, body)
+      await until("the spoken reply in History", () => record(result)?.spoken_reply ? true : undefined, 30)
     })
     await runCase("repeat that", async () => {
       const result = take("repeat that")
@@ -435,7 +445,7 @@ try {
       await show()
       const result = take(`check on ${name(id)}`)
       assert.ok(result.ok, JSON.stringify(result))
-      assert.ok(record(`check on ${name(id)}`)?.facts.some((f: any) => f.label === "Conversation" && f.value.endsWith(`${id}@${agent.projectHome}`)), "status belongs to the requested conversation")
+      assert.ok(record(result)?.facts.some((f: any) => f.label === "Conversation" && f.value.endsWith(`${id}@${agent.projectHome}`)), "status belongs to the requested conversation")
       await page.waitForFunction(() => document.hasFocus() && document.visibilityState === "visible")
       await delivered(id, `Reply with only ${token}afterstatus.`, false)
     })
@@ -449,7 +459,7 @@ try {
       assert.ok(title, "the sidebar has a title to address")
       const result = take(`check on ${title}`)
       assert.ok(result.ok, JSON.stringify(result))
-      assert.ok(record(`check on ${title}`)?.facts.some((f: any) => f.label === "Conversation" && f.value.endsWith(`${id}@${agent.projectHome}`)), "the sidebar title resolves to its own conversation")
+      assert.ok(record(result)?.facts.some((f: any) => f.label === "Conversation" && f.value.endsWith(`${id}@${agent.projectHome}`)), "the sidebar title resolves to its own conversation")
     })
   }
   await instance.quit()
@@ -472,4 +482,6 @@ finally {
   await cleanup()
   console.log(`Ultimate page conformance: ${results.filter(r => r.ok).length} passed, ${results.filter(r => !r.ok).length} failed; ${instance.folder}`)
 }
-process.exit(failure ? 1 : 0)
+const touched = (() => { try { return homeChanges(homeBefore, snapshotHome()) } catch (error) { return [(error as Error).message] } })()
+if (touched.length) console.error(`The run changed the user's own setup outside its scratch folders:\n  ${touched.join("\n  ")}`)
+process.exit(failure || touched.length ? 1 : 0)

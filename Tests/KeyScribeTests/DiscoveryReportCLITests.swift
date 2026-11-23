@@ -40,4 +40,17 @@ struct DiscoveryReportCLITests {
         #expect(outcome.code == 2)
         #expect(outcome.lines.contains { $0.contains("folder") })
     }
+
+    @Test func withNoFolderAskedForTheReportIsAboutTheFolderTheLoginShellNamesAndSaysWhy() async {
+        let (agentsDir, folder, connector) = fixture()
+        connector.variable = "FOLDER_HOME"
+        let outcome = await DiscoveryReportCLI.run(
+            agent: "folder", folder: nil, connectors: [connector], agentsDir: agentsDir, prepare: { _ in },
+            declared: { $0 == "FOLDER_HOME" ? folder.path : nil })
+        let report = outcome.lines.joined(separator: "\n")
+        let path = ConnectorFolders.canonical(folder).path
+        #expect(report.contains("Configuration folder: \(path)"))
+        #expect(report.contains("\(path) (FOLDER_HOME in your login shell)"))
+        #expect(report.contains("\(ConnectorFolders.canonical(connector.defaultFolder).path) (default)"))
+    }
 }

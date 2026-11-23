@@ -127,6 +127,8 @@ struct ScriptedTakeResult: Codable, Equatable, Sendable {
     var replyProblem: String?
     var hud: String?
     var problem: String?
+    var observesInput: Bool?
+    var history: String?
 }
 
 struct ScriptedTakeRecipient: Equatable, Sendable {
@@ -142,12 +144,67 @@ struct ScriptedReply: Codable, Equatable, Sendable {
     var ending: String?
 }
 
+struct ScriptedRead: Codable, Equatable, Sendable {
+    var request: String
+    var read: Bool
+    var reason: String?
+}
+
 @MainActor
 final class ScriptedReplies {
-    private let limit: Int
-    private var kept: [(request: String, reply: ScriptedReply)] = []
+    nonisolated static let ledgerName = "scripted-reads.jsonl"
 
-    init(limit: Int = 32) { self.limit = limit }
+    private let limit: Int
+    private let ledger: URL?
+    private let writer = DispatchQueue(label: "com.keyscribe.scripted-reads")
+    private var kept: [(request: String, reply: ScriptedReply)] = []
+    private var busy = false
+
+    init(limit: Int = 32, ledger: URL? = nil) {
+        self.limit = limit
+        self.ledger = ledger
+    }
+
+    nonisolated static func ledger(supportDir: URL, listensForInput: Bool) -> URL? {
+        listensForInput ? nil : supportDir.appendingPathComponent(ledgerName)
+    }
+
+    func noteRead(origin: String) { record(ScriptedRead(request: origin, read: true)) }
+
+    func noteUnread(origin: String, reason: String) { record(ScriptedRead(request: origin, read: false, reason: reason)) }
+
+    func noteBusy(_ busy: Bool) {
+        guard busy != self.busy else { return }
+        self.busy = busy
+        writeQuiet()
+    }
+
+    private func writeQuiet() { write(Data((busy ? #"{"quiet":false}"# : #"{"quiet":true}"#).utf8)) }
+
+    func flush() { writer.sync {} }
+
+    private func record(_ read: ScriptedRead) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard let line = try? encoder.encode(read) else { return }
+        write(line)
+        if !busy { writeQuiet() }
+    }
+
+    private func write(_ data: Data) {
+        guard let ledger else { return }
+        var line = data
+        line.append(0x0A)
+        writer.async {
+            guard let handle = FileHandle(forWritingAtPath: ledger.path) ?? {
+                FileManager.default.createFile(atPath: ledger.path, contents: nil)
+                return FileHandle(forWritingAtPath: ledger.path)
+            }() else { return }
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: line)
+        }
+    }
 
     func noteAnswer(origin: String?, answer: String) {
         keep(origin, ScriptedReply(kind: "answer", length: answer.count, sha256: Self.digest(answer)))
@@ -176,6 +233,10 @@ struct ScriptedTakeMarks {
     var receipt: AgentReceipt?
     var recipient: ScriptedTakeRecipient?
     var hud: String?
+    var acted = 0
+    var actedOn: ScriptedTakeRecipient?
+    var observesInput = false
+    var historyEntry: String?
 }
 
 @MainActor
@@ -220,7 +281,9 @@ final class ScriptedTakeRunner {
 
     func run(_ request: ScriptedTakeRequest) async -> ScriptedTakeResult? {
         guard callerWaits(request.caller, request.issued) else { return nil }
-        func refused(_ problem: String) -> ScriptedTakeResult { ScriptedTakeResult(id: request.id, ok: false, problem: problem) }
+        func refused(_ problem: String) -> ScriptedTakeResult {
+            ScriptedTakeResult(id: request.id, ok: false, problem: problem, observesInput: target.scriptedTakeMarks.observesInput)
+        }
         guard target.isIdleForScriptedTake else { return refused("A dictation is already running.") }
         guard FileManager.default.isReadableFile(atPath: request.wav) else { return refused("The clip \(request.wav) can\u{2019}t be read.") }
         guard let mode = target.scriptedTakeMode(request.mode) else {
@@ -275,7 +338,7 @@ final class ScriptedTakeRunner {
         let after = target.scriptedTakeMarks
         let record = after.records > before.records ? after.record : nil
         let receipt = after.receipts > before.receipts ? after.receipt : nil
-        let recipient = receipt == nil ? nil : after.recipient
+        let recipient = receipt == nil ? (after.acted > before.acted ? after.actedOn : nil) : after.recipient
         let succeeded = record?.outcome.map(Self.succeeded) ?? false
         let sent = receipt.map(Self.sent) ?? (!mode.sendsToAgents || record?.outcome == .command)
         let ok = problem == nil && succeeded && sent
@@ -284,7 +347,8 @@ final class ScriptedTakeRunner {
             id: request.id, ok: ok, outcome: record?.outcome?.rawValue, receipt: receipt.map { String(describing: $0) },
             receiptKind: receipt.map(Self.kind), conversation: recipient?.conversation, agent: recipient?.agent, request: recipient?.request,
             hud: after.hud,
-            problem: why)
+            problem: why, observesInput: after.observesInput,
+            history: after.historyEntry != before.historyEntry ? after.historyEntry : nil)
     }
 
     nonisolated static func kind(of receipt: AgentReceipt) -> String {

@@ -72,6 +72,8 @@ final class CodexConnector: AgentConnector {
 
     func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result? { CodexInstall.search(in: tools, home: folder.path, chosen: chosen) }
 
+    func runs(tool path: String) -> Bool { CodexInstall.runs(path, in: tools) }
+
     func checkTool(_ tool: String) async -> ToolCheck? { await tools.check(tool: tool, agent: kind.id) }
 
     func manualUninstall(for target: ConnectorTarget) -> [String] {

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { existsSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { markKept, scratchPrefixes } from "./scratch.ts"
 import { run, sleep, socketAnswers, until } from "./util.ts"
@@ -17,7 +17,11 @@ export type TakeResult = {
   replyProblem?: string
   hud?: string
   problem?: string
+  observesInput?: boolean
+  history?: string
 }
+
+export type LedgerLine = { request?: string; read?: boolean; reason?: string; quiet?: boolean }
 
 const requiredFlags = ["--no-input", "--connector", "--discovery-report", "--wait-reply", "--json", "--config-dir"]
 
@@ -85,13 +89,20 @@ export class Instance {
       .flatMap((file) => readFileSync(join(folder, file), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)))
   }
 
-  record(text: string): any {
-    return this.records().filter((entry) => entry.heard === text || entry.heard?.endsWith(text)).at(-1)
+  entry(id: string): any {
+    return this.records().filter((entry) => entry.id === id).at(-1)
+  }
+
+  ledger(): LedgerLine[] {
+    const path = join(this.folder, "scripted-reads.jsonl")
+    return existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []
   }
 
   private spawn() {
     const log = openSync(join(this.folder, "app.log"), "a")
-    this.process = spawn(this.binary, ["--config-dir", this.folder, "--no-input"], { stdio: ["ignore", log, log], detached: true })
+    try {
+      this.process = spawn(this.binary, ["--config-dir", this.folder, "--no-input"], { stdio: ["ignore", log, log], detached: true })
+    } finally { closeSync(log) }
   }
 
   async launch() {

@@ -6,8 +6,14 @@ import { run, sleep } from "./util.ts"
 export type Message = { role: "user" | "agent" | "ended"; text: string; turn?: string; mark?: string }
 export type Shown = { thread: boolean; focused: boolean; draft: string | null }
 
+export type ListedWindow = { app: string; spec: string; title: string }
+
 export interface AppWindow {
-  pids(): number[]
+  owns(window: ListedWindow): boolean
+  readonly reopens: boolean
+  readonly takeBehindDraft: "kept" | "sent"
+  readonly app?: string
+  focus?(): Promise<void>
   show(): Promise<void>
   look(): Promise<Shown>
   fill(text: string): Promise<void>
@@ -18,6 +24,7 @@ export interface AgentDriver {
   readonly kind: string
   readonly name: string
   readonly folder: string
+  readonly project: string
   readonly tool: string | undefined
   readonly conversation: string | undefined
   readonly addresses?: { said: string; absent: string }
@@ -30,6 +37,7 @@ export interface AgentDriver {
   stop(keep: boolean): Promise<void>
   untouched?(): string[]
   noteFromHost?(): Promise<void>
+  interrupt?(): Promise<void>
   readonly server?: { stop(): Promise<void>; start(): Promise<void> }
   diagnostics?(): Record<string, () => unknown | Promise<unknown>>
 }

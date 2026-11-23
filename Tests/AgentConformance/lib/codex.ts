@@ -1,10 +1,12 @@
 import { connect, type Socket } from "node:net"
 import { randomBytes } from "node:crypto"
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { type AgentDriver, type Message, command, removeScratch, scratch } from "./driver.ts"
-import { pidsListeningOn, sleep, texts, until } from "./util.ts"
+import { type AgentDriver, type AppWindow, type Message, command, removeScratch, scratch } from "./driver.ts"
+import { ensureExited, pidsListeningOn, sleep, stopEach, texts, until } from "./util.ts"
+import { copyCodexLogin } from "./logins.ts"
+import { terminalWindow } from "./terminal.ts"
 import { Tmux } from "./tmux.ts"
 
 export function codexMessages(newestFirst: any[]): Message[] {
@@ -60,12 +62,15 @@ class Daemon {
   close() { this.socket.destroy() }
 
   private send(message: unknown) {
-    const payload = Buffer.from(JSON.stringify(message))
+    this.frame(0x81, Buffer.from(JSON.stringify(message)))
+  }
+
+  private frame(first: number, payload: Buffer) {
     const mask = randomBytes(4)
     let header: Buffer
-    if (payload.length < 126) header = Buffer.from([0x81, 0x80 | payload.length])
-    else if (payload.length < 65536) { header = Buffer.alloc(4); header[0] = 0x81; header[1] = 0x80 | 126; header.writeUInt16BE(payload.length, 2) }
-    else { header = Buffer.alloc(10); header[0] = 0x81; header[1] = 0x80 | 127; header.writeBigUInt64BE(BigInt(payload.length), 2) }
+    if (payload.length < 126) header = Buffer.from([first, 0x80 | payload.length])
+    else if (payload.length < 65536) { header = Buffer.alloc(4); header[0] = first; header[1] = 0x80 | 126; header.writeUInt16BE(payload.length, 2) }
+    else { header = Buffer.alloc(10); header[0] = first; header[1] = 0x80 | 127; header.writeBigUInt64BE(BigInt(payload.length), 2) }
     const masked = Buffer.from(payload)
     for (let i = 0; i < masked.length; i++) masked[i] ^= mask[i % 4]
     this.socket.write(Buffer.concat([header, mask, masked]))
@@ -91,7 +96,8 @@ class Daemon {
       if (this.buffer.length < offset + length) return
       const payload = this.buffer.subarray(offset, offset + length)
       this.buffer = this.buffer.subarray(offset + length)
-      if (op === 0x9 || op === 0x8) continue
+      if (op === 0x9) { this.frame(0x8a, payload); continue }
+      if (op === 0x8 || op === 0xa) continue
       this.fragment += payload.toString()
       if (!fin) continue
       const text = this.fragment
@@ -113,6 +119,7 @@ export class CodexDriver implements AgentDriver {
   readonly root: string
   readonly tool = command("codex", "CODEX_BIN")
   private readonly tmux: Tmux
+  readonly window: AppWindow
   private daemon: Daemon | undefined
   private thread: string | undefined
   readonly name: string
@@ -124,7 +131,8 @@ export class CodexDriver implements AgentDriver {
     this.project = project
     this.home = join(root, "codex")
     mkdirSync(this.home)
-    this.tmux = new Tmux(`ks-conf-${process.pid}`)
+    this.tmux = new Tmux(`ks-conf-${process.pid}`, command("tmux", "TMUX_BIN"))
+    this.window = terminalWindow(this.tmux, `ks-conf codex ${name} ${process.pid}`, "sent")
   }
 
   get folder() { return this.home }
@@ -136,25 +144,26 @@ export class CodexDriver implements AgentDriver {
   }
 
   async setUp() {
-    const auth = join(process.env.CODEX_AUTH_HOME ?? join(homedir(), ".codex"), "auth.json")
-    if (!existsSync(auth)) throw new Error(`no Codex login at ${auth}: log in to Codex first, or set CODEX_AUTH_HOME`)
-    copyFileSync(auth, join(this.home, "auth.json"))
-    chmodSync(join(this.home, "auth.json"), 0o600)
+    const provider = copyCodexLogin(process.env.CODEX_AUTH_HOME ?? join(homedir(), ".codex"), this.home, "log in to Codex first")
     const model = process.env.CODEX_MODEL ?? "gpt-6-luna"
     writeFileSync(join(this.home, "config.toml"), [
+      ...provider.top,
       `model = "${model}"`,
       `model_reasoning_effort = "low"`,
       "",
       `[projects."${this.project}"]`,
       `trust_level = "trusted"`,
       "",
+      ...provider.tables,
     ].join("\n"))
   }
 
   async start() {
     this.tmux.start(this.project, `env CODEX_HOME='${this.home}' '${this.tool}'`)
     await this.answerStartScreens()
-    await until("Codex's app server", () => (existsSync(this.socket) ? true : undefined), 60)
+    await until("Codex's app server", () => (existsSync(this.socket) ? true : undefined), 60).catch(() => {
+      throw new Error(`Codex started no shared app server at ${this.socket}; KeyScribe reaches Codex only through it, so this setup cannot be tested. Last screen:\n${this.tmux.screen()}`)
+    })
     this.daemon = await Daemon.open(this.socket)
     await this.tmux.type("Reply with only the word ready.")
     let retype = false
@@ -173,7 +182,7 @@ export class CodexDriver implements AgentDriver {
       const loaded: string[] = (await this.daemon!.call("thread/loaded/list", {}))?.data ?? []
       if (loaded[0]) return loaded[0]
       const listed: any[] = (await this.daemon!.call("thread/list", {}))?.data ?? []
-      return listed.find((thread) => thread?.cwd === this.project)?.id ?? listed[0]?.id
+      return listed.find((thread) => typeof thread?.cwd === "string" && existsSync(thread.cwd) && realpathSync(thread.cwd) === this.project)?.id
     }, 90, 500)
     await this.idle(120)
     await this.daemon.call("thread/name/set", { threadId: this.thread, name: this.name })
@@ -236,15 +245,25 @@ export class CodexDriver implements AgentDriver {
     return problems
   }
 
+  async interrupt() {
+    this.tmux.keys("Escape")
+  }
+
   diagnostics() {
     return { "tmux-screen": () => this.tmux.screen() }
   }
 
   async stop(keep: boolean) {
+    await this.window.close().catch(() => {})
     this.daemon?.close()
-    this.tmux.kill()
-    for (const pid of pidsListeningOn(this.socket)) { try { process.kill(pid, "SIGTERM") } catch {} }
-    await sleep(1000)
+    const servers = pidsListeningOn(this.socket)
+    await stopEach(
+      () => this.tmux.stop(),
+      async () => {
+        for (const pid of servers) { try { process.kill(pid, "SIGTERM") } catch {} }
+        await ensureExited(servers, 10_000, "Codex's server processes")
+      },
+    )
     removeScratch(this.root, keep)
   }
 }

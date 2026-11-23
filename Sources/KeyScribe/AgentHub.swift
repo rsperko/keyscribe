@@ -153,6 +153,7 @@ final class AgentHub {
     private let addressesTurnedOn: @MainActor (String) -> Bool
     private let hostDeadline: Duration
     private let hostOpenDeadline: Duration?
+    var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     private let hostConfirmDelay: Duration
     private let heldLimit: Duration
     private(set) var retryWaiting: Set<String> = []
@@ -444,7 +445,7 @@ final class AgentHub {
         if let (source, location) = host(of: conversation) {
             guard stillWanted() else { return .none }
             let late = AgentHostOpen.refused("\(source.kind.displayName) didn\u{2019}t answer in time.")
-            switch await Self.within(hostOpenDeadline ?? source.host.openDeadline, otherwise: late, { await source.host.open(location, stillWanted: stillWanted) }) {
+            switch await within(hostOpenDeadline ?? source.host.openDeadline, otherwise: late, { await source.host.open(location, stillWanted: stillWanted) }) {
             case .opened: return .exact
             case .requested: return .requested(source.kind.displayName)
             case .refused(let why): return stillWanted() && !Task.isCancelled ? .refused(why) : .none
@@ -509,7 +510,7 @@ final class AgentHub {
     func checkHostFront() async -> HostFrontCheck {
         var fallback = HostFrontCheck()
         for source in hosts {
-            let focus = await Self.within(hostDeadline, otherwise: nil) { await source.host.focusInFront(requireClaim: false) }
+            let focus = await within(hostDeadline, otherwise: nil) { await source.host.focusInFront(requireClaim: false) }
             if source.isEnabled {
                 if let shown = await inFront(of: source, focus: focus) { return HostFrontCheck(shown: shown) }
                 if let focus, focus.allowsNewConversation, let app = focus.app, startCarrier(source, instance: app.instance) != nil {
@@ -529,7 +530,7 @@ final class AgentHub {
 
     func hostCopyNotReadyInFront() async -> HostCopyNotReady? {
         for source in hosts {
-            guard let focus = await Self.within(hostDeadline, otherwise: nil, { await source.host.focusInFront(requireClaim: false) }),
+            guard let focus = await within(hostDeadline, otherwise: nil, { await source.host.focusInFront(requireClaim: false) }),
                   let notReady = notReady(in: source, focus: focus)
             else { continue }
             return notReady
@@ -658,7 +659,7 @@ final class AgentHub {
 
     func newConversationInFront() async -> FrontSession? {
         for source in hosts where source.isEnabled {
-            guard let focus = await Self.within(hostDeadline, otherwise: nil, { await source.host.focusInFront(requireClaim: true) }),
+            guard let focus = await within(hostDeadline, otherwise: nil, { await source.host.focusInFront(requireClaim: true) }),
                   focus.allowsNewConversation, let app = focus.app, startCarrier(source, instance: app.instance) != nil
             else { continue }
             return FrontSession(id: Self.newConversation(in: source.kind.id), app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name, window: app.window))
@@ -672,7 +673,7 @@ final class AgentHub {
         let name = Self.newConversationName(of: source.kind)
         let notInFront = AgentReceipt.notSent(nil, reason: .newConversationNotInFront(source.kind.displayName))
         guard inFront,
-              let focus = await Self.within(hostDeadline, otherwise: nil, { await source.host.focusInFront(requireClaim: true) }),
+              let focus = await within(hostDeadline, otherwise: nil, { await source.host.focusInFront(requireClaim: true) }),
               focus.allowsNewConversation,
               let carrier = startCarrier(source, instance: focus.app?.instance)
         else { return notInFront }
@@ -740,7 +741,7 @@ final class AgentHub {
         let mine = (directory.conversations + disconnected).filter { $0.host?.host == source.kind.id }
         guard !mine.isEmpty else { return nil }
         let locations = mine.compactMap(\.host)
-        let focus = if let focus { focus } else { await Self.within(hostDeadline, otherwise: nil) { await source.host.focusInFront(requireClaim: true) } }
+        let focus = if let focus { focus } else { await within(hostDeadline, otherwise: nil) { await source.host.focusInFront(requireClaim: true) } }
         if let focus, focus.resolvesConversation {
             guard let location = focus.conversation, let app = focus.app else { return nil }
             let reported = shown(in: shownByHost, by: source, instance: app.instance)
@@ -751,7 +752,7 @@ final class AgentHub {
         let app = focus?.app
         let reported = shown(in: shownByHost, by: source, instance: app?.instance)
             .flatMap { id in transport.isLive(session: id) ? mine.first { $0.id == id }?.host : nil }
-        guard case .shown(let location, let app) = await Self.within(
+        guard case .shown(let location, let app) = await within(
             hostDeadline, otherwise: AgentHostFront.unknown, { await source.host.front(among: locations, reported: reported, in: app) }),
               let shown = mine.first(where: { $0.host == location })
         else { return nil }
@@ -1097,11 +1098,12 @@ final class AgentHub {
     private func bounded(agent: String) async -> AgentScan? {
         if let result = outstanding[agent]?.result { return result }
         let deadline = scanDeadline
+        let sleep = sleep
         return await withCheckedContinuation { (continuation: CheckedContinuation<AgentScan?, Never>) in
             let answer = FirstAnswer(continuation)
             outstanding[agent]?.waiter = answer
             Task {
-                try? await Task.sleep(for: deadline)
+                try? await sleep(deadline)
                 answer.resume(nil)
             }
         }
@@ -1211,14 +1213,20 @@ final class AgentHub {
 
     static let defaultHostDeadline: Duration = .seconds(2)
 
-    private static func within<T: Sendable>(_ deadline: Duration, otherwise late: T, _ call: @escaping @MainActor () async -> T) async -> T {
+    private func within<T: Sendable>(_ deadline: Duration, otherwise late: T, _ call: @escaping @MainActor () async -> T) async -> T {
+        await Self.within(deadline, otherwise: late, sleep: sleep, call)
+    }
+
+    private static func within<T: Sendable>(
+        _ deadline: Duration, otherwise late: T, sleep: @escaping @Sendable (Duration) async throws -> Void, _ call: @escaping @MainActor () async -> T
+    ) async -> T {
         let answer = Once<T>()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
                 answer.wait(continuation)
                 answer.start(Task { @MainActor in answer.resume(await call()) })
                 Task {
-                    try? await Task.sleep(for: deadline)
+                    try? await sleep(deadline)
                     answer.giveUp(late)
                 }
             }
@@ -1441,7 +1449,7 @@ final class AgentHub {
             if source.host.reportsDeliveredTurns, let index = hostFollows[id]?.firstIndex(where: { $0.request == request }) {
                 hostFollows[id]?[index].named = true
             }
-            let answer = await Self.within(receiptTimeout, otherwise: AgentHostDelivery.uncertain, {
+            let answer = await within(receiptTimeout, otherwise: AgentHostDelivery.uncertain, {
                 await source.host.deliver(text, images: images, request: request, to: location)
             })
             let arrived = matched.remove(request) != nil
@@ -2051,8 +2059,8 @@ final class AgentHub {
         guard let source = hosts.first(where: { $0.kind.id == agent }),
               let location = (directory.conversations + disconnected).first(where: { $0.id == session })?.host
         else { return decide(turn, of: session, record: nil, candidates: candidates, firstKnown: firstKnown, reason: reason, answer: answer, after: after, wasRequested: wasRequested) }
-        Task { [weak self] in
-            let record = await Self.within(Self.turnRecordBudget, otherwise: nil) { await source.host.taken(in: turn, at: location) }
+        Task { [weak self, sleep] in
+            let record = await Self.within(Self.turnRecordBudget, otherwise: nil, sleep: sleep) { await source.host.taken(in: turn, at: location) }
             self?.decide(turn, of: session, record: record, candidates: candidates, firstKnown: firstKnown, reason: reason, answer: answer, after: after, wasRequested: wasRequested)
         }
     }

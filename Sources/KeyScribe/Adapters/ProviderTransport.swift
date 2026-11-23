@@ -110,7 +110,11 @@ final class ConnectWatch: OriginPinnedRedirects, @unchecked Sendable {
     var gaveUp: Bool { lock.withLock { abandoned } }
 
     func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
-        lock.withLock { self.task = task }
+        let late = lock.withLock {
+            self.task = task
+            return abandoned
+        }
+        if late { task.cancel() }
     }
 
     func urlSession(
@@ -224,9 +228,9 @@ struct ProviderTransport: Sendable {
 
     private func attempt(_ request: URLRequest) async throws -> Data {
         let watch = ConnectWatch(request.url)
-        let deadline = Task { [connectTimeout, hasBody = request.httpBody?.isEmpty == false] in
+        let deadline = Task { [connectTimeout, sleep, hasBody = request.httpBody?.isEmpty == false] in
             guard hasBody else { return }
-            try await Task.sleep(for: connectTimeout)
+            try await sleep(connectTimeout)
             watch.giveUpIfNotConnected()
         }
         defer { deadline.cancel() }

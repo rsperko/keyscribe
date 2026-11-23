@@ -328,7 +328,7 @@ struct PiConnectorStatusTests {
         cli.version = "1.3.2\n"
         let (connector, _, _, folder) = make(cli: cli)
         #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .toolTooOld("1.3.2"))
-        #expect(connector.copy.toolTooOldAdvice("1.3.2").contains("1.4.0"))
+        #expect(connector.copy.toolTooOldAdvice("1.3.2").contains("older than 1.4.0, the oldest version the connector supports."))
     }
 
     @Test func aPiThatCannotReportItsVersionFailsWithWhatItSaid() async {

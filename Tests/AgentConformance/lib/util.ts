@@ -55,3 +55,35 @@ export const freePort = () => new Promise<number>((resolve) => {
     server.close(() => resolve(port))
   })
 })
+
+export async function ensureExited(targets: number[], within: number, what: string) {
+  const running = (target: number) => {
+    try { process.kill(target, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM" }
+  }
+  const ended = async (wait: number) => {
+    for (const deadline = Date.now() + wait; targets.some(running) && Date.now() < deadline;) await sleep(100)
+    return !targets.some(running)
+  }
+  if (await ended(within)) return
+  for (const target of targets.filter(running)) { try { process.kill(target, "SIGKILL") } catch {} }
+  if (await ended(2_000)) return
+  throw new Error(`${what} ${targets.filter(running).map(Math.abs).join(", ")} were still running after being stopped, so the scratch folder is kept`)
+}
+
+export async function stopEach(...steps: (() => Promise<void>)[]) {
+  const failures: string[] = []
+  for (const step of steps) {
+    try { await step() } catch (error) { failures.push((error as Error).message) }
+  }
+  if (failures.length) throw new Error(failures.join("; "))
+}
+
+export async function shutDown(stop: () => Promise<void>, dispose: (keep: boolean) => Promise<void>, keep: boolean) {
+  try {
+    await stop()
+  } catch (error) {
+    await dispose(true)
+    throw error
+  }
+  await dispose(keep)
+}

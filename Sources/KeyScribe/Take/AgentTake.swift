@@ -92,6 +92,18 @@ final class AgentTake {
         lastReceipt = receipt
         lastRecipient = ScriptedTakeRecipient(conversation: conversation, agent: agent, request: request)
     }
+
+    private(set) var actedCount = 0
+    private(set) var lastActedOn: ScriptedTakeRecipient?
+
+    private func noteActed(on conversation: String) {
+        actedCount += 1
+        lastActedOn = ScriptedTakeRecipient(conversation: conversation, agent: runningAgent(of: conversation), request: nil)
+    }
+
+    private func runningAgent(of conversation: String) -> String? {
+        host?.agents?.directory.conversations.first { $0.id == conversation }?.runningAgent
+    }
     var frontReadingGrace: Duration = .seconds(1)
     var placeNamesGrace: Duration = .seconds(1)
     var promptBoxConfirmation: Duration = .seconds(2)
@@ -371,7 +383,8 @@ final class AgentTake {
             let outcome: DictationOutcome = if case .notAllowed = result { .failed } else { .inserted }
             finishAgent(state: state, outcome: outcome, heard: heard, body: "", transformed: nil, rewrite: nil,
                         hideAfter: state.errorAction != nil ? 8 : state.indicator == .advisory ? 5 : 2,
-                        summary: result.historySummary(handle: handle, agent: agents.kind(of: id)), facts: facts)
+                        summary: result.historySummary(handle: handle, agent: agents.kind(of: id)), facts: facts,
+                        actedOn: result.broughtForward ? id : nil)
         case .ask(let body, let reason):
             let retry = AgentOutput.Retry.matching(routed.transcript, address)
             let line = retry == .open ? AgentOutput.openAskLine : AgentOutput.askLine
@@ -494,7 +507,7 @@ final class AgentTake {
         }
         agents.noteUsed(id)
         finishAgent(state: .commandDone(summary: "Renamed \(old) to \(name)", detail: mode.name), outcome: .inserted, heard: heard,
-                    body: "", transformed: nil, rewrite: nil, transitioned: true, hideAfter: 4, facts: facts)
+                    body: "", transformed: nil, rewrite: nil, transitioned: true, hideAfter: 4, facts: facts, actedOn: id)
     }
 
     private func answerStatus(
@@ -607,7 +620,7 @@ final class AgentTake {
         let enabled = { [weak host] in host?.agentsEnabled == true }
         _ = host?.spokenUpdates?.answer(conversation: conversation, handle: handle, line, whileTrue: { enabled() && stillTrue() })
         finishAgent(state: .advisory(message: shown), outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil,
-                    transitioned: true, hideAfter: 8, summary: summary, facts: facts)
+                    transitioned: true, hideAfter: 8, summary: summary, facts: facts, actedOn: conversation.isEmpty ? nil : conversation)
     }
 
     private static func renameProblem(_ problem: AgentRename.Problem) -> String {
@@ -685,7 +698,7 @@ final class AgentTake {
             guard lease.keepActing() else { return }
             let inFront = captured != nil && shown?.id == id && shown?.app == captured
             let (request, receipt) = await output.deliver(text, to: id, via: agents, inFront: inFront)
-            note(receipt, for: id, agent: agents.directory.conversations.first { $0.id == id }?.agent, request: request)
+            note(receipt, for: id, agent: runningAgent(of: id), request: request)
             finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
                         outcome: AgentOutput.dictationOutcome(receipt),
                         heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
@@ -708,7 +721,7 @@ final class AgentTake {
                request: request) {
             receipt = sent == .sent(handle) && (cause == .joinedDraft || cause == .joinedDraftMidTurn) ? .sentWithDraft(handle) : sent
         }
-        note(receipt, for: id, agent: agents.directory.conversations.first { $0.id == id }?.agent, request: request)
+        note(receipt, for: id, agent: runningAgent(of: id), request: request)
         finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
                     outcome: AgentOutput.dictationOutcome(receipt),
                     heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
@@ -789,7 +802,8 @@ final class AgentTake {
     private func finishAgent(
         state: HUDState, outcome: DictationOutcome, heard: String, body: String, transformed: String?,
         rewrite: RewriteDetails?, transitioned: Bool = false, hideAfter: Double? = nil, summary: String? = nil,
-        recorded: String? = nil, facts: [HistoryEntry.Fact], awaitingReceipt awaited: (request: String, receipt: AgentReceipt)? = nil
+        recorded: String? = nil, facts: [HistoryEntry.Fact], awaitingReceipt awaited: (request: String, receipt: AgentReceipt)? = nil,
+        actedOn: String? = nil
     ) {
         guard let host, host.finishAgent(
             state: state, outcome: outcome, heard: heard, body: body, transformed: transformed, rewrite: rewrite,
@@ -798,6 +812,7 @@ final class AgentTake {
                 output?.noteRecorded(entry, request: awaited.request)
             } })
         else { return }
+        if let actedOn { noteActed(on: actedOn) }
         if let awaited {
             output.replayEarlyReceipts(
                 request: awaited.request, receipt: awaited.receipt,

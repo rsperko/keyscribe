@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { join } from "node:path"
 import { command, type Message } from "./driver.ts"
+import { claudeCredential, claudeLoginSettings } from "./logins.ts"
 import { TerminalAgent } from "./terminal.ts"
 import { texts } from "./util.ts"
 
@@ -31,7 +33,7 @@ export class ClaudeDriver extends TerminalAgent {
   readonly kind = "claude"
   readonly tool = command("claude", "CLAUDE_BIN")
   readonly folder: string
-  protected ready = /\? for shortcuts|bypass permissions|accept edits|^\s*>\s*$/m
+  protected ready = /\? for shortcuts|bypass permissions|accept edits|auto mode on|shift\+tab to cycle|^\s*[>❯]\s*$/m
 
   constructor(name: string) {
     super(name)
@@ -45,17 +47,20 @@ export class ClaudeDriver extends TerminalAgent {
   }
 
   async setUp() {
-    if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-      throw new Error("a scratch Claude Code folder has no login: set CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) or ANTHROPIC_API_KEY")
+    const from = join(process.env.CLAUDE_LOGIN_HOME ?? join(homedir(), ".claude"), "settings.json")
+    const login = claudeLoginSettings(existsSync(from) ? JSON.parse(readFileSync(from, "utf8")) : {})
+    const credential = claudeCredential(login, process.env)
+    if (!credential.usable) {
+      throw new Error(`a scratch Claude Code folder has no login: set CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) or ANTHROPIC_API_KEY, or give ${from} an apiKeyHelper (or set CLAUDE_LOGIN_HOME)`)
     }
     mkdirSync(this.folder, { recursive: true })
-    const key = process.env.ANTHROPIC_API_KEY
+    const key = credential.apiKey
     writeFileSync(join(this.folder, ".claude.json"), JSON.stringify({
       hasCompletedOnboarding: true,
       projects: { [this.project]: { hasTrustDialogAccepted: true } },
       ...(key ? { customApiKeyResponses: { approved: [key.slice(-20)], rejected: [] } } : {}),
     }))
-    writeFileSync(join(this.folder, "settings.json"), JSON.stringify({ model: process.env.CLAUDE_MODEL ?? "haiku" }))
+    writeFileSync(join(this.folder, "settings.json"), JSON.stringify({ ...login, model: process.env.CLAUDE_MODEL ?? "haiku" }))
   }
 
   protected launch() {

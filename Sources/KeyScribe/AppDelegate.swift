@@ -270,7 +270,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.preloadActiveEngineIfNeeded()
         if let scriptedCapture {
             let engines = ScriptedEngines()
-            let replies = ScriptedReplies()
+            let replies = ScriptedReplies(ledger: ScriptedReplies.ledger(supportDir: KeyScribePaths.supportDir, listensForInput: listensForInput))
             scriptedReplies = replies
             controller.engineForTake = engines.engine(for:)
             scriptedTakes = ScriptedTakeInbox(
@@ -910,13 +910,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         guard let self, self.answerOnPanel else { return true }
                         return self.answers?.isActive != true && self.answers?.showsText != true
                     })
-                runtime.hub.onResult = { [weak spoken, weak self] in
+                runtime.hub.onResult = { [weak spoken, weak self, weak hub = runtime.hub] in
                     self?.scriptedReplies?.noteAnswer(origin: $4, answer: $2)
-                    spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3, origin: $4, cause: $5)
+                    spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3, origin: $4, cause: $5, agent: hub?.kind(of: $0)?.id)
                 }
-                runtime.hub.onEnded = { [weak spoken, weak self] in
+                runtime.hub.onEnded = { [weak spoken, weak self, weak hub = runtime.hub] in
                     self?.scriptedReplies?.noteEnded(origin: $4, body: $2)
-                    spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4)
+                    spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4, agent: hub?.kind(of: $0)?.id)
                 }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
                 runtime.hub.onWithdraw = { [weak spoken] in spoken?.withdraw(conversation: $0) }
@@ -926,8 +926,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 runtime.hub.bundledVersion = { bundled[$0] ?? nil }
                 runtime.hub.onSilence = { [weak spoken] in spoken?.forget(conversation: $0) }
                 spoken.onSpeaking = { [weak self] name in self?.showSpeaking(name) }
-                spoken.onHeard = { [weak controller = self.controller] in controller?.recordSpokenReply($0) }
-                spoken.onUnread = { [weak controller = self.controller] in controller?.recordUnreadReply($0, origin: $1) }
+                spoken.onHeard = { [weak controller = self.controller, weak self] heard in
+                    if let origin = heard.origin { self?.scriptedReplies?.noteRead(origin: origin) }
+                    controller?.recordSpokenReply(heard)
+                }
+                spoken.onUnread = { [weak controller = self.controller, weak self] in
+                    self?.scriptedReplies?.noteUnread(origin: $1, reason: $0.reason)
+                    controller?.recordUnreadReply($0, origin: $1)
+                }
+                if let replies = scriptedReplies, !listensForInput {
+                    spoken.onBusyChange = { [weak replies] in replies?.noteBusy($0) }
+                }
                 spoken.onPendingChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }
                     self?.showAgents(hub)

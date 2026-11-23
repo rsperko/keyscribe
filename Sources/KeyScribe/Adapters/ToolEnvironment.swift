@@ -182,9 +182,10 @@ final class ToolEnvironment: @unchecked Sendable {
         let sessions = sessionTools(agent: agent, setup: setup).map(\.tool)
         let places = ToolSearch.places(
             program: program, chosen: chosen, sessions: sessions, shellPath: shellPath, appPath: appPath, home: home, extra: extra)
-        let isExecutable = self.isExecutable
-        return ToolSearch.find(places) { isExecutable($0) && accepting($0) }
+        return ToolSearch.find(places) { runs($0, accepting: accepting) }
     }
+
+    func runs(_ path: String, accepting: (String) -> Bool = { _ in true }) -> Bool { isExecutable(path) && accepting(path) }
 
     func runEnvironment(tool: String, agent: String, base: [String: String]) -> [String: String] {
         var environment = base

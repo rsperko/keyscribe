@@ -97,7 +97,7 @@ struct SpokenVoiceModelTests {
         let installer = FakeInstaller(installed: true)
         let model = SpokenVoiceModel(installer: installer)
         let fallback = SpokenResultOutputTests.FakeSpeech()
-        let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: fallback)
+        let speech = model.speechWithoutDeadline(player: NaturalSpeechTests.FakePlayer(), fallback: fallback)
         installer.synthesisFails = true
         installer.isIntact = false
         speech.speak("All done.", voice: nil)
@@ -109,7 +109,7 @@ struct SpokenVoiceModelTests {
     @Test func aFailedResultWithItsFilesInPlaceLeavesTheVoiceReady() async {
         let installer = FakeInstaller(installed: true)
         let model = SpokenVoiceModel(installer: installer)
-        let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
+        let speech = model.speechWithoutDeadline(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
         installer.synthesisFails = true
         speech.speak("All done.", voice: nil)
         await settled { model.status == .ready }
@@ -119,7 +119,7 @@ struct SpokenVoiceModelTests {
     @Test func aResultReadByTheMacOSVoiceInsteadIsShownUntilTheNaturalVoicePlaysAgain() async {
         let installer = FakeInstaller(installed: true)
         let model = SpokenVoiceModel(installer: installer)
-        let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
+        let speech = model.speechWithoutDeadline(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
         installer.synthesisFails = true
         speech.speak("All done.", voice: nil)
         await settled { model.fellBack }
@@ -243,7 +243,7 @@ struct SpokenVoiceModelTests {
         let installer = FakeInstaller(installed: true)
         let model = SpokenVoiceModel(installer: installer)
         let player = NaturalSpeechTests.FakePlayer()
-        let speech = model.makeSpeech(player: player, fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
+        let speech = model.speechWithoutDeadline(player: player, fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
         speech.speak("All done.", voice: nil)
         await settled { player.isPlaying }
         #expect(player.isPlaying)
@@ -259,7 +259,7 @@ struct SpokenVoiceModelTests {
         let model = SpokenVoiceModel(installer: installer)
         let before = installer.intactChecks
         let fallback = SpokenResultOutputTests.FakeSpeech()
-        let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: fallback)
+        let speech = model.speechWithoutDeadline(player: NaturalSpeechTests.FakePlayer(), fallback: fallback)
         speech.speak("Done.", voice: nil)
         for _ in 0..<400 where fallback.spoken.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(fallback.spoken.map(\.text) == ["Done."])
@@ -269,7 +269,7 @@ struct SpokenVoiceModelTests {
     @Test func aPreviewThatFallsBackSaysSoOnItsOwnAndLeavesTheReplyAdvisoryAlone() async {
         let installer = FakeInstaller(installed: true)
         let model = SpokenVoiceModel(installer: installer)
-        let preview = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), preview: true, details: { _ in [] })
+        let preview = model.speechWithoutDeadline(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), preview: true, details: { _ in [] })
         installer.synthesisFails = true
         preview.speak("Sample.", voice: nil)
         await settled { model.previewFallbackReason == "the natural voice failed" }
@@ -301,11 +301,11 @@ struct SpokenVoiceModelTests {
         let model = SpokenVoiceModel(installer: installer)
         var used = 0
         model.onVoiceUsed = { used += 1 }
-        let reply = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
+        let reply = model.speechWithoutDeadline(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), details: { _ in [] })
         reply.speak("Reply.", voice: nil)
         await settled()
         #expect(used == 0)
-        let preview = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), preview: true, details: { _ in [] })
+        let preview = model.speechWithoutDeadline(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), preview: true, details: { _ in [] })
         preview.speak("Sample.", voice: nil)
         await settled { used == 1 }
         #expect(used == 1)
@@ -315,7 +315,7 @@ struct SpokenVoiceModelTests {
         let installer = FakeInstaller(installed: true)
         let model = SpokenVoiceModel(installer: installer)
         let attempts = SpokenAttempts()
-        let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), attempts: attempts, details: { _ in [] })
+        let speech = model.speechWithoutDeadline(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), attempts: attempts, details: { _ in [] })
         installer.synthesisFails = true
         speech.speak("docs: Done.", voice: nil)
         await settled { model.fallbackReason != nil }
@@ -327,5 +327,14 @@ struct SpokenVoiceModelTests {
         speech.speak("a notice", voice: nil)
         await settled { model.fallbackEntry == nil }
         #expect(model.fallbackEntry == nil)
+    }
+}
+
+private extension SpokenVoiceModel {
+    func speechWithoutDeadline(
+        player: any AudioPlaying, fallback: any SpeechSynthesizing, attempts: SpokenAttempts? = nil, preview: Bool = false,
+        details: @escaping @Sendable (Bool) -> [SpokenAttempt.Detail] = SpokenAttempts.environment
+    ) -> NaturalSpeech {
+        makeSpeech(player: player, fallback: fallback, attempts: attempts, preview: preview, details: details, synthesisLimit: { _ in .seconds(3600) })
     }
 }

@@ -855,7 +855,8 @@ A take that would no longer fit what is on screen is not sent, and never sends l
 example, the user sent that conversation a message after the take was decided, its question was answered,
 or its prompt box already holds text that the take cannot join. The HUD says so, why, and how to recover (“Not sent to docs: its
 prompt box already has text. Send or clear that text there, then say this again”); it never says who wrote
-that text. Text already in the agent's prompt box is left exactly as it was, and what was said stays in
+that text. When the app cannot see the prompt box of a conversation that is not in front, a take for it is sent on
+its own, as a message the agent takes beside whatever is typed there. Either way, text already in the agent's prompt box is left exactly as it was, and what was said stays in
 History. With **Read Agent Replies Aloud** on, a take the conversation did not take is also spoken once, as a short
 line naming the conversation and the reason (“docs didn’t take that: its prompt box has text”); what to do
 stays in the HUD and History. It is spoken whether that happens at once or after the take was queued, and even with the conversation in front:
@@ -2576,8 +2577,8 @@ the connector as Unavailable, with guidance to reinstall the app; nothing else i
 
 The Pi connector is files only: Install writes an extension folder into the setup's `extensions/` folder,
 which every Pi using that setup loads on its own, and Uninstall deletes that folder; Pi is never asked to run
-a command. Because Pi is only consulted for its version, a Pi older than the first version the connector
-works with (`PiCLI.minimumVersion`) shows **Pi too old** with that version and advice to update, and offers
+a command. Because Pi is only consulted for its version, a Pi older than the oldest version the connector
+supports (`PiCLI.minimumVersion`) shows **Pi too old** with that version and advice to update, and offers
 no Install; when the folder is in place it still offers Uninstall Connector…, since removal needs nothing
 from Pi. A `settings.json` whose `extensions` setting is not a list shows **Something went wrong** with the file named
 and **Try Again**, never Ready, because whether Pi turned the connector off is then unknown; a file Pi cannot read
@@ -2590,8 +2591,9 @@ Conversations row offers `omp --resume` to copy, and the label's update step rea
 the connector off is asked of omp (`omp config get disabledExtensions`), never read from its files, and shows
 **Turned off in omp**; when omp cannot answer, the folder shows **Something went wrong** with omp's own reason
 and **Try Again**, which asks omp again, never Ready and never Repair, since reinstalling cannot fix omp's
-configuration. An omp below the version the connector was proven on (`OmpCLI.minimumVersion`) shows
-**omp too old**, with advice to run `omp update`. Its **Configuration folders** help says that a conversation
+configuration. An omp below the oldest version the connector supports (`OmpCLI.minimumVersion`) shows
+**omp too old**, with the version it needs, why that is the floor (no older omp has been checked with the
+connector), and advice to run `omp update`. Its **Configuration folders** help says that a conversation
 started with `--profile` uses that profile's folder, learned once it connects, and that when another agent reads
 the same folder each agent's connector works only in that agent.
 

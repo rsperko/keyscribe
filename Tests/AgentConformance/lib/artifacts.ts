@@ -22,7 +22,7 @@ export async function failureBundle(
   mkdirSync(folder, { recursive: true, mode: 0o700 })
   writeFileSync(join(folder, "failure.json"), JSON.stringify({ case: label, at: new Date().toISOString(), error: String(error),
     stack: error instanceof Error ? error.stack : undefined, instance }, null, 2))
-  for (const name of ["app.log", "conformance.json"]) {
+  for (const name of ["app.log", "conformance.json", "scripted-reads.jsonl"]) {
     const path = join(instance, name)
     if (existsSync(path)) writeFileSync(join(folder, name), tail(path))
   }

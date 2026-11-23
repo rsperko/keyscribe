@@ -6,6 +6,8 @@ extension CodexInstall {
         isCommandLine(resolved: path) && isCommandLine(resolved: resolve(path))
     }
 
+    static func runs(_ path: String, in tools: ToolEnvironment = .shared) -> Bool { tools.runs(path, accepting: { accepts($0) }) }
+
     static func search(in tools: ToolEnvironment = .shared, home: String? = nil, chosen: String? = nil) -> ToolSearch.Result {
         tools.search(program: command, agent: CodexThread.agent, setup: home, chosen: chosen, extra: [], accepting: { accepts($0) })
     }

@@ -15,6 +15,7 @@ struct ExtensionAgent: Sendable {
     struct Wording: Sendable {
         var disabledAdvice: String
         var updateStep: String
+        var minimumReason: String?
         var alsoSearched: [String] = []
         var foldersHelp: String?
     }
@@ -80,7 +81,7 @@ extension AgentConnectorCopy {
             },
             toolTooOldLabel: "\(name) too old",
             toolTooOldAdvice: { found in
-                "\(name) \(found) is older than \(ExtensionAgent.describe(agent.minimumVersion)), the first version the connector works with. \(wording.updateStep), then come back here."
+                "\(name) \(found) is older than \(ExtensionAgent.describe(agent.minimumVersion)), the oldest version the connector supports\(wording.minimumReason.map { ": \($0)" } ?? ""). \(wording.updateStep), then come back here."
             },
             foldersHelp: wording.foldersHelp)
     }

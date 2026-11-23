@@ -16,6 +16,7 @@ final class SpokenResultOutput {
         var order: Int?
         var connection: String?
         var origin: String?
+        var agent: String?
         var refusal = false
         var merged: [Source] = []
         var shownOnly = false
@@ -24,9 +25,9 @@ final class SpokenResultOutput {
         var failure: String?
         var cause: SpokenResult.Cause?
         var text: String { standalone ? body : SpokenResult.prefaced(body, name: name, cause: cause) }
-        var unheardOrigins: [String] {
+        var unheard: [Source] {
             guard !replayed, !notice, !standalone, !heardAlready else { return [] }
-            return merged.isEmpty ? [origin].compactMap { $0 } : merged.compactMap(\.origin)
+            return merged.isEmpty ? [Source(origin: origin, failure: failure, agent: agent)] : merged
         }
     }
 
@@ -34,11 +35,13 @@ final class SpokenResultOutput {
         let task: Task<Void, Never>
         let name: String
         let origin: String?
+        let agent: String?
     }
 
     struct Source: Equatable {
         let origin: String?
         let failure: String?
+        var agent: String? = nil
     }
 
     struct Heard: Equatable {
@@ -63,6 +66,7 @@ final class SpokenResultOutput {
         case disconnected(name: String)
         case stopped
         case notStarted
+        case noText
 
         var line: String {
             switch self {
@@ -73,6 +77,20 @@ final class SpokenResultOutput {
             case .disconnected(let name): "Not read aloud: \(name) was disconnected"
             case .stopped: "Not read aloud: reading replies was stopped"
             case .notStarted: "Not read aloud: it did not start playing"
+            case .noText: "Not read aloud: it had no text"
+            }
+        }
+
+        var reason: String {
+            switch self {
+            case .inFront: "its conversation was in front when it finished"
+            case .replaced: "something newer from its conversation replaced it"
+            case .dictationStarted: "a dictation started before it played"
+            case .cancelled: "reading it was cancelled"
+            case .disconnected: "its conversation was disconnected"
+            case .stopped: "reading replies was stopped"
+            case .notStarted: "it did not start playing"
+            case .noText: "it had no text"
             }
         }
     }
@@ -110,15 +128,38 @@ final class SpokenResultOutput {
     private var ducked = false
     private var duckGraceTask: Task<Void, Never>?
     private var nextOrder = 0
-    private(set) var queued: [Queued] = []
-    private var generating: [String: Preparing] = [:]
-    private var checkingNotice: [String: Task<Void, Never>] = [:]
-    private var playing: Queued?
+    private(set) var queued: [Queued] = [] { didSet { noteBusy() } }
+    private var generating: [String: Preparing] = [:] { didSet { noteBusy() } }
+    private var checkingNotice: [String: Task<Void, Never>] = [:] { didSet { noteBusy() } }
+    private var playing: Queued? { didSet { noteBusy() } }
     private var heard: Queued?
-    private var replay: Queued?
-    private var answering: (item: Queued, stillTrue: () -> Bool)?
+    private var replay: Queued? { didSet { noteBusy() } }
+    private var answering: (item: Queued, stillTrue: () -> Bool)? { didSet { noteBusy() } }
     private var playingCheck: (() -> Bool)?
-    private var announced = false
+    private var announced = false { didSet { noteBusy() } }
+    private var wasBusy = false
+    var onBusyChange: ((Bool) -> Void)?
+
+    private var hasWorkAhead: Bool {
+        !queued.isEmpty || !generating.isEmpty || !checkingNotice.isEmpty || replay != nil || answering != nil
+    }
+
+    private var busy: Bool { hasWorkAhead || (playing != nil && !announced) }
+
+    private var busyCheckPending = false
+
+    private func noteBusy() {
+        guard onBusyChange != nil, !busyCheckPending else { return }
+        busyCheckPending = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            busyCheckPending = false
+            let now = busy
+            guard now != wasBusy else { return }
+            wasBusy = now
+            onBusyChange?(now)
+        }
+    }
     private var playingRequested: Set<String> = []
     private var noticed: [String: AgentAttention] = [:]
     private(set) var pendingRequested: Set<String> = [] {
@@ -127,6 +168,16 @@ final class SpokenResultOutput {
     var onSpeaking: ((Speaking?) -> Void)?
     var onHeard: ((Heard) -> Void)?
     var onUnread: ((Unread, _ origin: String) -> Void)?
+
+    private static func described(_ origin: String?, _ agent: String?) -> String {
+        "reply \(origin.map { "to request \($0)" } ?? "with no request") from \(agent ?? "an agent")"
+    }
+
+    private func unheard(_ why: Unread, _ source: Source) {
+        note("\(Self.described(source.origin, source.agent)) not read aloud: \(why.reason)")
+        if let origin = source.origin { onUnread?(why, origin) }
+    }
+    private let note: (String) -> Void
     var onPendingChange: (() -> Void)?
     var pendingSummaries: Int { generating.count }
 
@@ -140,8 +191,10 @@ final class SpokenResultOutput {
         inFront: @escaping @MainActor (String) async -> Bool = { _ in false },
         duck: @escaping (Bool) -> Void = { _ in },
         duckGrace: Duration = .seconds(1),
-        mayShow: @escaping () -> Bool = { true }
+        mayShow: @escaping () -> Bool = { true },
+        note: @escaping (String) -> Void = { Log.agents.notice("\($0, privacy: .public)") }
     ) {
+        self.note = note
         self.client = client
         self.permits = permits
         self.speech = speech
@@ -215,9 +268,8 @@ final class SpokenResultOutput {
         releasing = nil
     }
 
-    private var isIdle: Bool {
-        playing == nil && !speech.isSpeaking && queued.isEmpty && generating.isEmpty && checkingNotice.isEmpty
-            && answering == nil && replay == nil
+    var isIdle: Bool {
+        !hasWorkAhead && playing == nil && !speech.isSpeaking
     }
 
     private func settle() {
@@ -306,14 +358,16 @@ final class SpokenResultOutput {
 
     private func report(_ items: [Queued], sparing answered: String? = nil, _ why: (String) -> Unread) {
         for item in items {
-            for origin in item.unheardOrigins where origin != answered { onUnread?(why(item.name), origin) }
+            for source in item.unheard where source.origin == nil || source.origin != answered { unheard(why(item.name), source) }
         }
     }
 
     private func drop(preparing key: String, sparing answered: String? = nil, _ why: (String) -> Unread) {
         guard let preparing = generating.removeValue(forKey: key) else { return }
         preparing.task.cancel()
-        if let origin = preparing.origin, origin != answered { onUnread?(why(preparing.name), origin) }
+        if preparing.origin == nil || preparing.origin != answered {
+            unheard(why(preparing.name), Source(origin: preparing.origin, failure: nil, agent: preparing.agent))
+        }
     }
 
     private func drop(queuedWhere matches: (Queued) -> Bool, sparing answered: String? = nil, _ why: (String) -> Unread) {
@@ -336,28 +390,31 @@ final class SpokenResultOutput {
     }
 
     func finished(
-        conversation: String, handle: String, answer: String, requested: Bool = false, origin: String? = nil, cause: SpokenResult.Cause? = nil
+        conversation: String, handle: String, answer: String, requested: Bool = false, origin: String? = nil, cause: SpokenResult.Cause? = nil,
+        agent: String? = nil
     ) {
         let settings = settings()
         guard settings.enabled else { return }
         let plan = SpokenResult.plan(answer: answer, configured: !settings.connection.isEmpty)
         announce(
             conversation: conversation, handle: handle, plan == .nothing && requested ? .speak(SpokenResult.noTextBody) : plan,
-            requested: requested, origin: origin, cause: cause)
+            requested: requested, origin: origin, cause: cause, agent: agent)
     }
 
-    func ended(conversation: String, handle: String, body: String, requested: Bool, origin: String? = nil) {
+    func ended(conversation: String, handle: String, body: String, requested: Bool, origin: String? = nil, agent: String? = nil) {
         guard settings().enabled else { return }
-        announce(conversation: conversation, handle: handle, .speak(body), requested: requested, origin: origin)
+        announce(conversation: conversation, handle: handle, .speak(body), requested: requested, origin: origin, agent: agent)
     }
 
     private func announce(
-        conversation: String, handle: String, _ plan: SpokenResult.Plan, requested: Bool, origin: String?, cause: SpokenResult.Cause? = nil
+        conversation: String, handle: String, _ plan: SpokenResult.Plan, requested: Bool, origin: String?, cause: SpokenResult.Cause? = nil,
+        agent: String? = nil
     ) {
+        let source = Source(origin: origin, failure: nil, agent: agent)
         let settings = settings()
         let usable = connection(settings.connection).flatMap { permits($0) ? $0 : nil }
         if plan == .nothing {
-            Log.agents.info("reply from \(handle, privacy: .private) not read aloud: it had no text")
+            unheard(.noText, source)
             return
         }
         load()
@@ -371,9 +428,8 @@ final class SpokenResultOutput {
             let shown = requested ? false : await inFront(conversation)
             guard !Task.isCancelled, let self else { return }
             guard !shown else {
-                Log.agents.info("reply from \(handle, privacy: .private) not read aloud: it was in front when it finished")
                 self.generating.removeValue(forKey: key)
-                if let origin { self.onUnread?(.inFront(name: handle), origin) }
+                self.unheard(.inFront(name: handle), source)
                 return self.settle()
             }
             var summary = Summary()
@@ -395,17 +451,17 @@ final class SpokenResultOutput {
             guard !Task.isCancelled else { return }
             self.generating.removeValue(forKey: key)
             guard self.settings().enabled else {
-                if let origin { self.onUnread?(.stopped, origin) }
+                self.unheard(.stopped, source)
                 return self.settle()
             }
             self.enqueue(summary.text.isEmpty
                 ? Queued(
                     conversation: conversation, name: handle, body: SpokenResult.unavailableBody, unavailable: true, requested: requested,
-                    order: order, origin: origin, failure: summary.failure, cause: cause)
+                    order: order, origin: origin, agent: agent, failure: summary.failure, cause: cause)
                 : Queued(
                     conversation: conversation, name: handle, body: summary.text, requested: requested, order: order, connection: summarizedBy,
-                    origin: origin, returned: summary.returned, cause: cause))
-        }, name: handle, origin: origin)
+                    origin: origin, agent: agent, returned: summary.returned, cause: cause))
+        }, name: handle, origin: origin, agent: agent)
     }
 
     struct Summary {
@@ -426,7 +482,7 @@ final class SpokenResultOutput {
             return Summary(text: held.text, returned: held.shortened ? returned : nil)
         } catch {
             let reason = error is DeadlineExceeded ? "The summary took too long." : RewriteService.sanitizedReason(for: error)
-            Log.agents.info("spoken result not generated for \(handle, privacy: .public): \(reason, privacy: .public)")
+            Log.agents.info("spoken result not generated: \(reason, privacy: .public)")
             return Summary(failure: reason)
         }
     }
@@ -557,6 +613,7 @@ final class SpokenResultOutput {
             .replaced(name: $0)
         }
         queued.insert(item, at: queued.firstIndex { ($0.order ?? 0) > order } ?? queued.endIndex)
+        if !item.notice { note("\(Self.described(item.origin, item.agent)) queued to be read") }
         playNext()
     }
 
@@ -573,9 +630,10 @@ final class SpokenResultOutput {
         syncDuck()
         onSpeaking?(Speaking(name: playing.name, text: playing.body, textOnly: playing.shownOnly))
         if !playing.replayed, !playing.standalone, !playing.notice, !playing.heardAlready {
-            let sources = playing.merged.isEmpty
-                ? [Source(origin: playing.origin, failure: playing.failure)] : playing.merged.filter { $0.origin != nil }
+            let sources = playing.merged.isEmpty ? [Source(origin: playing.origin, failure: playing.failure, agent: playing.agent)] : playing.merged
             for source in sources {
+                note("\(Self.described(source.origin, source.agent)) \(playing.shownOnly ? "shown as text" : "read aloud")")
+                guard playing.merged.isEmpty || source.origin != nil else { continue }
                 onHeard?(Heard(
                     conversation: playing.conversation, name: playing.name, text: playing.text,
                     connection: playing.connection, origin: source.origin,
@@ -635,6 +693,7 @@ final class SpokenResultOutput {
 
     private func advance() {
         guard settings().enabled else {
+            report(queued) { _ in .stopped }
             queued = []
             pendingRequested = []
             replay = nil
@@ -661,8 +720,8 @@ final class SpokenResultOutput {
             let notice = SpokenResult.unavailable(names: [next.name] + merged.map(\.name))
             queued.removeAll { $0.unavailable && !$0.requested }
             next = Queued(
-                conversation: next.conversation, name: notice.name, body: notice.body, unavailable: true, origin: next.origin,
-                merged: merged.isEmpty ? [] : ([next] + merged).map { Source(origin: $0.origin, failure: $0.failure) },
+                conversation: next.conversation, name: notice.name, body: notice.body, unavailable: true, origin: next.origin, agent: next.agent,
+                merged: merged.isEmpty ? [] : ([next] + merged).map { Source(origin: $0.origin, failure: $0.failure, agent: $0.agent) },
                 failure: next.failure, cause: merged.isEmpty ? next.cause : nil)
         }
         play(next, requested: next.requested ? [next.conversation] : [])
@@ -680,7 +739,8 @@ final class SpokenResultOutput {
         resident = true
         playing = item
         silencer.speak(item.text, voice: settings().voice, with: speech)
-        if !speech.isSpeaking {
+        if !speech.isSpeaking, playing == item {
+            report([item]) { _ in .notStarted }
             playing = nil
             pendingRequested.subtract(playingRequested)
             playingRequested = []

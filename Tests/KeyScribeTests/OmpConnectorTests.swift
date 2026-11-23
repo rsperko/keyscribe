@@ -164,10 +164,12 @@ struct OmpConnectorTests {
     }
 
     @Test func anOmpOlderThanTheFloorIsNamedTooOld() async {
-        let made = make(version: "omp/18.21.9\n")
+        let made = make(version: "omp/18.22.1\n")
         let state = await made.omp.check(tool: "/test-bin/omp", target: target(made.folder))
-        #expect(state == .toolTooOld("18.21.9"))
-        #expect(made.omp.copy.toolTooOldAdvice("18.21.9").contains("18.22.2"))
+        #expect(state == .toolTooOld("18.22.1"))
+        let advice = made.omp.copy.toolTooOldAdvice("18.22.1")
+        #expect(advice.contains("older than 18.22.2, the oldest version the connector supports: no older omp has been checked with it."))
+        #expect(await make(version: "omp/18.22.2\n").omp.check(tool: "/test-bin/omp", target: target(made.folder)) != .toolTooOld("18.22.2"))
     }
 
     @Test func theCopyNamesNoReloadCommandOmpDoesNotHaveAndSaysHowToReopenTheConversation() {

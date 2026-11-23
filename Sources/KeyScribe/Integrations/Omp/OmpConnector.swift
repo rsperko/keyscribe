@@ -16,6 +16,7 @@ extension ExtensionAgent {
         recognizedFiles: ["config.yml", "models.yml", "agent.db", "extensions", "sessions"],
         wording: .init(
             disabledAdvice: "Turn the extension back on in omp\u{2019}s /extensions.", updateStep: "Run omp update",
+            minimumReason: "no older omp has been checked with it",
             foldersHelp: "A configuration folder is where omp loads its settings from: \(AgentProcesses.Rule.omp.defaultSetup), or the folder \(AgentProcesses.Rule.omp.setupVariable) names. \(Branding.appName) lists the default folder, the folders its connector is installed in, the folders open conversations use, and the one your login shell sets. A conversation started with --profile uses that profile\u{2019}s own folder, which \(Branding.appName) learns once the conversation connects; choose Add Folder\u{2026} to install the connector there. If another agent reads the same folder, each agent\u{2019}s connector works only in that agent."))
 }
 

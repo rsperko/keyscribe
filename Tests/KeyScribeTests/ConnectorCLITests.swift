@@ -7,12 +7,15 @@ import Testing
 struct ConnectorCLITests {
     final class Connector: AgentConnector {
         let kind = AgentKind(id: "folder", displayName: "Folder Agent", connectorName: "Folder Agent extension")
-        let copy = BBPluginConnector(agentsDir: URL(fileURLWithPath: "/tmp"), pluginName: "p").copy
+        var copy = BBPluginConnector(agentsDir: URL(fileURLWithPath: "/tmp"), pluginName: "p").copy
         let isBundled = true
         let bundledVersion: String? = "1"
         let defaultFolder: URL
         var installed = false
         var installFailure: String?
+        var tooOld: String?
+        var variable: String?
+        var folderVariable: String? { variable }
         private(set) var installedInto: [String] = []
 
         init(defaultFolder: URL) { self.defaultFolder = defaultFolder }
@@ -20,9 +23,13 @@ struct ConnectorCLITests {
         func hasFiles(in target: ConnectorTarget) -> Bool { installed }
         func manualUninstall(for target: ConnectorTarget) -> [String] { [] }
         func recognizes(folder: URL) -> Bool { true }
-        func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result? { nil }
+        func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result? {
+            let place = ToolSearch.Place(path: "/test-bin/folder", source: .usual)
+            return tooOld == nil ? nil : ToolSearch.Result(tool: place, searched: [place])
+        }
         func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State {
             if target.removing { return installed ? .removalUnfinished(nil) : .status(.notInstalled) }
+            if let tooOld { return .toolTooOld(tooOld) }
             return installed ? .status(.ready) : .status(.notInstalled)
         }
         func install(tool: String, target: ConnectorTarget) async throws {
@@ -85,6 +92,16 @@ struct ConnectorCLITests {
         #expect(outcome.lines.contains { $0.contains("notInstalled") })
         #expect(!fixture.connector.installed)
         #expect(fixture.enrolled.isEmpty)
+    }
+
+    @Test func aToolTooOldSaysWhichVersionTheConnectorNeedsAndWhy() async {
+        let fixture = Fixture()
+        fixture.connector.tooOld = "0.1"
+        fixture.connector.copy.toolTooOldAdvice = { "Folder Agent \($0) is older than 0.2, the oldest version the connector supports." }
+        let outcome = await fixture.run(.status)
+        #expect(outcome.lines.contains { $0.contains("tool too old: 0.1 (Folder Agent 0.1 is older than 0.2, the oldest version the connector supports.)") })
+        fixture.connector.copy.toolTooOldAdvice = { _ in "" }
+        #expect(await fixture.run(.status).lines.contains { $0.contains("tool too old: 0.1\t") })
     }
 
     @Test func aFailedInstallExitsNonZeroWithTheConnectorsReason() async {
