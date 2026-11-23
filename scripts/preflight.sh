@@ -756,12 +756,12 @@ else
   chk_c_agents() {
     if ! ask "Changed agent delivery, connectors, or the bb plugin this release?"; then result skip "agents (agent code unchanged)"; return; fi
     info "  Expected: give each agent you ship a long task (a Bash loop that waits for a file), then dictate to it while it runs."
-    info "  Claude Code in front: the dictation shows as your own queued prompt and the agent answers it after the current step."
+    info "  Claude Code: the HUD says the dictation is queued; it is sent as your own prompt when the running turn ends, and the agent answers it."
     info "  Pi, omp or a bb thread, not in front: the HUD says Sent and the agent answers after the current step."
     info "  omp idle: a dictation starts a turn at once (omp would hold a follow-up), and its model's own question is never answered by one."
     info "  Any agent stopped on an approval: dictating never answers it; the HUD says it waits for approval; after you answer, the message goes through."
     info "  bb: an idle thread starts a turn; renaming a thread by voice sets its bb title, and its sidebar chip disappears."
-    if ask "  every agent took the dictation mid-turn, and no approval was ever answered by a dictation"; then result pass "agents"; else result fail "an agent check failed"; fi
+    if ask "  every agent took the dictation as described, and no approval was ever answered by a dictation"; then result pass "agents"; else result fail "an agent check failed"; fi
   }
   guard c-agents "$AS" chk_c_agents
 
