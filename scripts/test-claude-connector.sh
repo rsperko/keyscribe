@@ -5,6 +5,7 @@
 # any test when the CLI is missing, older than the validated minimum, or has no test runner, so an
 # incompatible CLI is never reported as a test failure. Swift builds and tests never need the CLI.
 set -euo pipefail
+exec </dev/null
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MIN_VERSION="2.1.316"
