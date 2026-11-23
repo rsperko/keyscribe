@@ -1052,7 +1052,7 @@ in the header. Unlike a reply summary, it appears as soon as the answer arrives,
 already expanded, and the status reads "Getting ready to speak · Esc stops" until audio starts, then
 "Speaking · Esc stops playback". Collapsing or expanding an answer's text does not change the remembered
 choice for reply summaries. The panel shows the answer as written; the voice reads it without Markdown, code
-marks, or links ("a link"), and ends a sentence at a paragraph break or a list item that has no closing mark of its own,
+marks, links with or without their `http://` ("a link"), or the folders of a file path (only the file's name), and ends a sentence at a paragraph break or a list item that has no closing mark of its own,
 so a heading or a word on its own line is not run into the next one. The natural voice reads the answer a sentence at a time, so the first sentence
 plays while the rest are prepared; a sentence the natural voice cannot make or play in time is read by the
 macOS voice together with the rest. A copy button in the header copies the answer as written; its glyph
@@ -2395,7 +2395,9 @@ a non-English summary is read by an English speaker or the macOS default voice.
 
 Every summary starts with the exact name of the conversation that produced it, even with only one open, and
 the default instruction asks for one or two short sentences, about 25 words in all, leading with anything that failed, is
-unverified, or waits on the developer, else the main result, and leaving out everything else. When the reply came
+unverified, or waits on the developer, else the main result, and leaving out everything else. It keeps to what the reply
+says, and names a link, path, hash, ID, or address only by its kind ("the issue"), since a listener cannot use one
+read aloud, even spelled out. When the reply came
 right after the user's own dictation and the user has moved on from it (a couple of minutes have passed, they dictated
 to another conversation since, or other replies are waiting), the summary is asked with that dictation and opens with
 two to five words naming it; a reply while they are still on that request needs no cue and is summarized alone, within the same length, while the order above still decides what follows; when it came after a message someone else sent, the name is joined by who, in a few words and

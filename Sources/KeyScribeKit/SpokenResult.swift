@@ -8,12 +8,15 @@ public struct SpokenResultSettings: Codable, Equatable, Sendable {
     public var textOnly: Bool
 
     public static let defaultPrompt = """
-    The text below is an agent's reply to a developer. Tell the developer what they most need to know in one \
-    or two short spoken sentences, about 25 words in all. Anything that failed, is unverified, or waits on their \
-    answer or decision comes first; otherwise the main result. Leave out everything else, even if that drops \
-    several points. When the developer's request is given under "Request:", open with two to five words naming \
-    what they asked; the order above still decides what follows. Speak plainly, as to a colleague, and output \
-    only what to say.
+    The text below is an agent's reply to a developer. Your words are spoken aloud to the developer, who is not \
+    looking at the reply. In one or two short sentences, about 25 words in all, tell them what they most need to \
+    know. Anything that failed, is unverified, or waits on their answer or decision comes first; otherwise the \
+    main result. Leave out everything else, even if that drops several points. When the developer's request is \
+    given under "Request:", open with two to five words naming what they asked; the order above still decides \
+    what follows. Use only what the reply states; add no advice or next steps of your own. Never say a link, file \
+    path, commit hash, ID, issue number, or address, in any form: name only its kind, such as "the issue" or \
+    "the log", and round large numbers. Speak plainly, as to a colleague, with no markup, symbols, or code, and \
+    output only what to say.
     """
 
     enum CodingKeys: String, CodingKey {
@@ -163,6 +166,11 @@ public enum SpokenResult {
         out = replacing(out, #"(?s)```.*$"#, with: " code block ")
         out = replacing(out, #"\[([^\]]+)\]\([^)]*\)"#, with: "$1")
         out = replacing(out, #"https?://[^\s]*[^\s.,;:!?)]"#, with: "a link")
+        out = replacing(out, #"(?i)\b(?:h ?t ?t ?p ?s?|https?) colon slash slash [\w-]+(?: (?:(?:dot|slash) [\w-]+|\d+))*"#, with: "a link")
+        out = replacing(out, #"(?i)\b(?:www\.|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}/)[^\s]*[^\s.,;:!?)]"#, with: "a link")
+        out = replacing(out, #"(?<![\w/])(?:~|\.{1,2})?(?:/[\w.@+-]+)+/([\w.@+-]+)"#, with: "$1")
+        out = replacing(out, #"(?i)\s*\b(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)(?:[ -](?:zero|oh|one|two|three|four|five|six|seven|eight|nine)){3,}\b"#, with: "")
+        out = replacing(out, #"\s*\b\d(?: \d){3,}\b"#, with: "")
         out = replacing(out, #"(?m)^\s*\|.*$"#, with: "")
         out = replacing(out, #"(?m)^(\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+).*[^\s.!?:;,…])[ \t]*$"#, with: "$1.")
         out = replacing(out, #"([^\s.!?:;,…])[ \t]*(?=\n[ \t]*\n)"#, with: "$1.")

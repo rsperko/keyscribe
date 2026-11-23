@@ -53,6 +53,21 @@ struct SpokenResultTests {
     }
 
     @Test(arguments: [
+        ("Posted at www.slashdot.org/published/05721 today.", "Posted at a link today."),
+        ("Read slashdot.org/published/05721.", "Read a link."),
+        ("See http colon slash slash www dot slashdot dot org slash published 05721 for it.", "See a link for it."),
+        ("Open h t t p s colon slash slash example dot com.", "Open a link."),
+        ("Saved to /Users/me/src/app/Sources/Config.swift and ~/notes/todo.md.", "Saved to Config.swift and todo.md."),
+        ("Use and/or the 3.2 release, see e.g. the docs.", "Use and/or the 3.2 release, see e.g. the docs."),
+        ("You opened issue seven seven two one three and assigned it.", "You opened issue and assigned it."),
+        ("Published 0 5 7 2 1 today.", "Published today."),
+        ("Counted one, two, three and 1 2 3 of them.", "Counted one, two, three and 1 2 3 of them."),
+    ])
+    func theSpokenFormNeverReadsOutALinkOrAPath(text: String, spoken: String) {
+        #expect(SpokenResult.spokenForm(text) == spoken)
+    }
+
+    @Test(arguments: [
         ("Extra\n\n`sleep 20` is still running.", "Extra. sleep 20 is still running."),
         ("Done!\n\nNext step", "Done! Next step"),
         ("Checked:\n\n- the parser\n- the lexer", "Checked: the parser. the lexer."),
@@ -211,6 +226,14 @@ struct SpokenResultTests {
         #expect(prompt.contains("about 25 words in all"))
         #expect(prompt.contains("under \"Request:\", open with two to five words naming"))
         #expect(prompt.contains("comes first"))
+    }
+
+    @Test func theDefaultPromptNamesWhatALinkOrIdentifierPointsToInsteadOfReadingIt() {
+        let prompt = SpokenResultSettings.defaultPrompt
+        #expect(prompt.contains("Never say a link, file path, commit hash, ID, issue number, or address, in any form"))
+        #expect(prompt.contains("name only its kind"))
+        #expect(prompt.contains("round large numbers"))
+        #expect(prompt.contains("Use only what the reply states"))
     }
 
     @Test func aPlainReplyNeedsNoTokenNoteAndABoundedRequestNeverExceedsTheInputLimit() {
