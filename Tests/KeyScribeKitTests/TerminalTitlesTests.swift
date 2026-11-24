@@ -27,9 +27,9 @@ struct TerminalTitlesTests {
     }
 
     @Test func anAgentDirectlyInATerminalAppIsReadByOneScriptMatchedByItsTTY() throws {
-        let read = try #require(read(30, ghosttyFacts()))
+        let title = try #require(read(30, ghosttyFacts()))
         let ghostty = try route("Ghostty") as! ScriptedTerminalRoute
-        #expect(read == TitleRead(
+        #expect(title == TitleRead(
             route: "Ghostty", source: .script(app: Self.ghostty, pid: 10, body: try #require(ghostty.titleScript)), pane: ["/dev/ttys004"]))
     }
 
@@ -178,9 +178,9 @@ struct TerminalTitlesTests {
         let facts = Facts()
             .add(10, parent: 1, ["/Applications/cmux.app/Contents/MacOS/cmux"], app: "com.cmuxterm.app")
             .add(30, parent: 10, tty: "/dev/ttys004", ["codex"], environment: ["CMUX_SURFACE_ID": surface])
-        let read = try #require(read(30, facts))
-        #expect(read.pane == [surface])
-        guard case .script(let app, let pid, _) = read.source else {
+        let title = try #require(read(30, facts))
+        #expect(title.pane == [surface])
+        guard case .script(let app, let pid, _) = title.source else {
             Issue.record("expected a script")
             return
         }
