@@ -63,7 +63,7 @@ struct UltimateHostTests {
             }, openPage: { url in
                 front.openedPages.append(url.absoluteString)
                 return true
-            })
+            }, now: { front.now })
     }
 
     private func session(_ id: String, _ home: String = home) -> String {
@@ -339,6 +339,27 @@ struct UltimateHostTests {
         #expect(press?.copy?.instance == Self.home)
         #expect(press?.conversation == nil)
         #expect(press?.allowsNewConversation == false)
+    }
+
+    @Test func aProjectPageInFrontThatHasNotClaimedFocusLatelyIsSilentNotEmpty() async {
+        let front = Front()
+        front.app = Self.browser
+        front.pages["cg:400"] = "http://127.0.0.1:4747/?conversation=61"
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        #expect(await ultimate.focusInFront(requireClaim: false)?.pageSilent == true)
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: false))
+        #expect(await ultimate.focusInFront(requireClaim: false)?.pageSilent == true)
+        ultimate.observe(.shown(session: "53@\(Self.home)", on: true, pageConversation: "53"))
+        let claimedElsewhere = await ultimate.focusInFront(requireClaim: false)
+        #expect(claimedElsewhere?.conversation == nil)
+        #expect(claimedElsewhere?.pageSilent == false)
+        front.now = front.now.addingTimeInterval(UltimateHost.pageReportsWithin + 1)
+        #expect(await ultimate.focusInFront(requireClaim: false)?.pageSilent == true)
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        let claimed = await ultimate.focusInFront(requireClaim: false)
+        #expect(claimed?.conversation == location("61"))
+        #expect(claimed?.pageSilent == false)
     }
 
     @Test func aPageComingToTheFrontIsRememberedSoOpenCanRaiseItWithoutAnyPress() async {

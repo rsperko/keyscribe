@@ -211,10 +211,12 @@ class VerificationTests(unittest.TestCase):
         ids = {c.id for c in plan}
         self.assertTrue({"swift", "tools", "claude-connector", "pi-connector", "omp-connector", "bb-plugin", "codex-connector", "ultimate-connector"} <= ids)
         self.assertTrue({f"live-{agent}" for agent in ["claude", "pi", "omp", "bb", "codex", "ultimate"]} <= ids)
-        self.assertTrue({"build", "ultimate-live", "ultimate-page"} <= ids)
+        self.assertTrue({"build", "ultimate-live", "ultimate-page", "ultimate-page-smoke"} <= ids)
         for check in plan:
-            if check.id.startswith("live-") or check.id in {"ultimate-live", "ultimate-page"}:
+            if check.id.startswith("live-") or check.id in {"ultimate-live", "ultimate-page", "ultimate-page-smoke"}:
                 self.assertFalse(check.cache)
+        smoke = next(c for c in plan if c.id == "ultimate-page-smoke")
+        self.assertFalse(smoke.screen)
 
     def test_the_unit_plan_never_takes_over_the_screen_or_calls_a_live_agent(self):
         plan = verification_plan(self.root, os.environ.copy(), "unit")

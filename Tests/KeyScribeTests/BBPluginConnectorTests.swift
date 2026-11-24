@@ -271,6 +271,22 @@ struct BBPluginConnectorTests {
         #expect(sidebarCalls(calls, tool).count == 5)
     }
 
+    @Test func aSwitchBbNoLongerReportsIsSkippedAndTheOthersAreStillTurnedOn() async throws {
+        let (home, agents) = scratch()
+        let calls = Calls()
+        calls.set("settings show", #"{"experiments":{"timelinePush":false}}"#)
+        calls.set("thread-list prefs get", Self.sidebarOff.rows)
+        let plugin = connector(home, agents, calls: calls)
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil)!.tool?.path)
+        try await plugin.install(tool: tool, target: target(home))
+        #expect(sidebarCalls(calls, tool) == [
+            [tool, "settings", "show", "--json"],
+            [tool, "thread-list", "prefs", "get", "showRowMetadata", "--json"],
+            [tool, "thread-list", "prefs", "set", "showRowMetadata", "true", "--json"],
+        ])
+        #expect(plugin.undoesOnUninstall(in: target(home)))
+    }
+
     @Test func aFailedRowDetailsChangeNeverFailsTheInstall() async throws {
         let (home, agents) = scratch()
         let calls = Calls()

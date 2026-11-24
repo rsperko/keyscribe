@@ -495,7 +495,15 @@ every rule above applies to it, with these sharpenings:
   stack, so the extension starts nothing and posts a notice naming the version it needs. An install leaves the folder
   holding only the files this version ships, so an update removes what an older version left behind.
   `make test-ultimate-connector` with `ULTIMATE_CLONE` set runs that checkout's own `scripts/check-extension.ts`
-  against the folder, and refuses a checkout whose checker does not check `web.solid.tsx`. It
+  against the folder, and refuses a checkout whose checker does not check `web.solid.tsx`;
+  `make test-ultimate-page-smoke` loads the page in headless Chrome and checks what its page half reports
+  (conversation, switching, draft, a dialog, leaving and reloading), and `make check-upstream` runs both against
+  Ultimate's newest main, with bb's newest SDK. Current files are not proof the extension runs: Settings reads
+  an installed extension as not working when an Ultimate project under that user folder has been running past
+  a startup grace and the extension's `list` action does not answer (`UltimateHost.silentProject`), which covers
+  the server half only. The page half is judged where it matters, at a take: a project page verified in front
+  that has not claimed focus within a few heartbeats (`UltimateHost.pageReportsWithin`) holds the take as a
+  page that is not reporting (`pageSilent`), not as one that shows nothing. It
   observes, never hooks: commits for input, reply and placement records and the task graph for busy, so nothing it
   does sits in a run's path and a crash replays nothing. It submits with `whenBusy: 'steer'` and the bridge request id
   as Ultimate's `requestId`, so a repeated command never submits twice, and emits Ultimate's `user.input` event, which
@@ -1023,8 +1031,9 @@ every rule above applies to it, with these sharpenings:
   experimental row metadata slot. bb draws that slot only while its `threadRowMetadata` experiment and the
   thread list's `showRowMetadata` are on, so the first install or update turns on whichever is off
   (`BBSidebarSwitch`) and records what it changed in the plugin folder. The record keeps it from ever doing
-  this again, so a switch the user turns off stays off. A switch bb could not read is left alone and tried at
-  the next update, and a failed change never fails the install. Uninstalling turns off only recorded
+  this again, so a switch the user turns off stays off. When bb cannot answer, every switch is left alone and
+  tried at the next update; a switch bb answers without (an experiment it has retired) is skipped while the
+  others are still turned on. A failed change never fails the install. Uninstalling turns off only recorded
   switches, and only when the user picks that button (`AgentConnector.undoesOnUninstall`). A location that is not a thread of an enrolled build's data folder is never passed to any command. A
   list longer than `HostCLI`'s output cap reads as unreadable, not as the part that fit. An agent bb started
   is placed in its thread by `BB_THREAD_ID` together with `BB_THREAD_STORAGE`, which must be that thread's
@@ -1158,7 +1167,11 @@ every rule above applies to it, with these sharpenings:
   message's text, without its surrounding whitespace, and names the turn it starts by the dictation's digest, so
   its reply is followed.
 - **bb's plugin says which thread you are looking at.** Its window half (`app.tsx`, an `experimental_appOverlay`
-  mounted once per bb window, which bb builds when it installs or reloads the plugin) reports over bb's plugin
+  mounted once per bb window, which bb builds when it installs or reloads the plugin) registers the focus reporter
+  and the compose bridge first; every other addition (reading replies aloud, sidebar names, the read-aloud menu and
+  commands) registers through `optional`, so a bb API that is renamed or removed drops that one addition instead of
+  the whole window half. `make check-bb-sdk` type-checks the plugin against bb's published plugin SDK (the pinned
+  version, or `VERSION=latest`). It reports over bb's plugin
   RPC whether the window has focus and which thread it shows: a thread only on a thread page, and in a split
   only once the focused pane and the page agree (`shownThread`; they disagree for a few milliseconds during a
   switch, measured 2026-11-14), on every change and every few seconds while visible. The server half forgets a

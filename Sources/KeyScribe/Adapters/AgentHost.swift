@@ -62,10 +62,12 @@ public struct AgentHostFocus: Equatable, Sendable {
     public var conversation: AgentHostLocation?
     public var resolvesConversation: Bool
     public var allowsNewConversation: Bool
+    public var pageSilent: Bool
 
     public init(
         app: AgentHostApp? = nil, copy: AgentHostCopy? = nil, problem: String? = nil,
-        conversation: AgentHostLocation? = nil, resolvesConversation: Bool = false, allowsNewConversation: Bool = true
+        conversation: AgentHostLocation? = nil, resolvesConversation: Bool = false, allowsNewConversation: Bool = true,
+        pageSilent: Bool = false
     ) {
         self.app = app
         self.copy = copy
@@ -73,6 +75,7 @@ public struct AgentHostFocus: Equatable, Sendable {
         self.conversation = conversation
         self.resolvesConversation = resolvesConversation
         self.allowsNewConversation = allowsNewConversation
+        self.pageSilent = pageSilent
     }
 }
 

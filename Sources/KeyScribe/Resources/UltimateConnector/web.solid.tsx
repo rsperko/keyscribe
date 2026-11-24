@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-js'
 import { automatedBrowser, joined, runsAsCommand, typingTarget } from './keyscribe.ts'
-import { actionRef, api, defineWebExtension, fillComposer, setUiState, useConversationId } from '@/sdk/solid'
+import { actionRef, api, composerDraft, defineWebExtension, fillComposer, setUiState, useConversationId } from '@/sdk/solid'
 
 const extension = 'keyscribe'
 type Ask = { id: string; kind?: 'start'; conversation: number; text: string }
@@ -82,13 +82,7 @@ function composerNow(shown: number | null = null): {
 }
 
 function draftOf(conversation: number): string {
-  const editor = editorOf(conversation)
-  if (editor) return editor.value
-  try {
-    return localStorage.getItem(`ultimate.draft.${conversation}`) ?? ''
-  } catch {
-    return ''
-  }
+  return editorOf(conversation)?.value ?? composerDraft(conversation).text
 }
 
 const composerParts = 'textarea[data-conversation], [role="dialog"], [role="alertdialog"], dialog'

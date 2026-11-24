@@ -54,6 +54,9 @@ final class UltimateHost: AgentHost {
     private var listed: [String: [UltimateProjects.Conversation]] = [:]
     private var listedByConnector: Set<String> = []
     private var reports: [String: Report] = [:]
+    private var lastClaim: [String: Date] = [:]
+    private let now: @MainActor () -> Date
+    static let pageReportsWithin: TimeInterval = 15
     private var lastWindow: [String: AgentHostApp] = [:]
     private var rememberTasks: [String: Task<Void, Never>] = [:]
 
@@ -67,8 +70,10 @@ final class UltimateHost: AgentHost {
         frontApp: @escaping @MainActor () -> AgentHostApp? = UltimateHost.frontApp,
         documentURL: @escaping @Sendable (AgentHostApp) async -> URL? = UltimateHost.documentURL,
         activate: @escaping @MainActor (AgentHostApp, @escaping @MainActor () -> Bool) async -> Bool = UltimateHost.activate,
-        openPage: @escaping @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) }
+        openPage: @escaping @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) },
+        now: @escaping @MainActor () -> Date = Date.init
     ) {
+        self.now = now
         self.home = home
         let usual = (home as NSString).appendingPathComponent(UltimateProjects.setupFolderName)
         self.enrolled = enrolled ?? { [usual] }
@@ -142,6 +147,7 @@ final class UltimateHost: AgentHost {
         listed = listed.filter { running[$0.key] != nil }
         listedByConnector = listedByConnector.filter { running[$0] != nil }
         reports = reports.filter { running[$0.key] != nil }
+        lastClaim = lastClaim.filter { running[$0.key] != nil }
         lastWindow = lastWindow.filter { running[$0.key] != nil }
         for (instance, task) in rememberTasks where running[instance] == nil {
             task.cancel()
@@ -169,6 +175,7 @@ final class UltimateHost: AgentHost {
             conversation: on ? location.native : nil, pageConversation: pageConversation,
             on: on, newConversation: newConversation, problem: problem)
         reports[location.instance] = report.claimsFocus ? report : nil
+        if report.claimsFocus { lastClaim[location.instance] = now() }
         if !wasClaiming, report.on || report.newConversation {
             let instance = location.instance
             rememberTasks[instance]?.cancel()
@@ -219,7 +226,8 @@ final class UltimateHost: AgentHost {
         guard let page = await verifiedPage(requireClaim: requireClaim) else { return nil }
         let copy = AgentHostCopy(name: name(page.project), instance: page.project.home, enrolled: true)
         guard let report = reports[page.project.home], Self.matches(report, urlConversation: page.urlConversation) else {
-            return AgentHostFocus(app: page.app, copy: copy, resolvesConversation: true, allowsNewConversation: false)
+            let silent = lastClaim[page.project.home].map { now().timeIntervalSince($0) > Self.pageReportsWithin } ?? true
+            return AgentHostFocus(app: page.app, copy: copy, resolvesConversation: true, allowsNewConversation: false, pageSilent: silent)
         }
         return AgentHostFocus(
             app: page.app, copy: copy, problem: report.problem,
@@ -312,6 +320,20 @@ final class UltimateHost: AgentHost {
         return .file(file, connectorFailed: installed)
     }
 
+    nonisolated static let startupGrace: TimeInterval = 30
+
+    nonisolated static func silentProject(setup: String) async -> String? {
+        for project in await readProjects([setup]) {
+            let lock = (project.home as NSString).appendingPathComponent(UltimateProjects.lockFile)
+            guard let started = (try? FileManager.default.attributesOfItem(atPath: lock))?[.modificationDate] as? Date,
+                  Date().timeIntervalSince(started) > startupGrace
+            else { continue }
+            if let answer = await list(port: project.lock.port), UltimateProjects.listed(answer) != nil { continue }
+            return project.project?.name ?? (project.home as NSString).lastPathComponent
+        }
+        return nil
+    }
+
     private nonisolated static func list(port: Int) async -> Data? {
         await post(port: port, path: "/api/extensions/\(KeyScribePaths.variant.connectorSlug)/actions/list", body: ["args": [:]])
     }
@@ -346,7 +368,11 @@ final class UltimateHost: AgentHost {
         guard let (answer, response) = try? await session.data(for: request),
               let status = (response as? HTTPURLResponse)?.statusCode
         else { return nil }
-        return (200..<300).contains(status) ? answer : nil
+        guard (200..<300).contains(status) else {
+            Log.agents.info("Ultimate answered \(status, privacy: .public) to \(path, privacy: .public)")
+            return nil
+        }
+        return answer
     }
 
     static func frontApp() -> AgentHostApp? {

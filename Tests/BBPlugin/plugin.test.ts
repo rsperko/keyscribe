@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { focusConnectionContract } from "../AgentConformance/lib/focus-contract.ts"
-import { ComposerAnswers, acceptedInEndedTurn, commandAnswer, composeInto, keyscribe, promptDigest, readAloudReply, rowLabel, spokenMentions, shownThread, waitingFor, type Bb, type Composed, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
+import { ComposerAnswers, acceptedInEndedTurn, optional, commandAnswer, composeInto, keyscribe, promptDigest, readAloudReply, rowLabel, spokenMentions, shownThread, waitingFor, type Bb, type Composed, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
 
 type Request = { path: string; body: any; auth: string; answer: (status: number, text?: string) => void; settled: boolean; cancelled: boolean }
 
@@ -1730,4 +1730,20 @@ test("a reply names a thread it mentions by the name the app gave it, never by i
   assert.equal(spokenMentions("See @thread:thr_known for the plan.", nameOf), "See docs green for the plan.")
   assert.equal(spokenMentions("Started @thread:thr_01HX9ZQ, and asked @thread:thr_known#msg=42.", nameOf), "Started another thread, and asked docs green.")
   assert.equal(spokenMentions("Mail me@thread:x and keep thread:thr_a", nameOf), "Mail me@thread:x and keep thread:thr_a")
+})
+
+test("an optional bb feature that fails to register leaves the rest of the plugin registering", () => {
+  const registered: string[] = []
+  const warned: unknown[] = []
+  const warn = console.warn
+  console.warn = (...args: unknown[]) => { warned.push(args) }
+  try {
+    registered.push("focus")
+    optional("spoken names", () => { throw new TypeError("experimental_threadRowMetadata is not a function") })
+    optional("read-aloud commands", () => { registered.push("commands") })
+    registered.push("compose")
+  } finally { console.warn = warn }
+  assert.deepEqual(registered, ["focus", "commands", "compose"])
+  assert.equal(warned.length, 1)
+  assert.match(String((warned[0] as unknown[])[0]), /spoken names/)
 })

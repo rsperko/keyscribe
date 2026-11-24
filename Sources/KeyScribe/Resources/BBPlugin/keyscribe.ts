@@ -1028,3 +1028,11 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
 
   return { stop: () => stop(), window, readAloud, command, labels, settings }
 }
+
+export function optional(feature: string, register: () => void) {
+  try {
+    register()
+  } catch (error) {
+    console.warn(`KeyScribe: ${feature} could not be added to bb`, error)
+  }
+}

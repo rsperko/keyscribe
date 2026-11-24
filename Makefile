@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-omp-connector test-bb-plugin test-ultimate-connector test-ultimate-live test-agents test-codex-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
+.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-omp-connector test-bb-plugin check-bb-sdk check-upstream test-ultimate-connector test-ultimate-live test-ultimate-page-smoke test-agents test-codex-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -75,11 +75,20 @@ test-omp-connector: ## Run the omp connector's behavior tests (needs Node 22.18 
 test-bb-plugin: ## Run the bb plugin's behavior tests (needs Node 22.18 or later; never needed to build)
 	./scripts/test-bb-plugin.sh
 
+check-bb-sdk: ## Type-check the bb plugin against bb's published plugin SDK ([VERSION=<version>|latest]; default the pinned one; needs npm and network)
+	./scripts/check-bb-plugin-sdk.sh $(VERSION)
+
+check-upstream: ## Check the Ultimate extension and bb plugin against the hosts' latest upstream (ULTIMATE_NODE=<node with pnpm>; needs network)
+	./scripts/check-upstream.sh
+
 test-ultimate-connector: ## Run the Ultimate connector's behavior tests (needs Node 22.18 or later; never needed to build)
 	./scripts/test-ultimate-connector.sh
 
 test-ultimate-live: ## Drive a real headless Ultimate through the connector (ULTIMATE_CLONE=<clone>, ULTIMATE_NODE=<node 26>; spends a few cents of the model ULTIMATE_MODEL names)
 	timeout 600 "$${ULTIMATE_NODE:-node}" Tests/UltimateConnector/e2e/live.ts
+
+test-ultimate-page-smoke: ## Load Ultimate's page in headless Chrome and check what the extension's page half reports (ULTIMATE_CLONE=<clone>, ULTIMATE_NODE=<node 26>; no model, no screen)
+	timeout 400 "$${ULTIMATE_NODE:-node}" Tests/UltimateConnector/e2e/page-smoke.ts
 
 test-agents: ## Run the agent conformance exercises against a real agent: make test-agents AGENT=codex|all [ONLY=D1,R1] [FAIL_FAST=1] [REPEAT=N] [KEEP=1]
 	timeout 5400 node Tests/AgentConformance/run.ts --agent '$(AGENT)' $(if $(ONLY),--only '$(ONLY)') $(if $(FAIL_FAST),--fail-fast) $(if $(REPEAT),--repeat '$(REPEAT)') $(if $(KEEP),--keep)

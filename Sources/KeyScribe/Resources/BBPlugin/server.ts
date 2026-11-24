@@ -12,8 +12,8 @@ import {
 const pageSize = 200
 const pageLimit = 10
 const historyLimit = "8"
-const turnRecord = ["client/turn/requested", "turn/started", "turn/input/accepted", "turn/completed"]
-const turnRecordLimit = 100
+const turnRecord = ["client/turn/requested", "turn/started", "turn/input/accepted", "turn/completed"] as const
+const turnRecordLimit = "100"
 const responseLimit = 512 * 1024
 const startDeadline = 1000
 const composeDeadline = 6000

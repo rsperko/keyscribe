@@ -291,10 +291,9 @@ final class BBPluginConnector: AgentConnector {
         guard turnedOn(target) == nil else { return }
         var states: [BBSidebarSwitch: Bool] = [:]
         for item in BBSidebarSwitch.allCases {
-            guard let read = try? await output(tool, item.read, subcommand: item.readSubcommand, target: target), read.status == 0,
-                  let on = item.isOn(read.stdout)
+            guard let read = try? await output(tool, item.read, subcommand: item.readSubcommand, target: target), read.status == 0
             else { return }
-            states[item] = on
+            states[item] = item.isOn(read.stdout)
         }
         var changed: [BBSidebarSwitch] = []
         for item in BBSidebarSwitch.allCases where states[item] == false {

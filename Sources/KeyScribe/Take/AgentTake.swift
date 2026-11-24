@@ -416,7 +416,7 @@ final class AgentTake {
         switch notReady {
         case .missing, .notConnected, .cannotStart: .openAgents(mode)
         case .needsAccessibility: .openAccessibilitySettings
-        case .notSetUp, .windowUnknown, .nothingShown, .notListed, .unavailable: nil
+        case .notSetUp, .windowUnknown, .nothingShown, .pageSilent, .notListed, .unavailable: nil
         }
     }
 

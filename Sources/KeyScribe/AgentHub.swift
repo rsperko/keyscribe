@@ -495,6 +495,7 @@ final class AgentHub {
         case needsAccessibility(String)
         case windowUnknown(String)
         case nothingShown(String)
+        case pageSilent(String)
         case notListed(String)
         case cannotStart(String)
         case unavailable(String)
@@ -562,7 +563,7 @@ final class AgentHub {
         if focus.allowsNewConversation, let page = newConversationShown[slot], transport.isLive(session: page) {
             return features(of: page).contains("start") ? nil : .cannotStart(copy.name)
         }
-        return .nothingShown(copy.name)
+        return focus.pageSilent ? .pageSilent(copy.name) : .nothingShown(copy.name)
     }
 
     struct HostReportMark { fileprivate let heard: [String: Int] }

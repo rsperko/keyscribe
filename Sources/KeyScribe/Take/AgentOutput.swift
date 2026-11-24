@@ -301,6 +301,8 @@ final class AgentOutput {
             "Accessibility is off \u{2014} \(Branding.appName) can\u{2019}t read which \(name) window is in front. \(nothingSent)"
         case .nothingShown(let name):
             "\(name) hasn\u{2019}t shown \(Branding.appName) a conversation. \(nothingSent) Open or click in one in \(name), then try again."
+        case .pageSilent(let name):
+            "\(name)\u{2019}s page isn\u{2019}t reporting to \(Branding.appName). \(nothingSent) Reload the page; if that doesn\u{2019}t help, \(name)\u{2019}s status line names the extension problem."
         case .notListed(let name):
             "\(name)\u{2019}s conversation in front isn\u{2019}t in its list yet. \(nothingSent) Try again in a moment."
         case .cannotStart(let name):

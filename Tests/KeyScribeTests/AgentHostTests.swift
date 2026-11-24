@@ -89,8 +89,15 @@ struct AgentHostTests {
         }
 
         var copy: AgentHostCopy?
+        var pageSilent = false
 
         func copyInFront() -> AgentHostCopy? { copy }
+
+        func focusInFront(requireClaim: Bool) async -> AgentHostFocus? {
+            let app = focusedWindow()
+            guard app != nil || copy != nil else { return nil }
+            return AgentHostFocus(app: app, copy: copy, pageSilent: pageSilent)
+        }
 
         private(set) var unwatched = 0
 
@@ -1812,6 +1819,9 @@ struct AgentHostTests {
         #expect(await hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
         host.window = Self.window
         #expect(await hub.hostCopyNotReadyInFront() == .nothingShown("Example Work"))
+        host.pageSilent = true
+        #expect(await hub.hostCopyNotReadyInFront() == .pageSilent("Example Work"))
+        host.pageSilent = false
         transport.live.insert(Self.id("t9"))
         hub.handle(.shown(session: Self.id("t9"), on: true))
         #expect(await hub.hostCopyNotReadyInFront() == .notListed("Example Work"))

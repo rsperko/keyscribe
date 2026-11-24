@@ -4,7 +4,7 @@ import {
   useSidebarSplitLayout,
   type ExperimentalThreadRowMetadataDataInput, type ExperimentalThreadRowMetadataProps, type PluginComposerApi,
 } from "@get-bb/plugin-sdk/app"
-import { ComposerAnswers, composeChannel, composeInto, isComposeAsk, rowLabel, rpcContract, shownThread } from "./keyscribe.ts"
+import { ComposerAnswers, composeChannel, composeInto, isComposeAsk, optional, rowLabel, rpcContract, shownThread } from "./keyscribe.ts"
 
 type Labels = Record<string, string | null> | undefined
 
@@ -141,16 +141,17 @@ function FocusReporter() {
 
 export default definePluginApp((app) => {
   app.slots.experimental_appOverlay({ id: "focus-reporter", component: FocusReporter })
-  app.slots.experimental_appOverlay({ id: "read-aloud-bridge", component: ReadAloudBridge })
   app.slots.experimental_appOverlay({ id: "compose-bridge", component: ComposeBridge })
-  app.slots.experimental_threadRowMetadata<Labels>({ id: "spoken-name", useData: useLabels, component: SpokenName })
-  app.composer.customize({
+  optional("reading replies aloud", () => app.slots.experimental_appOverlay({ id: "read-aloud-bridge", component: ReadAloudBridge }))
+  optional("spoken names in the sidebar", () =>
+    app.slots.experimental_threadRowMetadata<Labels>({ id: "spoken-name", useData: useLabels, component: SpokenName }))
+  optional("the read-aloud menu", () => app.composer.customize({
     id: "read-aloud",
     scopes: ["thread"],
     plusMenu: readAloudCommands.map(({ id, label, on }) => ({ id, label, icon: "Mic", run: ({ composer }) => readAloud(composer, on) })),
     experimental_popups: [{ id: answerPopup, label: "Reply read aloud", component: ReadAloudAnswer }],
-  })
+  }))
   for (const { id, label, on } of readAloudCommands) {
-    app.composer.experimental_registerCommand({ id, title: label, run: ({ composer }) => readAloud(composer, on) })
+    optional("the read-aloud commands", () => app.composer.experimental_registerCommand({ id, title: label, run: ({ composer }) => readAloud(composer, on) }))
   }
 })

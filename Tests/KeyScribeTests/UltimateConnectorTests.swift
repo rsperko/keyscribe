@@ -16,8 +16,11 @@ struct UltimateConnectorTests {
         return (home, root.appendingPathComponent("agents", isDirectory: true))
     }
 
-    private func connector(_ home: URL, _ agents: URL, id: String = "keyscribe-dev", sources: [String: String]? = Self.sources) -> UltimateConnector {
-        UltimateConnector(agentsDir: agents, pluginName: id, home: home, sources: sources)
+    private func connector(
+        _ home: URL, _ agents: URL, id: String = "keyscribe-dev", sources: [String: String]? = Self.sources,
+        silentProject: @escaping @Sendable (URL) async -> String? = { _ in nil }
+    ) -> UltimateConnector {
+        UltimateConnector(agentsDir: agents, pluginName: id, home: home, sources: sources, silentProject: silentProject)
     }
 
     private func target(_ home: URL, installation: String? = "inst-u", removing: Bool = false) -> ConnectorTarget {
@@ -81,6 +84,33 @@ struct UltimateConnectorTests {
         let page = try #require(UltimateConnectorFiles.written(sources, id: "keyscribe-dev")["web.solid.tsx"])
         #expect(page.contains("const extension = 'keyscribe-dev'"))
         #expect(!page.contains("const extension = 'keyscribe'\n"))
+    }
+
+    @Test func currentFilesInAProjectWhoseExtensionIsNotAnsweringAreNotWorkingNotReady() async throws {
+        let (home, agents) = scratch()
+        let asked = Asked()
+        let silent = connector(home, agents, silentProject: { setup in
+            await asked.add(setup.path)
+            return "app"
+        })
+        try await silent.install(tool: "/bin/ultimate", target: target(home))
+        guard case .broken(let message) = await silent.check(tool: "/bin/ultimate", target: target(home)) else {
+            Issue.record("a running project whose extension does not answer must not read as ready")
+            return
+        }
+        #expect(message.contains("app"))
+        #expect(message.contains("0.1"))
+        #expect(await asked.paths == [home.appendingPathComponent(".ultimate").path])
+        try Data("older".utf8).write(to: home.appendingPathComponent(".ultimate/extensions/keyscribe-dev/keyscribe.ts"))
+        guard case .status(.outdated) = await silent.check(tool: "/bin/ultimate", target: target(home)) else {
+            Issue.record("outdated files are updated before the running projects are asked")
+            return
+        }
+    }
+
+    actor Asked {
+        var paths: [String] = []
+        func add(_ path: String) { paths.append(path) }
     }
 
     @Test func anotherInstallationsSettingsAreOutdatedNotReady() async throws {

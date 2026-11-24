@@ -741,7 +741,7 @@ whose title shows something else (for example a zellij pane started as `zellij r
 Yes. In **Settings ▸ Modes ▸ Agent**, choose **Connect…** beside **Ultimate** under **Connections** to install the
 extension. KeyScribe writes a small extension into Ultimate's user folder (`~/.ultimate`), and Ultimate loads it at
 once into every project it runs on your Mac; nothing restarts. If you turn it off in Ultimate's Extensions panel,
-Settings says so. The extension needs Ultimate 0.1 or later; an older Ultimate shows a notice saying so, and the extension does nothing there.
+Settings says so. The extension needs Ultimate 0.1 or later; an older Ultimate shows a notice saying so, and the extension does nothing there. If Ultimate is running but the extension isn't answering, Settings says the extension isn't working, and a dictation to an Ultimate page that isn't reporting says so instead of sending.
 
 KeyScribe lists every conversation you can type into from Ultimate's sidebar, in every project whose Ultimate is
 running: @ultimate and your other standing agents, branches, conversations you start, side chats and subagents. The

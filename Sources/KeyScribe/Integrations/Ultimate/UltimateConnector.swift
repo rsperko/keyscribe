@@ -47,15 +47,18 @@ final class UltimateConnector: AgentConnector {
     private let agentsDir: URL
     private let home: URL
     private let sources: [String: String]?
+    private let silentProject: @Sendable (URL) async -> String?
 
     init(
         agentsDir: URL, pluginName: String, home: URL = FileManager.default.homeDirectoryForCurrentUser,
-        sources: [String: String]? = UltimateConnectorFiles.sources
+        sources: [String: String]? = UltimateConnectorFiles.sources,
+        silentProject: @escaping @Sendable (URL) async -> String? = { await UltimateHost.silentProject(setup: $0.path) }
     ) {
         self.agentsDir = agentsDir
         id = pluginName
         self.home = home
         self.sources = sources
+        self.silentProject = silentProject
     }
 
     var isBundled: Bool { sources != nil }
@@ -111,7 +114,13 @@ final class UltimateConnector: AgentConnector {
         let current = await Task.detached {
             files.allSatisfy { name, text in (try? String(contentsOf: folder.appendingPathComponent(name), encoding: .utf8)) == text }
         }.value
-        return current ? .status(.ready) : .status(.outdated(installed: config["version"] as? String ?? ""))
+        guard current else { return .status(.outdated(installed: config["version"] as? String ?? "")) }
+        if let project = await silentProject(target.folder) { return .broken(Self.notAnswering(project)) }
+        return .status(.ready)
+    }
+
+    static func notAnswering(_ project: String) -> String {
+        "Ultimate is running \(project), but the extension there isn\u{2019}t answering. It needs Ultimate 0.1 or later; if Ultimate is up to date, its status line names the extension problem."
     }
 
     private static let unreadableSettings =
