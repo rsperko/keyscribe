@@ -136,3 +136,60 @@ test("bridge trace summaries keep protocol fields and omit user, reply, and prob
   assert.deepEqual(pageSummary, { page: "p1", seq: 7, focused: true, conversation: 61, draft: false, hasProblem: true })
   assert.equal(JSON.stringify(pageSummary).includes("SECRET"), false)
 })
+
+test("the extension loads on a host whose only lifecycle hook is onOpen with its disposable stack", async () => {
+  const openers: Array<(opened: { defer(cleanup: () => Promise<void>): void }) => Promise<void>> = []
+  assert.doesNotThrow(() => server.default({ home: "/nowhere", onOpen: (opener: any) => openers.push(opener) } as any))
+  assert.equal(openers.length, 1)
+  await openers[0]({ defer: () => undefined })
+})
+
+function stack() {
+  const cleanups: Array<() => Promise<void>> = []
+  return { defer: (cleanup: () => Promise<void>) => { cleanups.push(cleanup) }, dispose: async () => { for (const cleanup of cleanups.reverse()) await cleanup() } }
+}
+
+test("each open starts one connection, its stack ends it once, and the next open starts a new one", async () => {
+  const made: Array<{ closed: number; close(): void }> = []
+  const live: unknown[] = []
+  const open = server.opener(
+    () => true,
+    () => { const one = { closed: 0, close() { this.closed += 1 } }; made.push(one); return one },
+    { started: (value) => live.push(value), ended: (value) => live.splice(live.indexOf(value), 1) },
+    () => assert.fail("a host with a stack is new enough"),
+  )
+  const first = stack()
+  await open(first)
+  await open(first)
+  assert.equal(made.length, 1)
+  assert.deepEqual(live, [made[0]])
+  await first.dispose()
+  assert.equal(made[0].closed, 1)
+  assert.deepEqual(live, [])
+  const second = stack()
+  await open(second)
+  assert.equal(made.length, 2)
+  await first.dispose()
+  assert.equal(made[0].closed, 1)
+  assert.deepEqual(live, [made[1]])
+  assert.equal(made[1].closed, 0)
+  await second.dispose()
+  assert.equal(made[1].closed, 1)
+})
+
+test("an Ultimate older than 0.1, whose onOpen passes no stack, starts nothing, and says what it needs only where it serves", async () => {
+  for (const serves of [true, false]) {
+    let began = 0
+    const notices: string[] = []
+    const open = server.opener(() => serves, () => { began += 1; return { close() {} } }, { started() {}, ended() {} }, () => notices.push("too old"))
+    await open(undefined)
+    assert.equal(began, 0)
+    assert.deepEqual(notices, serves ? ["too old"] : [])
+  }
+  const openers: Array<(opened?: unknown) => Promise<void>> = []
+  const said: string[] = []
+  server.default({ home: "/nowhere", notice: (message: string) => said.push(message), onOpen: (opener: any) => openers.push(opener) } as any)
+  server.default({ home: "/nowhere", onOpen: (opener: any) => openers.push(opener) } as any)
+  for (const open of openers) await open()
+  assert.deepEqual(said, [])
+})

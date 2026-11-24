@@ -2,9 +2,9 @@ import Foundation
 import KeyScribeKit
 
 enum UltimateConnectorFiles {
-    static let names = ["server.ts", "keyscribe.ts", "web.tsx", "README.md"]
+    static let names = ["server.ts", "keyscribe.ts", "web.solid.tsx", "README.md"]
     static let configName = "keyscribe.json"
-    static let writeOrder = [configName, "keyscribe.ts", "web.tsx", "README.md", "server.ts"]
+    static let writeOrder = [configName, "keyscribe.ts", "web.solid.tsx", "README.md", "server.ts"]
     private static let extensionLine = "const extension = 'keyscribe'"
 
     static let sources: [String: String]? = {
@@ -25,7 +25,7 @@ enum UltimateConnectorFiles {
 
     static func written(_ sources: [String: String], id: String) -> [String: String] {
         sources.reduce(into: [:]) { files, entry in
-            files[entry.key] = entry.key == "web.tsx"
+            files[entry.key] = entry.key == "web.solid.tsx"
                 ? entry.value.replacingOccurrences(of: extensionLine, with: "const extension = '\(id)'") : entry.value
         }
     }
@@ -125,6 +125,9 @@ final class UltimateConnector: AgentConnector {
         let failure: String? = await Task.detached {
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                for name in try FileManager.default.contentsOfDirectory(atPath: folder.path) where files[name] == nil {
+                    try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+                }
                 for name in UltimateConnectorFiles.writeOrder {
                     guard let text = files[name] else { continue }
                     try Data(text.utf8).write(to: folder.appendingPathComponent(name), options: .atomic)
@@ -178,7 +181,7 @@ final class UltimateConnector: AgentConnector {
         },
         setupTitle: "Extension",
         purpose: "Dictate to the Ultimate conversation you are looking at and hear its replies read aloud.",
-        installNote: "Ultimate loads the extension at once, in every project it runs on this Mac; nothing restarts.",
+        installNote: "Ultimate loads the extension at once, in every project it runs on this Mac; nothing restarts. It needs Ultimate 0.1 or later.",
         undoOnUninstallLabel: "",
         undoOnUninstallNote: "",
         folderNoun: "user folder",

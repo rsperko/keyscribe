@@ -32,7 +32,7 @@ writeFileSync(join(project, "README.md"), "A scratch project.\n")
 const socketPath = join(bridge, "bridge.sock")
 writeFileSync(join(bridge, "token"), "live-token\n")
 writeFileSync(join(bridge, "ready.json"), JSON.stringify({ launch: "live", protocol: 3 }))
-for (const name of ["server.ts", "keyscribe.ts", "web.tsx", "README.md"]) copyFileSync(join(sources, name), join(extension, name))
+for (const name of readdirSync(sources)) copyFileSync(join(sources, name), join(extension, name))
 writeFileSync(join(extension, "keyscribe.json"), JSON.stringify({
   protocol: 3, socketPath, tokenPath: join(bridge, "token"), readyPath: join(bridge, "ready.json"), installation: "live",
   setup, version: "live", appName: "KeyScribe", plugin: "keyscribe",

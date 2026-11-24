@@ -490,6 +490,12 @@ every rule above applies to it, with these sharpenings:
   dictation takes the bridge `submit` path with its receipts, steering and checks. The extension
   (`Resources/UltimateConnector/`) runs inside each Ultimate process that loads `~/.ultimate/extensions`, and only one
   whose state home is under the installed setup's `projects/` (`served`), so a preview instance stays silent. It
+  targets Ultimate 0.1 or later: a Solid page facet (`web.solid.tsx`) and one lifecycle hook, `onOpen`, whose
+  disposable stack ends the connection on every release, reload, unload and shutdown; an older Ultimate passes no
+  stack, so the extension starts nothing and posts a notice naming the version it needs. An install leaves the folder
+  holding only the files this version ships, so an update removes what an older version left behind.
+  `make test-ultimate-connector` with `ULTIMATE_CLONE` set runs that checkout's own `scripts/check-extension.ts`
+  against the folder, and refuses a checkout whose checker does not check `web.solid.tsx`. It
   observes, never hooks: commits for input, reply and placement records and the task graph for busy, so nothing it
   does sits in a run's path and a crash replays nothing. It submits with `whenBusy: 'steer'` and the bridge request id
   as Ultimate's `requestId`, so a repeated command never submits twice, and emits Ultimate's `user.input` event, which

@@ -46,10 +46,10 @@ type Host = {
   harness(): any
   doc(kind: string): any
   emit(tx: unknown, event: unknown, data: unknown): Promise<void> | void
-  onOpen(callback: () => Promise<void>): void
-  onRelease(callback: () => Promise<void>): void
-  onClose(callback: () => Promise<void>): void
+  notice?(message: string): void
+  onOpen(callback: (opened?: Opened) => Promise<void>): void
 }
+type Opened = { defer(cleanup: () => Promise<void>): void }
 let current: ReturnType<typeof start> | null = null
 const traceTarget = process.env.KEYSCRIBE_ULTIMATE_TRACE || null
 let traced = 0
@@ -373,6 +373,25 @@ function start(host: Host, config: Config) {
   }
 }
 
+export function opener<T extends { close(): void }>(
+  serves: () => boolean, begin: () => T, publish: { started(value: T): void; ended(value: T): void }, tooOld: () => void,
+) {
+  let running: T | null = null
+  return async (opened?: Opened) => {
+    if (running || !serves()) return
+    if (typeof opened?.defer !== 'function') return tooOld()
+    const started = begin()
+    running = started
+    publish.started(started)
+    opened.defer(async () => {
+      if (running !== started) return
+      running = null
+      publish.ended(started)
+      started.close()
+    })
+  }
+}
+
 export const userActions = ['list', 'page', 'next', 'composed', 'started', 'readAloud', 'label']
 
 function args(value: unknown): Record<string, unknown> {
@@ -438,19 +457,12 @@ export default (host: Host) => {
   const config = settings()
   const app = appNameOf(config)
   const tool = readAloudToolName(config?.plugin ?? name)
-  let running: ReturnType<typeof start> | null = null
-  host.onOpen(async () => {
-    if (running || !served(host, config) || !config) return
-    running = start(host, config)
-    current = running
-  })
-  const close = async () => {
-    if (running && current === running) current = null
-    running?.close()
-    running = null
-  }
-  host.onRelease(close)
-  host.onClose(close)
+  host.onOpen(opener(
+    () => config !== null && served(host, config),
+    () => start(host, config!),
+    { started: (value) => { current = value }, ended: (value) => { if (current === value) current = null } },
+    () => host.notice?.(`${app}’s extension needs Ultimate 0.1 or later. Update Ultimate to use it.`),
+  ))
   return defineExtension({
     name,
     tools: [

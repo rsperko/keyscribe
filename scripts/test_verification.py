@@ -246,34 +246,17 @@ class VerificationTests(unittest.TestCase):
         self.assertFalse({"ONLY", "TARGETS", "REPEAT", "FAIL_FAST", "AGENT"} & seen.keys())
         self.assertEqual(seen["REPLY_WAIT"], "45")
 
-    def test_the_web_typecheck_passes_only_when_tsc_is_clean_or_every_error_is_in_the_checkout(self):
-        script = Path(__file__).resolve().parent / "typecheck-ultimate-web.sh"
-        sources = self.root / "sources"
-        sources.mkdir()
-        (sources / "web.tsx").write_text("")
-        (sources / "keyscribe.ts").write_text("")
+    def test_the_ultimate_connector_tests_refuse_a_checkout_whose_checker_skips_the_solid_page(self):
+        script = Path(__file__).resolve().parent / "test-ultimate-connector.sh"
         clone = self.root / "clone"
-        (clone / "node_modules/.bin").mkdir(parents=True)
-        tsc = clone / "node_modules/.bin/tsc"
-        checkout_error = "../../clone/web/src/a.ts(1,1): error TS2304: Cannot find name 'x'."
-        cases = {
-            "clean": ("", 0, 0),
-            "checkout only": (checkout_error, 2, 0),
-            "timed out": ("", 124, 1),
-            "crashed": ("Segmentation fault", 139, 1),
-            "checkout error then a crash": (checkout_error, 139, 1),
-            "checkout error with outputs skipped": (checkout_error, 1, 0),
-            "checkout error in an invalid project": (checkout_error, 3, 1),
-            "own file": ("web.tsx(1,1): error TS2304: Cannot find name 'x'.", 2, 1),
-            "own file beside a checkout error": (checkout_error + "\nkeyscribe.ts(2,1): error TS2304: nope", 2, 1),
-            "project error": ("error TS5023: Unknown compiler option 'x'.", 2, 1),
-            "project error beside a checkout error": (checkout_error + "\ntsconfig.json: error TS5023: Unknown compiler option 'x'.", 2, 1),
-        }
-        for name, (output, status, expected) in cases.items():
-            tsc.write_text(f"#!/bin/bash\ncat <<'OUT'\n{output}\nOUT\nexit {status}\n")
-            tsc.chmod(0o755)
-            answer = subprocess.run(["bash", str(script), str(clone), str(sources)], capture_output=True, text=True, timeout=30)
-            self.assertEqual(answer.returncode, expected, f"{name}: {answer.stdout}{answer.stderr}")
+        (clone / "node_modules").mkdir(parents=True)
+        (clone / "scripts").mkdir()
+        (clone / "scripts/check-extension.ts").write_text("include: ['ext/*/web.tsx', 'ext/*/server.ts']\n")
+        answer = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=60,
+                                env=dict(os.environ, ULTIMATE_CLONE=str(clone), NODE=str(self.root / "no-node")))
+        self.assertEqual(answer.returncode, 1, answer.stdout + answer.stderr)
+        self.assertIn("Ultimate 0.1 or later", answer.stderr)
+        self.assertNotIn("ℹ tests", answer.stdout)
 
     def test_a_failed_prerequisite_blocks_the_expensive_check(self):
         failed = Check("first", (sys.executable, "-c", "raise SystemExit(7)"))

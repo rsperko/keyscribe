@@ -1,6 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-js'
 import { automatedBrowser, joined, runsAsCommand, typingTarget } from './keyscribe.ts'
-import { actionRef, api, defineWebExtension, fillComposer, useUltimate } from '@/sdk'
+import { actionRef, api, defineWebExtension, fillComposer, setUiState, useConversationId } from '@/sdk/solid'
 
 const extension = 'keyscribe'
 type Ask = { id: string; kind?: 'start'; conversation: number; text: string }
@@ -126,14 +126,34 @@ type Shown = {
   conversation: number | null; draft: boolean; newConversation?: boolean; parent?: number; pageConversation: number | null; problem?: string; focused: boolean
 }
 
-function Reporter() {
-  const { conversationId } = useUltimate()
-  const conversationShown = typeof conversationId === 'number' ? conversationId : null
-  const snapshot = useSyncExternalStore(subscribe, () => JSON.stringify({ ...composerNow(conversationShown), focused: focusedNow() }))
-  const shown = JSON.parse(snapshot) as Shown
-  const { focused, draft, newConversation } = shown
+function shownConversation(): () => number | null {
+  const conversationId = useConversationId()
+  return () => {
+    const id = conversationId()
+    return typeof id === 'number' ? id : null
+  }
+}
 
-  useEffect(() => {
+function Reporter() {
+  const conversationShown = shownConversation()
+  const [changed, setChanged] = createSignal(0)
+  onSettled(() => {
+    const bump = () => setChanged(count => count + 1)
+    const unsubscribe = subscribe(bump)
+    bump()
+    return unsubscribe
+  })
+  const snapshot = createMemo(() => {
+    changed()
+    return JSON.stringify({ ...composerNow(conversationShown()), focused: focusedNow() })
+  })
+  const shown = createMemo(() => JSON.parse(snapshot()) as Shown)
+  const asking = createMemo(() => {
+    const { focused, draft, newConversation } = shown()
+    return focused && (draft || newConversation === true)
+  })
+
+  onSettled(() => {
     const leave = () => {
       void api.action(
         PageAction,
@@ -143,22 +163,21 @@ function Reporter() {
     }
     window.addEventListener('pagehide', leave)
     return () => window.removeEventListener('pagehide', leave)
-  }, [])
+  })
 
-  useEffect(() => {
+  createEffect(shown, (now) => {
     const controller = new AbortController()
-    const report = () => api.action(PageAction, { page, seq: ++reportSeq, ...shown }, { signal: controller.signal }).catch(() => undefined)
+    const report = () => api.action(PageAction, { page, seq: ++reportSeq, ...now }, { signal: controller.signal }).catch(() => undefined)
     void report()
-    if (!focused) return () => controller.abort()
-    const timer = window.setInterval(report, heartbeat)
+    const timer = now.focused ? window.setInterval(report, heartbeat) : undefined
     return () => {
       controller.abort()
       window.clearInterval(timer)
     }
-  }, [snapshot])
+  })
 
-  useEffect(() => {
-    if (!focused || (!draft && !newConversation)) return
+  createEffect(asking, (active) => {
+    if (!active) return undefined
     const controller = new AbortController()
     void (async () => {
       while (!controller.signal.aborted) {
@@ -184,16 +203,20 @@ function Reporter() {
             continue
           }
           const text = hasDraft ? joined(before, ask.text) : ask.text
+          let opened: { id: number }
           try {
-            const opened = await api.action(SideChatOpenAction, { text }, { conversationId: ask.conversation as any })
-            if (hasDraft && editorOf(ask.conversation)?.value === before) fillComposer(ask.conversation, '')
-            document.querySelector<HTMLButtonElement>('[data-ui="side-chat-switch"][aria-pressed="true"]')?.click()
-            await api.updateUi({ set: { 'ext.side-chat.front': opened.id } }).catch(() => undefined)
-            await api.action(StartedAction, { id: ask.id, page, sent: true, withDraft: hasDraft, conversation: opened.id }).catch(() => undefined)
+            opened = await api.action(SideChatOpenAction, { text }, { conversationId: ask.conversation as any })
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error)
             await api.action(StartedAction, { id: ask.id, page, sent: false, reason: 'failed', detail: detail.slice(0, 200) }).catch(() => undefined)
+            continue
           }
+          try {
+            if (hasDraft && editorOf(ask.conversation)?.value === before) fillComposer(ask.conversation, '')
+            document.querySelector<HTMLButtonElement>('[data-ui="side-chat-switch"][aria-pressed="true"]')?.click()
+            setUiState('ext.side-chat.front', opened.id)
+          } catch {}
+          await api.action(StartedAction, { id: ask.id, page, sent: true, withDraft: hasDraft, conversation: opened.id }).catch(() => undefined)
           continue
         }
         const before = draftOf(ask.conversation)
@@ -204,22 +227,21 @@ function Reporter() {
       }
     })()
     return () => controller.abort()
-  }, [focused, draft, newConversation])
+  })
 
   return null
 }
 
 function Name() {
-  const { conversationId } = useUltimate()
-  const conversation = typeof conversationId === 'number' ? conversationId : null
-  const [label, setLabel] = useState<string | null>(null)
-  useEffect(() => {
+  const conversation = shownConversation()
+  const [label, setLabel] = createSignal<string | null>(null)
+  createEffect(conversation, (id) => {
     setLabel(null)
-    if (conversation === null) return
+    if (id === null) return undefined
     let live = true
     const read = () => {
       if (document.visibilityState !== 'visible') return
-      api.action(LabelAction, { conversation }).then((answer) => live && setLabel(answer.label), () => undefined)
+      api.action(LabelAction, { conversation: id }).then((answer) => live && setLabel(answer.label), () => undefined)
     }
     read()
     const timer = window.setInterval(read, heartbeat)
@@ -227,42 +249,38 @@ function Name() {
       live = false
       window.clearInterval(timer)
     }
-  }, [conversation])
-  if (!label) return null
-  return <span className="truncate text-muted-foreground">{label}</span>
+  })
+  return <Show when={label()}>{(text) => <span class="truncate text-muted-foreground">{text()}</span>}</Show>
 }
 
-let say: ((message: string) => void) | null = null
+const [answer, setAnswer] = createSignal<string | null>(null)
+let answerTimer: number | undefined
+
+function say(message: string) {
+  setAnswer(message)
+  window.clearTimeout(answerTimer)
+  answerTimer = window.setTimeout(() => setAnswer(null), answerShown)
+}
 
 function Answer() {
-  const [message, setMessage] = useState<string | null>(null)
-  useEffect(() => {
-    let clear: number | undefined
-    say = (text) => {
-      setMessage(text)
-      window.clearTimeout(clear)
-      clear = window.setTimeout(() => setMessage(null), answerShown)
-    }
-    return () => {
-      say = null
-      window.clearTimeout(clear)
-    }
-  }, [])
-  if (!message) return null
   return (
-    <div
-      role="status"
-      className="pointer-events-none fixed bottom-20 left-1/2 z-50 max-w-md -translate-x-1/2 rounded-md border border-border bg-popover px-3 py-2 text-sm text-popover-foreground shadow-md"
-    >
-      {message}
-    </div>
+    <Show when={answer()}>
+      {(text) => (
+        <div
+          role="status"
+          class="pointer-events-none fixed bottom-20 left-1/2 z-50 max-w-md -translate-x-1/2 rounded-md border border-border bg-popover px-3 py-2 text-sm text-popover-foreground shadow-md"
+        >
+          {text()}
+        </div>
+      )}
+    </Show>
   )
 }
 
 async function readAloud(conversation: number | undefined, on: boolean) {
   if (typeof conversation !== 'number') return
   const { message } = await api.action(ReadAloudAction, { conversation, on })
-  say?.(message)
+  say(message)
 }
 
 export default defineWebExtension({
