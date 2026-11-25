@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct UltimateConnectorTests {
     static let sources = [
-        "server.ts": "server", "keyscribe.ts": "core", "web.solid.tsx": "const extension = 'keyscribe'\nrest",
+        "server.ts": "server", "keyscribe.ts": "core", "page.ts": "page", "web.solid.tsx": "const extension = 'keyscribe'\nrest",
         "web.tsx": "const extension = 'keyscribe'\nreact", "README.md": "readme",
     ]
 

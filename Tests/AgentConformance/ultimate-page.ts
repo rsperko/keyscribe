@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Instance, type TakeResult } from "./lib/instance.ts"
 import { bringAwayForward } from "./lib/driver.ts"
-import { UltimateDriver } from "./lib/ultimate.ts"
+import { UltimateDriver, pageChange } from "./lib/ultimate.ts"
 import { awayWindow, terminalHost } from "./lib/terminal.ts"
 import { run, sha256, shutDown, sleep, stopEach, until } from "./lib/util.ts"
 import { failureBundle } from "./lib/artifacts.ts"
@@ -105,8 +105,8 @@ const windows = () => instance.windows()
 const focus = (spec: string) => instance.focus(spec)
 const lookAway = () => bringAwayForward(away, windows, focus)
 async function shown(page: any, id: number, side?: number) {
-  await request("/api/ui", { set: { "shell.surface": "agent", "shell.conversation": id,
-    "ext.side-chat.front": side ?? null } })
+  await request("/api/ui", pageChange({ "shell.surface": "agent", "shell.conversation": id,
+    "ext.side-chat.front": side ?? null }))
   const editor = page.locator(`textarea[data-conversation="${side ?? id}"]:visible`).filter({ visible: true })
   await editor.waitFor({ state: "visible", timeout: 60_000 })
   focus(chromeWindow)
@@ -387,6 +387,16 @@ try {
     assert.ok(answer, "the new side chat answered its take")
     assert.equal(result.reply!.sha256, sha256(answer.text))
   }, "main")
+  if (side) await attempt(main, "go to @ultimate with its side chat in front shows @ultimate's own message box", async () => {
+    await shown(page, main, side.id)
+    await lookAway()
+    const result = take(`go to ${name(main)}`)
+    assert.ok(result.ok, JSON.stringify(result))
+    await page.waitForFunction((id: number) => {
+      const box = [...document.querySelectorAll<HTMLTextAreaElement>(`textarea[data-conversation="${id}"]`)].find(editor => editor.getClientRects().length > 0)
+      return !!box && !box.closest('[inert]')
+    }, main, { timeout: 15_000 })
+  }, "main")
   const landerCase = "lander hold identifies the conversation"
   if (!stoppedEarly && matchesPageCase(only, landerCase, "lander")) {
     const served = String((await streamed("system"))?.project?.root ?? "")
@@ -397,7 +407,7 @@ try {
       const lander = fileListing().find(c => c.label === "lander")
       assert.ok(lander, "the project has its standing lander")
       await attempt(lander.id, landerCase, async () => {
-        await request("/api/ui", { set: { "shell.surface": "agent", "shell.conversation": lander.id, "ext.side-chat.front": null } })
+        await request("/api/ui", pageChange({ "shell.surface": "agent", "shell.conversation": lander.id, "ext.side-chat.front": null }))
         focus(chromeWindow)
         await page.waitForURL(new RegExp(`conversation=${lander.id}(?:&|$)`))
         await page.waitForTimeout(500)

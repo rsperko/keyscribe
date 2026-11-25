@@ -549,8 +549,17 @@ every rule above applies to it, with these sharpenings:
   address is unreadable, so a number that names no listed conversation holds whatever follows it. The page reports the visible writable composer, including
   a side chat over its parent, Tab’s new-side-chat mode (`data-side-mode="side"`, delivered through `start` and
   `side-chat/open` so it never falls into `@ultimate`), and the page URL’s `?conversation=` id; a dialog or an editor
-  that is not ready holds delivery with its reason. It reacts to
-  focus, typing and composer or dialog elements appearing, and re-reads the composer at each heartbeat, so a dialog
+  that is not ready holds delivery with its reason. Focus in any other place that takes typing (a question card’s note,
+  the Inbox’s answer box, a search field, a `role="textbox"` editor) holds it too, even beside one
+  composer, since a take never goes to a box other than the one with focus and an Agent take never leaves words in a box
+  unsent (`typesText`, `typingTarget`). Focus inside a shadow root is read as its host, which Ultimate's page does not
+  use as an editor, and focus inside an iframe is read as the iframe, which is not a text box: with a conversation's
+  preview over its message box, a take without a name still goes to the conversation shown. A surface other than the conversation view has no message box and says so (`composerProblem`); the
+  page reads the surface Ultimate shows (`useSurface`, `useUltimate().surface`), which a project's `defaultSurface`
+  can make the Inbox without the user choosing it. The page reads a draft from the box, or from Ultimate’s
+  `ultimate.draft.<id>` storage when the box is not drawn, rather than a page-SDK call some supported Ultimate versions
+  lack. Both page facets share their DOM readers through `page.ts`. It reacts to
+  focus, typing, composer or dialog elements appearing and any change that moves focus, and re-reads the composer at each heartbeat, so a dialog
   shown by a style change alone is reported within one heartbeat.
   A page in a browser that automation drives (`navigator.webdriver`) or that runs headless never reports focus
   (`automatedBrowser`), so a page an agent opens with a browser tool never becomes the page in front, and while the user
@@ -576,6 +585,12 @@ every rule above applies to it, with these sharpenings:
   other agents and other copies do not wake it.
   Instance paths use the filesystem's canonical path on both sides.
   “Open” switches Ultimate's shared UI state through its loopback `/api/ui` and raises the window last matched, and
+  each write carries the change both as `ops` (what current Ultimate reads) and as `set` (what an older one reads), since
+  each version ignores the other's field (`UltimateHost.show`, pinned against both shapes by `UltimatePageChangeTests`).
+  A write Ultimate refuses says so with Ultimate's own error, trimmed and cut to `UltimateHost.refusalLimit`, or with
+  its HTTP status when it gives none, rather than reading as nothing found. The write also clears
+  `ext.side-chat.front`: Ultimate covers `@ultimate`'s own box with the side chat that key names, so leaving it would open
+  the side chat instead, while a side chat opened by its own name is the conversation shown. “Open” then
   reads as opened only when that window, once raised, still shows this project's page (`UltimateHost.view`): a
   tab closed since then leaves a window that shows something else. A window whose page cannot be read, or that is not
   yet in front after raising, is not the same as one showing something else: it reads as requested and opens nothing,

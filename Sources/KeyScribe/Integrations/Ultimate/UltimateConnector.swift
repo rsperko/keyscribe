@@ -2,9 +2,9 @@ import Foundation
 import KeyScribeKit
 
 enum UltimateConnectorFiles {
-    static let names = ["server.ts", "keyscribe.ts", "web.solid.tsx", "web.tsx", "README.md"]
+    static let names = ["server.ts", "keyscribe.ts", "page.ts", "web.solid.tsx", "web.tsx", "README.md"]
     static let configName = "keyscribe.json"
-    static let writeOrder = [configName, "keyscribe.ts", "web.solid.tsx", "web.tsx", "README.md", "server.ts"]
+    static let writeOrder = [configName, "keyscribe.ts", "page.ts", "web.solid.tsx", "web.tsx", "README.md", "server.ts"]
     private static let extensionLine = "const extension = 'keyscribe'"
 
     static let sources: [String: String]? = {

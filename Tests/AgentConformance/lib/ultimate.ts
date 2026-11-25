@@ -12,6 +12,10 @@ function traceRecords(trace: string): any[] {
   })
 }
 
+export function pageChange(set: Record<string, unknown>) {
+  return { ops: Object.entries(set).map(([key, value]) => ({ key, value })), set }
+}
+
 export function reportedPages(trace: string): Set<string> {
   return new Set(traceRecords(trace).flatMap((entry) => (entry.dir === "page->ext" && typeof entry.page === "string" ? [entry.page] : [])))
 }
@@ -284,7 +288,8 @@ export class UltimateDriver implements AgentDriver {
       if (!this.chromePids().length) {
         await this.launchChrome()
       } else {
-        await this.api("/api/ui", { set: { "shell.surface": "agent", "shell.conversation": this.id } })
+        const shown = await this.api("/api/ui", pageChange({ "shell.surface": "agent", "shell.conversation": this.id }))
+        if (!shown.ok) throw new Error(`Ultimate refused the page change: ${shown.status} ${await shown.text()}`)
       }
       await until("the conversation's message box in the Ultimate window", async () =>
         (await this.page(`(() => { const box = ${this.composer()}; return !!box && box.getClientRects().length > 0 })()`).catch(() => undefined)) ? true : undefined, 90, 500)

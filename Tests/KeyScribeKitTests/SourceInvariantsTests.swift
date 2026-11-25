@@ -29,8 +29,9 @@ struct SourceInvariantsTests {
         let rule = SourceRule(
             pattern: #"\bsetInterval\("#,
             allowed: [
-                "Sources/KeyScribe/Resources/UltimateConnector/web.solid.tsx": 3,
-                "Sources/KeyScribe/Resources/UltimateConnector/web.tsx": 3,
+                "Sources/KeyScribe/Resources/UltimateConnector/page.ts": 1,
+                "Sources/KeyScribe/Resources/UltimateConnector/web.solid.tsx": 2,
+                "Sources/KeyScribe/Resources/UltimateConnector/web.tsx": 2,
                 "Sources/KeyScribe/Resources/BBPlugin/app.tsx": 1,
             ],
             reason: "A connector runs inside the user's agent and wakes it for nothing while nothing changes; it reports "

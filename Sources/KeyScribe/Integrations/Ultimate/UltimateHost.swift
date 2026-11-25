@@ -37,7 +37,13 @@ final class UltimateHost: AgentHost {
 
     typealias ReadProjects = @Sendable (_ setups: [String]) async -> [Running]
     typealias ReadConversations = @Sendable (_ home: String, _ port: Int) async -> Listing
-    typealias ShowConversation = @Sendable (_ port: Int, _ conversation: Int) async -> Bool
+    typealias ShowConversation = @Sendable (_ port: Int, _ conversation: Int) async -> PageChange
+
+    enum PageChange: Equatable, Sendable {
+        case changed
+        case refused(String)
+        case unanswered
+    }
     typealias Retitle = @Sendable (_ port: Int, _ conversation: Int, _ title: String) async -> Bool
 
     private let home: String
@@ -176,7 +182,7 @@ final class UltimateHost: AgentHost {
             on: on, newConversation: newConversation, problem: problem)
         reports[location.instance] = report.claimsFocus ? report : nil
         if report.claimsFocus { lastClaim[location.instance] = now() }
-        if !wasClaiming, report.on || report.newConversation {
+        if !wasClaiming, report.claimsFocus {
             let instance = location.instance
             rememberTasks[instance]?.cancel()
             rememberTasks[instance] = Task { @MainActor [weak self] in
@@ -245,7 +251,12 @@ final class UltimateHost: AgentHost {
     func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen {
         guard location.host == Self.kind.id, let project = running[location.instance], let conversation = Int(location.native) else { return .failed }
         guard stillWanted() else { return .failed }
-        guard await show(project.lock.port, conversation), !Task.isCancelled, stillWanted() else { return .failed }
+        switch await show(project.lock.port, conversation) {
+        case .changed: break
+        case .refused(let why): return .refused("\(Self.kind.displayName) refused the page change: \(why)")
+        case .unanswered: return .failed
+        }
+        guard !Task.isCancelled, stillWanted() else { return .failed }
         if let task = rememberTasks[location.instance] {
             await task.value
             guard !Task.isCancelled, stillWanted() else { return .failed }
@@ -343,6 +354,7 @@ final class UltimateHost: AgentHost {
     }
 
     nonisolated static let requestTimeout: TimeInterval = 2
+    nonisolated static let refusalLimit = 200
 
     private nonisolated static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -350,16 +362,33 @@ final class UltimateHost: AgentHost {
         return URLSession(configuration: configuration)
     }()
 
-    nonisolated static func show(port: Int, conversation: Int) async -> Bool {
-        await post(port: port, path: "/api/ui", body: ["set": ["shell.surface": "agent", "shell.conversation": conversation]]) != nil
+    nonisolated static func show(port: Int, conversation: Int) async -> PageChange {
+        let change: [String: Any] = ["shell.surface": "agent", "shell.conversation": conversation, "ext.side-chat.front": NSNull()]
+        let body: [String: Any] = ["ops": change.sorted { $0.key < $1.key }.map { ["key": $0.key, "value": $0.value] }, "set": change]
+        return switch await send(port: port, path: "/api/ui", body: body) {
+        case .answered: .changed
+        case .refused(let status, let error): .refused(error ?? "HTTP \(status)")
+        case .unanswered: .unanswered
+        }
     }
 
     nonisolated static func retitle(port: Int, conversation: Int, title: String) async -> Bool {
         await post(port: port, path: "/api/extensions/conversations/actions/rename", body: ["args": ["id": conversation, "title": title]]) != nil
     }
 
+    private enum Reply {
+        case answered(Data)
+        case refused(status: Int, error: String?)
+        case unanswered
+    }
+
     private nonisolated static func post(port: Int, path: String, body: [String: Any]) async -> Data? {
-        guard let url = URL(string: "http://127.0.0.1:\(port)\(path)"), let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
+        guard case .answered(let data) = await send(port: port, path: path, body: body) else { return nil }
+        return data
+    }
+
+    private nonisolated static func send(port: Int, path: String, body: [String: Any]) async -> Reply {
+        guard let url = URL(string: "http://127.0.0.1:\(port)\(path)"), let data = try? JSONSerialization.data(withJSONObject: body) else { return .unanswered }
         var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -367,12 +396,14 @@ final class UltimateHost: AgentHost {
         request.httpBody = data
         guard let (answer, response) = try? await session.data(for: request),
               let status = (response as? HTTPURLResponse)?.statusCode
-        else { return nil }
+        else { return .unanswered }
         guard (200..<300).contains(status) else {
             Log.agents.info("Ultimate answered \(status, privacy: .public) to \(path, privacy: .public)")
-            return nil
+            let error = ((try? JSONSerialization.jsonObject(with: answer) as? [String: Any])?["error"] as? String)
+                .map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(refusalLimit)) }
+            return .refused(status: status, error: error?.isEmpty == false ? error : nil)
         }
-        return answer
+        return .answered(answer)
     }
 
     static func frontApp() -> AgentHostApp? {

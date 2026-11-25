@@ -2390,7 +2390,7 @@ struct AgentDeliveryWiringTests {
         let ultimate = UltimateHost(
             home: "/u", enrolled: { [UltimateNamingTests.setup] }, readProjects: { _ in [project] },
             readConversations: { _, _ in .connector([.init(id: "53", handle: "@ultimate", folder: "/w/app"), .init(id: "61", folder: "/w/61")]) },
-            show: { _, _ in false }, retitle: { _, _, _ in false },
+            show: { _, _ in .unanswered }, retitle: { _, _, _ in false },
             frontApp: { browser },
             documentURL: { _ in
                 await MainActor.run {
@@ -2452,7 +2452,7 @@ struct AgentDeliveryWiringTests {
         let ultimate = UltimateHost(
             home: "/u", enrolled: { [UltimateNamingTests.setup] }, readProjects: { _ in [project] },
             readConversations: { _, _ in .connector([.init(id: "53", handle: "@ultimate", folder: "/w/app"), .init(id: "61", folder: "/w/61")]) },
-            show: { _, _ in false }, retitle: { _, _, _ in false },
+            show: { _, _ in .unanswered }, retitle: { _, _, _ in false },
             frontApp: { browser },
             documentURL: { _ in URL(string: "http://ultimate.localhost:4747/?conversation=61") },
             activate: { _, _ in false })

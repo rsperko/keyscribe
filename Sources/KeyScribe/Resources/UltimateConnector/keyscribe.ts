@@ -188,13 +188,33 @@ function remember<K, V>(map: Map<K, V>, key: K, value: V) {
 export type TypingTarget = { kind: "conversation"; id: number } | { kind: "newSideChat"; parent: number } | { kind: "none" }
 
 export function typingTarget(
-  editors: Array<{ id: number; active: boolean; sideMode?: boolean }>, blocked: boolean
+  editors: Array<{ id: number; active: boolean; sideMode?: boolean }>, blocked: boolean, elsewhere = false
 ): TypingTarget {
-  if (blocked) return { kind: "none" }
+  if (blocked || elsewhere) return { kind: "none" }
   const active = editors.filter(editor => editor.active)
   const chosen = active.length === 1 ? active[0] : editors.length === 1 ? editors[0] : undefined
   if (!chosen) return { kind: "none" }
   return chosen.sideMode ? { kind: "newSideChat", parent: chosen.id } : { kind: "conversation", id: chosen.id }
+}
+
+const textInputs = new Set(["text", "search", "email", "url", "tel", "password", "number"])
+
+export function typesText(element: {
+  tagName: string; type?: string; role?: string | null; isContentEditable?: boolean; disabled?: boolean; readOnly?: boolean
+} | null): boolean {
+  if (!element || element.disabled || element.readOnly) return false
+  if (element.tagName === "TEXTAREA") return true
+  if (element.tagName === "INPUT") return textInputs.has((element.type || "text").toLowerCase())
+  return element.isContentEditable === true || element.role === "textbox"
+}
+
+export function composerProblem(state: { blocked: boolean; elsewhere: boolean; editors: number; home: boolean }): string {
+  if (state.blocked) return "A dialog covers Ultimate’s composer."
+  if (state.elsewhere) return "The box with focus in Ultimate is not a conversation’s message box. "
+    + (state.editors > 0 ? "Click in a message box, or say the conversation’s name." : "Open a conversation, or say its name.")
+  if (state.editors > 1) return "Ultimate has several writable composers. Click in the one to use."
+  if (!state.home) return "What Ultimate shows has no message box. Open a conversation, or say its name."
+  return "Ultimate’s composer is not ready."
 }
 
 export function typingConversation(editors: Array<{ id: number; active: boolean; sideMode?: boolean }>, blocked: boolean): number | null {

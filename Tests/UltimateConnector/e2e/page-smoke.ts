@@ -28,6 +28,9 @@ writeFileSync(join(setup, "onboarding.json"), JSON.stringify({ firstRunDone: tru
 writeFileSync(join(setup, "settings.json"), JSON.stringify({ onboarding: false }))
 execFileSync("git", ["init", "-q", project])
 writeFileSync(join(project, "README.md"), "A scratch project.\n")
+mkdirSync(join(project, ".ultimate"))
+writeFileSync(join(project, ".ultimate", "settings.json"), JSON.stringify({ defaultSurface: "inbox" }))
+writeFileSync(join(setup, "trust.json"), JSON.stringify({ [project]: true }))
 const socketPath = join(bridge, "bridge.sock")
 writeFileSync(join(bridge, "token"), "smoke-token\n")
 writeFileSync(join(bridge, "ready.json"), JSON.stringify({ launch: "smoke", protocol: 3 }))
@@ -58,6 +61,10 @@ async function until<T>(what: string, find: () => T | undefined, seconds = 20): 
   }
 }
 const after = (index: number, match: (report: Report) => boolean) => () => reports.slice(index).find(match)
+const addressed = (url: string) => {
+  const value = new URL(url).searchParams.get("conversation")
+  return value && /^\d+$/.test(value) ? Number(value) : null
+}
 
 const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("ULTIMATE_")))
 const child = spawn(node, [join(clone, "bin/ultimate.ts"), project, "--port", String(port), "--no-open"], {
@@ -129,14 +136,75 @@ try {
   await until("a report after the dialog closed", after(reports.length - 1, (report) => report.conversation === second))
   console.log("a dialog holds the page and its closing releases it")
 
+  await box.fill("an unrelated draft")
+  for (const [how, close] of [
+    ["removed", (note: HTMLTextAreaElement) => note.remove()],
+    ["hidden", (note: HTMLTextAreaElement) => { note.hidden = true }],
+    ["disabled", (note: HTMLTextAreaElement) => { note.disabled = true }],
+  ] as const) {
+    mark = reports.length
+    await page.evaluate(() => {
+      const note = document.createElement("textarea")
+      note.id = "ks-smoke-note"
+      note.placeholder = "Anything else?"
+      document.body.append(note)
+      note.focus()
+    })
+    await until("a report held by a focused box that is not a message box",
+      after(mark, (report) => report.conversation === null && /not a conversation’s message box/.test(report.problem ?? "")))
+    mark = reports.length
+    await page.evaluate(`(${close.toString()})(document.getElementById("ks-smoke-note"))`)
+    await until(`a release within one heartbeat after the other box is ${how}`,
+      after(mark, (report) => report.conversation === second && report.draft), 3)
+    await page.evaluate(() => document.getElementById("ks-smoke-note")?.remove())
+  }
+  mark = reports.length
+  await page.evaluate(() => {
+    const preview = document.createElement("iframe")
+    preview.id = "ks-smoke-preview"
+    preview.title = "Preview"
+    document.body.append(preview)
+    preview.focus()
+  })
+  await page.waitForFunction(() => document.activeElement?.id === "ks-smoke-preview")
+  await new Promise((done) => setTimeout(done, 1500))
+  assert.deepEqual(reports.slice(mark).filter((report) => report.conversation !== second).map((report) => report.problem), [],
+    "focus in a preview frame never holds the take")
+  assert.equal(reports.at(-1)!.conversation, second)
+  await page.evaluate(() => document.getElementById("ks-smoke-preview")?.remove())
+  console.log("focus in a preview frame still names the conversation shown")
+
+  await box.fill("")
+  await until("a report without the draft", after(reports.length - 1, (report) => report.conversation === second && !report.draft))
+  console.log("focus in another text box holds the take, and closing that box releases it at once")
+
+  mark = reports.length
+  await page.locator(`[data-ui="surface-tabs"] [data-surface="inbox"]:visible`).first().click()
+  const inInbox = await until("a report from the Inbox",
+    after(mark, (report) => report.conversation === null && /has no message box\. Open a conversation, or say its name/.test(report.problem ?? "")))
+  assert.equal(inInbox.pageConversation, addressed(page.url()), "the report names the conversation in the browser's address")
+  mark = reports.length
+  await page.locator(`[data-ui="surface-tabs"] [data-surface="agent"]:visible`).first().click()
+  const back = await until("a report after returning to the conversation", after(mark, (report) => report.conversation === second), 30)
+  assert.equal(back.pageConversation, addressed(page.url()), "the report names the conversation in the browser's address")
+  console.log("a surface with no message box says so and what to do")
+
   mark = reports.length
   const before = reports.at(-1)!.page
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide")))
   await until("the leaving page's last report", after(mark, (report) => report.page === before && report.conversation === null))
   mark = reports.length
   await page.reload()
-  await until("a report from the reloaded page", after(mark, (report) => report.page !== before && report.conversation === second), 60)
+  await until("a report from the reloaded page", after(mark, (report) => report.page !== before && report.pageConversation === second), 60)
   console.log("leaving clears the page's report and a reload reports again")
+
+  mark = reports.length
+  const opened = await context.newPage()
+  await opened.goto(`${origin}/`)
+  await until("a report from the project's default surface",
+    after(mark, (report) => report.conversation === null && /has no message box/.test(report.problem ?? "")), 60)
+  await opened.close()
+  console.log("the surface the project opens on is the one the page reports")
 
   assert.deepEqual(problems, [], "the page reported errors from the extension")
   console.log("test-ultimate-page-smoke: passed")
@@ -147,7 +215,9 @@ try {
   console.error(output.join("").slice(-4000))
 } finally {
   await browser?.close().catch(() => undefined)
+  const exited = new Promise((done) => child.exitCode !== null || child.signalCode !== null ? done(undefined) : child.once("exit", done))
   try { process.kill(-child.pid!, "SIGTERM") } catch {}
+  await Promise.race([exited, new Promise((done) => setTimeout(done, 10_000))])
   app.close()
   if (!failed) rmSync(root, { recursive: true, force: true })
   else console.error(`kept ${root}`)

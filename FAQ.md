@@ -770,8 +770,8 @@ What you dictate is sent as your own message, with any image you pasted. A conve
 into the running turn, the way typing there does. While an Ultimate page is the window in front, dictation without
 a name goes to the conversation whose message box takes your typing, which is the side chat when one covers the
 main message box (or opens a new side chat when you switched `@ultimate`'s box to side-chat mode with Tab). If its message box already has text, what you say is added after it and both are sent together.
-When the page can't take it, such as when a dialog covers the message box or the page shows the lander, nothing is
-sent and the panel says why. KeyScribe tells which page is in front from the address the browser reports for its
+When the page can't take it, such as when a dialog covers the message box, the page shows the lander or the Inbox,
+or you are typing in another box such as a question card's note, nothing is sent and the panel says why. KeyScribe tells which page is in front from the address the browser reports for its
 window, which Chrome, other Chromium browsers and Safari do and Firefox does not; in Firefox, name the conversation.
 A page opened by a browser that automation drives, such as an agent checking its own work in a headless browser, never
 takes over from the page on your screen, so dictation and the decision to read a reply aloud follow the page you see.

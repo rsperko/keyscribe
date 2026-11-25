@@ -11,6 +11,7 @@ struct UltimateHostTests {
         var shown: [(Int, Int)] = []
         var retitled: [(Int, Int, String)] = []
         var showWorks = true
+        var showRefusal: String?
         var now = Date()
         var pages: [String: String] = ["cg:400": "http://ultimate.localhost:4747/?conversation=61"]
         var frontReads = 0
@@ -41,7 +42,7 @@ struct UltimateHostTests {
             readConversations: { home, _ in listing?(home) ?? conversations(home).map { .connector($0) } ?? .file(nil, connectorFailed: false) },
             show: { [front] port, id in
                 await MainActor.run { front.shown.append((port, id)) }
-                return await MainActor.run { front.showWorks }
+                return await MainActor.run { front.showRefusal.map { .refused($0) } ?? (front.showWorks ? .changed : .unanswered) }
             },
             retitle: { [front] port, id, title in
                 await MainActor.run { front.retitled.append((port, id, title)) }
@@ -655,6 +656,21 @@ struct UltimateHostTests {
         #expect(front.openedPages == ["http://ultimate.localhost:4747/?conversation=61"])
     }
 
+    @Test func aPageFirstSeenOnASurfaceWithNoMessageBoxIsStillTheWindowAnOpenRaises() async {
+        let front = Front()
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        front.app = Self.browser
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: false, problem: "What Ultimate shows has no message box. Open a conversation, or say its name."))
+        for _ in 0..<50 { await Task.yield() }
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        for _ in 0..<50 { await Task.yield() }
+        front.app = Self.terminal
+        #expect(await ultimate.open(location("53"), stillWanted: { true }) == .opened)
+        #expect(front.activated == [Self.browser.pid])
+        #expect(front.openedPages.isEmpty)
+    }
+
     @Test func theReaderKeepsAnotherPagesAddressSoAClosedTabReadsAsShowingSomethingElse() {
         let local = URL(string: "http://ultimate.localhost:4747/?conversation=61")!
         let other = URL(string: "https://example.com/news")!
@@ -690,6 +706,16 @@ struct UltimateHostTests {
         _ = await ultimate.scan()
         #expect(await ultimate.open(location("61"), stillWanted: { true }) == .failed)
         #expect(front.activated.isEmpty)
+    }
+
+    @Test func anOpenUltimateRefusesSaysWhatItSaid() async {
+        let front = Front()
+        front.showRefusal = "Invalid UI update"
+        let ultimate = host(front)
+        _ = await ultimate.scan()
+        #expect(await ultimate.open(location("61"), stillWanted: { true }) == .refused("Ultimate refused the page change: Invalid UI update"))
+        #expect(front.activated.isEmpty)
+        #expect(front.openedPages.isEmpty)
     }
 
     @Test func aProjectThatIsNotRunningIsNotOpened() async {

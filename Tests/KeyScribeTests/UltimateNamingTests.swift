@@ -102,7 +102,7 @@ struct UltimateNamingTests {
                 let found = Self.conversations(ids, home: home, root: roots[home]!)
                 return .connector(order.reversed ? found.reversed() : found)
             },
-            show: { _, _ in false }, retitle: { _, _, _ in false }, frontApp: { nil }, activate: { _, _ in false })
+            show: { _, _ in .unanswered }, retitle: { _, _, _ in false }, frontApp: { nil }, activate: { _, _ in false })
         let transport = AgentHubTests.FakeTransport()
         let hub = AgentHub(
             transport: transport, discovery: [AgentHubTests.FakeDiscovery(kind: .claude)], names: nil, focus: nil, front: nil,

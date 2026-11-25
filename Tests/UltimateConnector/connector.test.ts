@@ -792,6 +792,37 @@ for (const order of [["page", "listed", "hello"], ["listed", "page", "hello"], [
   })
 }
 
+test("focus in a text box that is not a message box holds the take even beside one composer", async () => {
+  const { typingTarget } = await import("../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts") as any
+  assert.deepEqual(typingTarget([{ id: 53, active: false }], false, true), { kind: "none" })
+  assert.deepEqual(typingTarget([{ id: 53, active: false }], false, false), { kind: "conversation", id: 53 })
+})
+
+test("a focused text box is one that takes typing", async () => {
+  const { typesText } = await import("../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts") as any
+  assert.equal(typesText({ tagName: "TEXTAREA" }), true)
+  assert.equal(typesText({ tagName: "INPUT", type: "search" }), true)
+  assert.equal(typesText({ tagName: "INPUT", type: "" }), true)
+  assert.equal(typesText({ tagName: "IFRAME" }), false)
+  assert.equal(typesText({ tagName: "DIV", role: "textbox" }), true)
+  assert.equal(typesText({ tagName: "DIV", isContentEditable: true }), true)
+  assert.equal(typesText({ tagName: "INPUT", type: "checkbox" }), false)
+  assert.equal(typesText({ tagName: "TEXTAREA", readOnly: true }), false)
+  assert.equal(typesText({ tagName: "BUTTON" }), false)
+  assert.equal(typesText(null), false)
+})
+
+test("the page says what is in front when no message box can take a take", async () => {
+  const { composerProblem } = await import("../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts") as any
+  const base = { blocked: false, elsewhere: false, editors: 0, home: true }
+  assert.match(composerProblem({ ...base, blocked: true }), /dialog/)
+  assert.match(composerProblem({ ...base, elsewhere: true, editors: 1 }), /not a conversation’s message box\. Click in a message box, or say the conversation’s name/)
+  assert.match(composerProblem({ ...base, elsewhere: true }), /not a conversation’s message box\. Open a conversation, or say its name/)
+  assert.match(composerProblem({ ...base, editors: 2 }), /several writable composers/)
+  assert.match(composerProblem({ ...base, home: false }), /has no message box\. Open a conversation, or say its name/)
+  assert.match(composerProblem(base), /composer is not ready/)
+})
+
 test("Tab new side-chat mode targets a new side chat and never routes to @ultimate", async () => {
   const { typingTarget } = await import("../../Sources/KeyScribe/Resources/UltimateConnector/keyscribe.ts") as any
   assert.equal(typeof typingTarget, "function")

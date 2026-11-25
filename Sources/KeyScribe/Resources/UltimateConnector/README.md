@@ -21,8 +21,8 @@ waits and sends nothing. It reports the reply, a short fingerprint of the prompt
 prompt itself), and the question a conversation asks you.
 
 Each open Ultimate page tells the server half whether it has focus, which writable message box receives typing and whether that
-box holds text. A side chat in front receives the take. A dialog or a message box that is not ready holds it
-with an explanation. The app verifies the page against the browser window and project address. Only a focused page keeps reporting.
+box holds text. A side chat in front receives the take. A dialog, a message box that is not ready, focus in another
+text box, or a surface with no message box holds it with an explanation. The app verifies the page against the browser window and project address. Only a focused page keeps reporting.
 A page in a headless browser or one that automation drives never reports focus, so a page an agent opens never takes
 over from the page on screen.
 
