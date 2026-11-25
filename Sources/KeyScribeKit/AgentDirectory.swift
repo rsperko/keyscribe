@@ -110,13 +110,20 @@ public struct RememberedName: Codable, Hashable, Sendable {
 }
 
 public struct AgentDirectory: Sendable {
+    public static let retiredLimit = 512
     public private(set) var conversations: [AgentConversation] = []
     public private(set) var disconnected: [AgentConversation] = []
     public private(set) var revision = 0
     private var handleById: [String: String] = [:]
-    private var retired: [String: String] = [:]
+    struct Retired: Equatable, Sendable {
+        var name: String
+        var update: Int
+    }
+
+    private(set) var retired: [String: Retired] = [:]
+    private var updates = 0
     private var chosen: [String: String] = [:]
-    private var nativeNameById: [String: String] = [:]
+    private(set) var nativeNameById: [String: String] = [:]
     private var remembering: [String: RememberedName]
     private var startById: [String: Int] = [:]
     private var preferredById: [String: String] = [:]
@@ -135,6 +142,7 @@ public struct AgentDirectory: Sendable {
             kept.previous = Self.previous(saved.previous, apartFrom: saved.name)
             return kept
         }
+        rememberAll()
     }
 
     private static func isSayable(_ name: String) -> Bool { !name.isEmpty && AgentHandles.normalize(name) == name }
@@ -176,7 +184,13 @@ public struct AgentDirectory: Sendable {
 
     public var chosenNames: [String: String] { chosen }
 
-    public var remembered: [String: RememberedName] {
+    public private(set) var remembered: [String: RememberedName] = [:]
+
+    private mutating func rememberAll() {
+        remembered = rememberedNow()
+    }
+
+    func rememberedNow() -> [String: RememberedName] {
         var names = remembering
         for conversation in conversations + disconnected {
             if let saved = remembering(conversation) { names[conversation.id] = saved }
@@ -205,6 +219,23 @@ public struct AgentDirectory: Sendable {
         conversations.first { $0.pid == pid }
     }
 
+    private mutating func retire(_ id: String, as name: String) {
+        retired[id] = Retired(name: name, update: updates)
+    }
+
+    private mutating func capRetired() {
+        guard retired.count > Self.retiredLimit else { return }
+        let byUpdate = Dictionary(grouping: retired.values.map(\.update), by: { $0 }).mapValues(\.count)
+        var kept = 0
+        var oldestKept = Int.max
+        for (update, count) in byUpdate.sorted(by: { $0.key > $1.key }) {
+            guard oldestKept == Int.max || kept + count <= Self.retiredLimit else { break }
+            kept += count
+            oldestKept = update
+        }
+        retired = retired.filter { $0.value.update >= oldestKept }
+    }
+
     public mutating func setStates(_ states: [String: AgentLiveState]) {
         var changed = false
         for index in conversations.indices {
@@ -225,6 +256,7 @@ public struct AgentDirectory: Sendable {
         running: (RememberedName) -> Bool = { _ in false }, excluded: Set<String> = [], places: [String: AgentPlace] = [:],
         unplaced: Set<String> = [], unreadSince: [String: Date] = [:]
     ) {
+        updates += 1
         func conversationId(_ entry: AgentSession) -> String { AgentSessionID.make(agent: entry.agent, native: entry.id) }
         func usable(_ name: String) -> String? {
             let normalized = AgentHandles.normalize(name)
@@ -307,7 +339,7 @@ public struct AgentDirectory: Sendable {
             return !replaced && running(saved)
         }
         for (id, handle) in handleById where !liveIds.contains(id) && !folderUnknown.contains(id) {
-            retired[id] = handle
+            retire(id, as: handle)
         }
         handleById = handleById.filter { liveIds.contains($0.key) }
         startById = Dictionary(entries.compactMap { entry in entry.startedAt.map { (conversationId(entry), $0) } }, uniquingKeysWith: { first, _ in first })
@@ -317,7 +349,7 @@ public struct AgentDirectory: Sendable {
             guard let saved = remembering.removeValue(forKey: id), saved.pid == entry.pid, saved.startedAt == entry.startedAt else { continue }
             if former[id] == nil, !saved.previous.isEmpty { former[id] = saved.previous }
             guard chosen[id] == nil else { continue }
-            retired[id] = saved.name
+            retire(id, as: saved.name)
             nativeNameById[id] = saved.native
             answered[id] = answered[id] ?? saved.name
         }
@@ -362,7 +394,7 @@ public struct AgentDirectory: Sendable {
         let held = Set(remembering.values.map { AgentHandles.matchKey($0.name) })
         for entry in entries where handleById[conversationId(entry)] == nil {
             let id = conversationId(entry)
-            guard let previous = chosen[id] ?? retired[id] else { continue }
+            guard let previous = chosen[id] ?? retired[id]?.name else { continue }
             let key = AgentHandles.matchKey(previous)
             let chosenByAnother = chosenBy[key].map { !$0.subtracting([id]).isEmpty } ?? false
             guard !inUse.contains(key), !chosenByAnother, !held.contains(key) else { continue }
@@ -420,11 +452,15 @@ public struct AgentDirectory: Sendable {
         }.sorted { $0.handle < $1.handle }
         let shown = next.filter { !excluded.contains($0.id) }
         let excludedNow = next.filter { excluded.contains($0.id) }
+        for id in liveIds { retired[id] = nil }
+        capRetired()
+        nativeNameById = nativeNameById.filter { liveIds.contains($0.key) || remembering[$0.key] != nil || retired[$0.key] != nil }
         if shown != conversations || excludedNow != disconnected {
             conversations = shown
             disconnected = excludedNow
             revision += 1
         }
+        rememberAll()
     }
 
     private func otherNames(
@@ -548,12 +584,16 @@ public struct AgentDirectory: Sendable {
         if let replaced = handleById.removeValue(forKey: id) { former[id] = [replaced] }
         retired[id] = nil
         indexPreviousNames()
+        rememberAll()
         revision += 1
     }
 
     public mutating func carryChosenName(from old: String, to new: String, previous carried: [String]) -> Bool {
         guard chosen[new] == nil, handleById[new] != nil, let name = chosen[old] else { return false }
-        defer { indexPreviousNames() }
+        defer {
+            indexPreviousNames()
+            rememberAll()
+        }
         chosen[old] = nil
         remembering[old] = nil
         handleById[old] = nil
@@ -590,6 +630,7 @@ public struct AgentDirectory: Sendable {
             .sorted { $0.handle < $1.handle }
         disconnected = disconnected.map(renamed)
             .sorted { $0.handle < $1.handle }
+        rememberAll()
         revision += 1
     }
 }

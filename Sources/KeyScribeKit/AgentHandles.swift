@@ -17,6 +17,31 @@ public enum AgentHandles {
     private static let numberWords = ["two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
 
     public static func normalize(_ raw: String) -> String {
+        asciiNormalized(raw) ?? normalizeCharacters(raw)
+    }
+
+    private static func asciiNormalized(_ raw: String) -> String? {
+        var words: [String] = []
+        var word: [UInt8] = []
+        func endWord() {
+            guard !word.isEmpty else { return }
+            let text = String(decoding: word, as: UTF8.self)
+            if let n = Int(text), String(n) == text, (2...10).contains(n) { words.append(numberWords[n - 2]) } else { words.append(text) }
+            word.removeAll(keepingCapacity: true)
+        }
+        for byte in raw.utf8 {
+            switch byte {
+            case 0x80...: return nil
+            case UInt8(ascii: "A")...UInt8(ascii: "Z"): word.append(byte + 0x20)
+            case UInt8(ascii: "a")...UInt8(ascii: "z"), UInt8(ascii: "0")...UInt8(ascii: "9"): word.append(byte)
+            default: endWord()
+            }
+        }
+        endWord()
+        return words.joined(separator: " ")
+    }
+
+    static func normalizeCharacters(_ raw: String) -> String {
         let spaced = raw.lowercased().map { $0.isLetter || $0.isNumber ? $0 : " " }
         return String(spaced)
             .split(separator: " ")

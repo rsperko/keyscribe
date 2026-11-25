@@ -48,6 +48,64 @@ struct AgentDirectoryTests {
         #expect(patched.disconnected == rebuilt.disconnected)
     }
 
+    private func crowd(_ tag: String, _ count: Int) -> [AgentSession] {
+        (0..<count).map { k in
+            started(20_000 + k, "\(tag)\(k)", at: k, cwd: "/src/\(tag)\(k)", name: "task \(tag) \(k / 2)").session
+        }
+    }
+
+    private func handles(_ directory: AgentDirectory) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: directory.conversations.map { ($0.id, $0.handle) })
+    }
+
+    @Test func moreConversationsThanTheLimitLeavingTogetherAllComeBackWithTheirNames() {
+        var directory = AgentDirectory()
+        let everyone = crowd("a", AgentDirectory.retiredLimit + 20)
+        directory.update(entries: everyone, live: [])
+        #expect(directory.retired.isEmpty)
+        let named = handles(directory)
+        let suffixed = everyone.first { named["claude:\($0.id)"] != AgentHandles.normalize($0.explicitName ?? "") }
+        #expect(suffixed != nil)
+        directory.update(entries: [], live: [])
+        #expect(directory.retired.count == everyone.count)
+
+        directory.update(entries: [suffixed!], live: [])
+        #expect(handles(directory) == ["claude:\(suffixed!.id)": named["claude:\(suffixed!.id)"]!])
+        #expect(directory.retired.count == everyone.count - 1)
+        directory.update(entries: everyone, live: [])
+        #expect(handles(directory) == named)
+        #expect(directory.retired.isEmpty)
+    }
+
+    @Test func aNewerCrowdLeavingEvictsAnOlderOneWholeAndNeverItself() {
+        var directory = AgentDirectory()
+        let older = crowd("a", 300), newer = crowd("b", 300)
+        directory.update(entries: older, live: [])
+        directory.update(entries: [], live: [])
+        directory.update(entries: newer, live: [])
+        directory.update(entries: [], live: [])
+        #expect(Set(directory.retired.keys) == Set(newer.map { "claude:\($0.id)" }))
+        #expect(directory.nativeNameById.keys.allSatisfy { directory.retired[$0] != nil })
+    }
+
+    @Test func theRememberedNamesKeptAlwaysMatchTheOnesWorkedOutFromTheDirectory() throws {
+        var directory = AgentDirectory(remembered: ["claude:old": RememberedName(name: "old work", pid: 7, startedAt: 70, native: nil, agent: "claude")])
+        #expect(directory.remembered == directory.rememberedNow())
+        let entries = [started(10, "a", at: 50).session, started(11, "b", at: 60, cwd: "/src/other").session, started(7, "old", at: 70).session]
+        let steps: [(String, (inout AgentDirectory) throws -> Void)] = [
+            ("update", { $0.update(entries: entries, live: ["claude:a"]) }),
+            ("setStates", { $0.setStates(["claude:a": .working]) }),
+            ("rename", { try $0.rename("claude:a", to: "docs") }),
+            ("carryChosenName", { _ = $0.carryChosenName(from: "claude:a", to: "claude:b", previous: ["older"]) }),
+            ("useDefaultName", { $0.useDefaultName("claude:b") }),
+            ("update after leaving", { $0.update(entries: [entries[0]], live: []) }),
+        ]
+        for (name, step) in steps {
+            try step(&directory)
+            #expect(directory.remembered == directory.rememberedNow(), "\(name)")
+        }
+    }
+
     @Test func aConversationListedBeforeItsFolderIsKnownGetsASayableNameThatTheFolderReplaces() {
         var directory = AgentDirectory()
         directory.update(entries: [hosted("t0", at: 50, cwd: "/src/keyscribe")], live: [])

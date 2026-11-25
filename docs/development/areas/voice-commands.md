@@ -174,8 +174,12 @@ every rule above applies to it, with these sharpenings:
   or before the conversation's first scan, still holds the next dictation.
   The roster is rebuilt only when its inputs, its names, or which name-remembered conversations still run changed
   (`AgentHub.refresh`), and inputs that differ only in conversations' states change those rows
-  (`AgentDirectory.setStates`) without reassigning names: in a debug build with 430 listed conversations, a turn
-  event that changed one state took about 5 ms and one that also changed a name about 13 ms (2026-11-25); a refresh and the filing before it read every liveness answer in one bridge call
+  (`AgentDirectory.setStates`) without reassigning names. In a release build with 430 listed conversations, as
+  measured 2026-11-25: keeping the names a directory remembers as it changes, rather than working them out at each
+  read (`AgentDirectory.remembered`), took a turn event that changed one state from about 1.27 ms to 0.50 ms; an
+  event that also changed a name took about 4.4 ms, 3.2 ms once folder names stopped going through a file URL
+  (`AgentSession.folder`), and 2.2 ms once name keys of plain ASCII text skipped per-character parsing
+  (`AgentHandles.normalize`). A refresh and the filing before it read every liveness answer in one bridge call
   (`AgentTransport.liveness`), and a rebuild indexes labels,
   containers and names once rather than searching the roster per conversation (`AgentDirectory.update`). Each agent's processes
   are classified once per process listing (`AgentProcessTable.found`), however many scans ask within it. A press
@@ -186,7 +190,18 @@ every rule above applies to it, with these sharpenings:
   about 4% CPU around the clock when it ran on a timer while a conversation was connected (2026-11-11).
 - **Bound background work across failures and reconnects.** A timed-out request still counts as
   outstanding until it settles. Idle checks, retries, queues, timers, and stored receipts must not
-  grow with session age or failure count.
+  grow with session age or failure count. Nor may what the hub keeps per conversation grow with how many
+  conversations came and went: each refresh works out once which conversations ended, those no longer listed by
+  any source (an agent hidden inside a host's conversation is still listed) and no longer connected, and drops
+  what it kept for them, so a conversation is asked to say hello again at most once while it stays listed or
+  connected. The conversations considered are those the hub keeps anything for, read from what it keeps rather than
+  noted where each piece is stored, so one that greets and goes before any refresh, or that a late answer to an
+  earlier request names, still ends. A host conversation an agent inside it waits for is kept only while that agent
+  is listed or the conversation is connected. What connectors reported is filtered only when a conversation ended or the conversations the user
+  disconnected changed: with 430 greeted conversations that took a turn event that changed one state from about
+  0.71 ms to 0.64 ms (release build, 2026-11-25). The directory keeps the names of conversations that may come back, dropping whole older departures
+  first once they pass `AgentDirectory.retiredLimit`; the newest departure is kept whole even past it, and a listed
+  conversation holds no such name.
 - **Validate connection identity on both sides of the bridge.** Recheck session, connection,
   expiry, and cancellation immediately before acting. Reconnection holds stale dictation for
   review; it never grants old queued commands permission to run again.

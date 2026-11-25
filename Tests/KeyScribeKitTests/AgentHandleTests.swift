@@ -3,6 +3,29 @@ import Testing
 @testable import KeyScribeKit
 
 struct AgentHandleTests {
+    @Test func everyASCIINameNormalizesAsItDoesCharacterByCharacter() {
+        let alphabet = Array("abcXYZ019 2 10 11 02 -_./\t\r\nQs")
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        for _ in 0..<5000 {
+            var raw = ""
+            for _ in 0..<Int(seed % 24) {
+                seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                raw.append(alphabet[Int(seed >> 33) % alphabet.count])
+            }
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            #expect(AgentHandles.normalize(raw) == AgentHandles.normalizeCharacters(raw), "\(raw.debugDescription)")
+        }
+    }
+
+    @Test(arguments: [
+        ("/src/keyscribe", "keyscribe"), ("/src/keyscribe/", "keyscribe"), ("/", ""), ("", ""), ("relative/dir", "dir"),
+        ("/src/a/..", ""), ("/src/My Project", "My Project"), ("/src/---", ""), ("/src/caf\u{E9}", "caf\u{E9}"), ("~", ""),
+        ("/src//double//", "double"), ("/src/v2", "v2"),
+    ])
+    func aFolderIsTheLastNameablePartOfItsPath(_ cwd: String, _ folder: String) {
+        #expect(AgentSession.folder(cwd: cwd) == folder)
+    }
+
     @Test(arguments: [
         ("keyscribe", "keyscribe"),
         ("KeyScribe", "keyscribe"),

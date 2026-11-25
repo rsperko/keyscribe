@@ -1417,6 +1417,95 @@ struct AgentHostTests {
         #expect(transport.rehelloed.filter { $0 == Self.id("t1") }.count == before + 1)
     }
 
+    @Test func aConversationAnAgentWaitedForIsForgottenOnceTheAgentExitsBeforeTheHostListsIt() async {
+        let host = FakeHost()
+        let claude = FakeDiscovery(kind: .claude)
+        let hub = makeHub(host, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t9"]])
+        claude.result = .found([Self.claudeSession()])
+        await hub.rescan()
+        await hub.scansSettled()
+        #expect(hub.expected == [Self.id("t9")])
+        claude.result = .found([])
+        await hub.rescan()
+        #expect(hub.expected.isEmpty)
+    }
+
+    @Test func manyConversationsAgentsWaitedForAreCheckedInOneLivenessSnapshotOnceTheAgentsExit() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let claude = FakeDiscovery(kind: .claude)
+        let environments = Dictionary(uniqueKeysWithValues: (0..<200).map { (100 + $0, ["EXAMPLE_THREAD": "t\($0)"]) })
+        let hub = makeHub(host, transport: transport, claude: claude, environments: environments)
+        claude.result = .found((0..<200).map { Self.claudeSession("s\($0)", pid: 100 + $0) })
+        await hub.rescan()
+        await hub.scansSettled()
+        #expect(hub.expected.count == 200)
+        claude.result = .found([])
+        transport.liveCalls = 0
+        await hub.rescan()
+        #expect(hub.expected.isEmpty)
+        #expect(transport.liveCalls == 0)
+    }
+
+    @Test func manyAgentsHiddenInsideThreadsFromTheirFirstScanAreCheckedInOneLivenessSnapshotOnceTheyExit() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let claude = FakeDiscovery(kind: .claude)
+        let environments = Dictionary(uniqueKeysWithValues: (0..<100).map { (100 + $0, ["EXAMPLE_THREAD": "t\($0)"]) })
+        let hub = makeHub(host, transport: transport, claude: claude, environments: environments)
+        host.conversations = (0..<100).map { Self.thread("t\($0)") }
+        claude.result = .found((0..<100).map { Self.claudeSession("s\($0)", pid: 100 + $0) })
+        await hub.rescan()
+        #expect(hub.linked.count == 100)
+        claude.result = .found([])
+        host.conversations = []
+        host.watcher?(.listing)
+        transport.liveCalls = 0
+        await hub.rescan()
+        #expect(hub.linked.isEmpty)
+        #expect(transport.liveCalls == 0)
+    }
+
+    @Test func anAgentRenamedWhileHiddenInsideAThreadComesBackUnderItsNewName() async {
+        let host = FakeHost()
+        let claude = FakeDiscovery(kind: .claude)
+        func agent(named name: String) -> AgentSession {
+            AgentSession(agent: "claude", id: "s1", pid: 42, cwd: "/src/docs", explicitName: name, state: .idle)
+        }
+        claude.result = .found([agent(named: "alpha")])
+        let hub = makeHub(host, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1"]])
+        await hub.rescan()
+        hub.handle(.title(session: "claude:s1", text: "release notes"))
+        await hub.rescan()
+        #expect(hub.handle(of: "claude:s1") == "release notes")
+        host.conversations = [Self.thread("t1")]
+        host.watcher?(.listing)
+        await hub.rescan()
+        #expect(hub.handle(of: "claude:s1") == nil)
+        claude.result = .found([agent(named: "beta")])
+        await hub.rescan()
+        host.conversations = []
+        host.watcher?(.listing)
+        await hub.rescan()
+        #expect(hub.handle(of: "claude:s1") == "beta")
+    }
+
+    @Test func agentsThatCameAndWentInsideThreadsLeaveNoLinksOrRehelloAsksBehind() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let claude = FakeDiscovery(kind: .claude)
+        let environments = Dictionary(uniqueKeysWithValues: (0..<60).map { (100 + $0, ["EXAMPLE_THREAD": "t\($0)"]) })
+        let hub = makeHub(host, transport: transport, claude: claude, environments: environments)
+        for round in 0..<60 {
+            host.conversations = [Self.thread("t\(round)")]
+            claude.result = .found([Self.claudeSession("s\(round)", pid: 100 + round)])
+            transport.live = ["claude:s\(round)"]
+            await hub.rescan()
+        }
+        #expect(hub.linked.count <= 1)
+        #expect(hub.rehelloAsked.count <= 1)
+    }
+
     @Test func anAgentFiledInsideAThreadNeverTurnsOffItsHostPluginsDraftJoining() async {
         let host = FakeHost()
         let transport = FakeTransport()
@@ -3362,6 +3451,7 @@ struct AgentHostTests {
         hub.handle(.hello(Self.hostHello("t1")))
         await hub.rescan()
         #expect(host.scans == scans + 1)
+        transport.live.insert(Self.id("t2"))
         hub.handle(.hello(Self.hostHello("t2")))
         await hub.rescan()
         hub.handle(.hello(Self.hostHello("t2")))

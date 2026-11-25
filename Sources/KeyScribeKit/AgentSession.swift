@@ -59,7 +59,7 @@ public struct AgentSession: Equatable, Sendable {
     }
 
     static func folder(cwd: String) -> String {
-        let last = cwd.isEmpty ? "" : URL(fileURLWithPath: cwd).lastPathComponent
+        let last = cwd.split(separator: "/").last.map(String.init) ?? ""
         return AgentHandles.base(forFolder: last).isEmpty ? "" : last
     }
 }

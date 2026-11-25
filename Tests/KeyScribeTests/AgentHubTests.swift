@@ -2837,6 +2837,29 @@ struct AgentHubTests {
         #expect(hub.directory.conversations.filter { $0.agent == "fake" && $0.state == .working }.count == 300)
     }
 
+    @Test(arguments: OneConversationEvent.allCases)
+    func aTurnEventThatRefreshesTheRosterSettlesAttentionOnce(_ kind: OneConversationEvent) async {
+        let (hub, fake, _) = await twoSources(count: 20)
+        let state: AgentLiveState = kind == .turnStarted ? .working : .waitingQuestion
+        fake.listing = { Self.listed($0, ["f7": kind == .turnComplete ? .idle : state]) }
+        if kind == .turnComplete {
+            fake.result = .found((0..<20).map { Self.listed("f\($0)", ["f7": .working]) })
+            await hub.rescan()
+        }
+        let passes = hub.attentionPasses
+        hub.handle(event(kind, "fake:f7"))
+        #expect(hub.attentionPasses == passes + 1)
+    }
+
+    @Test(arguments: [true, false])
+    func aReadAloudChoiceSettlesAttentionOnce(_ on: Bool) async {
+        let (hub, _, _) = await twoSources(count: 20)
+        hub.speaks = { true }
+        let passes = hub.attentionPasses
+        hub.handle(.notify(session: "fake:f7", turn: "t1", on: on))
+        #expect(hub.attentionPasses == passes + 1)
+    }
+
     @Test func aBurstOfHellosHandledTogetherSettlesAttentionOnce() async {
         let (hub, _, _) = await twoSources(count: 300)
         let passes = hub.attentionPasses
@@ -2845,6 +2868,137 @@ struct AgentHubTests {
             .shown(session: "fake:f\(i)", on: false),
         ] })
         #expect(hub.attentionPasses == passes + 1)
+    }
+
+    enum Leaving: String, CaseIterable, Sendable {
+        case goneEntirely, unlistedButConnected, listedButDisconnected, disconnectedByTheUser, cameAndWentBetweenRefreshes
+    }
+
+    private struct Kept: Equatable {
+        var connectorState, installation, registryName, running, typed, absorbed, nextRequested, typedTurn, steer: Bool
+
+        @MainActor init(_ hub: AgentHub, _ id: String) {
+            connectorState = hub.connectorStateSessions.contains(id)
+            installation = hub.installations[id] != nil
+            registryName = hub.registryNames[id] != nil
+            running = hub.running[id] != nil
+            typed = hub.typedCounts[id] != nil
+            absorbed = hub.absorbed[id] != nil
+            nextRequested = hub.nextRequested.contains(id)
+            typedTurn = hub.nextTyped[id] != nil
+            steer = hub.steersWaiting[id] != nil
+        }
+
+        init(all: Bool, registryName: Bool, nextRequested: Bool) {
+            self.registryName = registryName
+            self.nextRequested = nextRequested
+            (connectorState, installation, running, typed, absorbed, typedTurn, steer) = (all, all, all, all, all, all, all)
+        }
+    }
+
+    @Test(arguments: Leaving.allCases)
+    func whatIsKeptForAConversationLastsExactlyAsLongAsItIsListedOrConnected(_ leaving: Leaving) async {
+        let fake = FakeDiscovery()
+        let transport = FakeTransport()
+        let hub = AgentHub(transport: transport, discovery: [fake])
+        hub.speaks = { true }
+        let listedFirst = leaving != .cameAndWentBetweenRefreshes
+        fake.result = .found(listedFirst ? [AgentSession(agent: "fake", id: "f1", pid: 1001, cwd: "/src/f1", explicitName: "task", state: .idle)] : [])
+        transport.live = listedFirst ? ["fake:f1"] : []
+        await hub.rescan()
+        let hello = AgentEvent.Hello(
+            protocolVersion: 3, agent: "fake", agentVersion: "", instance: "i1", session: "fake:f1", pid: 1001, features: ["readiness"],
+            idle: false, gap: false, installation: "inst-1")
+        hub.prepare(for: hello)
+        hub.handle([
+            .hello(hello), .turnStarted(session: "fake:f1", turn: "t1"), .typed(session: "fake:f1"),
+            .absorbed(session: "fake:f1", turn: "t1", prompt: "go on"),
+        ])
+        _ = hub.notify(session: "fake:f1", turn: "", on: true)
+        hub.awaitTypedTurn(of: "fake:f1", request: "q1")
+        hub.followSteer(of: "fake:f1", for: "q2", text: "and the docs")
+        if listedFirst {
+            await hub.scansSettled()
+            #expect(Kept(hub, "fake:f1") == Kept(all: true, registryName: true, nextRequested: true))
+        }
+
+        switch leaving {
+        case .goneEntirely:
+            fake.result = .found([])
+            transport.live = []
+        case .unlistedButConnected:
+            fake.result = .found([])
+        case .listedButDisconnected:
+            transport.live = []
+        case .disconnectedByTheUser:
+            hub.disconnect("fake:f1")
+        case .cameAndWentBetweenRefreshes:
+            break
+        }
+        await hub.rescan()
+        let kept = leaving != .goneEntirely && leaving != .cameAndWentBetweenRefreshes
+        #expect(Kept(hub, "fake:f1") == Kept(all: kept, registryName: kept, nextRequested: kept && leaving != .disconnectedByTheUser))
+        #expect(transport.forgotten.contains("fake:f1") == !kept)
+
+        hub.handle(.typed(session: "fake:f1"))
+        await hub.rescan()
+        #expect((hub.typedCounts["fake:f1"] != nil) == kept)
+    }
+
+    @Test func aRefusalThatArrivesAfterItsConversationWasForgottenLeavesNothingBehind() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        registry.remove("s1")
+        transport.live = []
+        await hub.rescan()
+        #expect(hub.running["claude:s1"] == nil)
+        hub.handle(.refused(request: "r1", reason: "working"))
+        #expect(await receipt == .queued("keyscribe"))
+        #expect(hub.running["claude:s1"] != nil)
+        await hub.rescan()
+        #expect(hub.running["claude:s1"] == nil)
+    }
+
+    @Test func stepsLeftInAPromptBoxAreForgottenWithTheirConversation() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        hub.onLeftInPromptBox = { _, _, _ in }
+        for (index, text) in ["first", "second"].enumerated() {
+            let sentBefore = transport.sent.count
+            async let receipt = hub.deliver(text, to: "claude:s1")
+            await untilSent(transport, sentBefore + 1)
+            hub.handle(.submitted(request: "r\(index + 1)", turn: ""))
+            _ = await receipt
+        }
+        hub.handle(.refused(request: "r1", reason: "filled"))
+        #expect(hub.steered.contains { $0.conversation == "claude:s1" })
+        #expect(hub.leftInBox["claude:s1"] != nil)
+        registry.remove("s1")
+        transport.live = []
+        await hub.rescan()
+        #expect(!hub.steered.contains { $0.conversation == "claude:s1" })
+        #expect(hub.leftInBox["claude:s1"] == nil)
+    }
+
+    @Test func conversationsThatCameAndWentLeaveNothingBehind() async {
+        let fake = FakeDiscovery()
+        let transport = FakeTransport()
+        let hub = AgentHub(transport: transport, discovery: [fake])
+        for round in 0..<100 {
+            let ids = (0..<20).map { "r\(round)k\($0)" }
+            fake.result = .found(ids.enumerated().map { k, id in
+                AgentSession(agent: "fake", id: id, pid: 1000 + k, cwd: "/src/f\(k)", explicitName: "task \(k)", state: .idle)
+            })
+            transport.live = Set(ids.map { "fake:\($0)" })
+            await hub.rescan()
+            for id in ids { hub.handle(.turnStarted(session: "fake:\(id)", turn: "t")) }
+        }
+        #expect(hub.registryNames.count <= 20)
+        #expect(hub.running.count <= 20)
     }
 
     @Test func aTurnEventWhoseListingAlsoChangedANameRebuildsTheRoster() async {

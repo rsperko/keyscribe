@@ -91,15 +91,15 @@ final class AgentHub {
     var bundledVersion: (_ agent: String) -> String? = { _ in nil }
     private var awaitingResult: [String: String] = [:]
     private var awaitedRequests: [String: String] = [:]
-    private var nextTyped: [String: PromptBoxTake] = [:]
-    private var steersWaiting: [String: [WaitingSteer]] = [:]
+    private(set) var nextTyped: [String: PromptBoxTake] = [:]
+    private(set) var steersWaiting: [String: [WaitingSteer]] = [:]
     private var awaitedStamp: [String: Int] = [:]
     private var takenIn: [String] = []
     private var stamps = 0
     private var filed: [String: Filing] = [:]
     private var inHosts: [String: String] = [:]
-    private var rehelloAsked: Set<String> = []
-    private var expected: Set<String> = []
+    private(set) var rehelloAsked: Set<String> = []
+    private(set) var expected: Set<String> = []
     private var carriedNames: [String: (from: String, previous: [String])] = [:]
     private var processIdentities: [String: ProcessIdentity] = [:]
     private var hostFollows: [String: [HostFollow]] = [:]
@@ -107,21 +107,22 @@ final class AgentHub {
     private var continuing: [String: (request: String, at: Date)] = [:]
     private var namedTurns: [String: [(turn: String, request: String, stamp: Int)]] = [:]
     private var delivering: [String: String] = [:]
-    private var linked: [String: String] = [:]
+    private(set) var linked: [String: String] = [:]
+    private var excludedWhenForgotten: Set<String>? = []
     private var matched: Set<String> = []
     private var heldResults: [String: () -> Void] = [:]
     private var uncertainHosted: [String: (handle: String, conversation: String, withDraft: Bool)] = [:]
-    private struct PromptBoxTake {
+    struct PromptBoxTake {
         var request: String
         var typedAt: Date?
     }
-    private struct WaitingSteer {
+    struct WaitingSteer {
         var request: String
         var prompt: String
     }
     var typedTurnWindow: TimeInterval = 5
     private var requested: Set<String> = []
-    private var nextRequested: Set<String> = []
+    private(set) var nextRequested: Set<String> = []
     private var attention: [String: AgentAttention] = [:]
     private var goneSince: [String: Date] = [:]
     private var awaitedHandles: [String: String] = [:]
@@ -181,7 +182,7 @@ final class AgentHub {
     private var requests: [String: Request] = [:]
     private var waiters: [String: CheckedContinuation<AgentReceipt, Never>] = [:]
     private var focusWaiters: [String: CheckedContinuation<TerminalSelection, Never>] = [:]
-    private var installations: [String: String] = [:]
+    private(set) var installations: [String: String] = [:]
     private struct Connector {
         let session: String
         let isHost: Bool
@@ -192,17 +193,17 @@ final class AgentHub {
     private var sessionInstances: [String: [String]] = [:]
     private var environments: [String: [String: String]] = [:]
     private var prompts: [String: Int] = [:]
-    private var typedCounts: [String: Int] = [:]
-    private var absorbed: [String: [(turn: String, prompt: String, stamp: Int)]] = [:]
-    private struct Steered {
+    private(set) var typedCounts: [String: Int] = [:]
+    private(set) var absorbed: [String: [(turn: String, prompt: String, stamp: Int)]] = [:]
+    struct Steered {
         let wire: String
         let request: String
         let handle: String
         let conversation: String
     }
 
-    private var steered: [Steered] = []
-    private var leftInBox: [String: [Steered]] = [:]
+    private(set) var steered: [Steered] = []
+    private(set) var leftInBox: [String: [Steered]] = [:]
     private var filledWires: [String: String] = [:] {
         didSet { if filledWires.count > Self.keptDeliveries { filledWires.remove(at: filledWires.startIndex) } }
     }
@@ -224,10 +225,10 @@ final class AgentHub {
     private var hostScanRounds = (started: 0, finished: 0)
     var promptBoxCheckWait: Duration = .seconds(1)
     private var connectorNames: [String: String?] = [:]
-    private var registryNames: [String: String?] = [:]
+    private(set) var registryNames: [String: String?] = [:]
     private var labels: [String: String] = [:]
     private var handingOff: [String: String] = [:]
-    private var running: [String: Date] = [:]
+    private(set) var running: [String: Date] = [:]
     private var turns: [String: String] = [:]
     private var lastUsed: [String: Date] = [:]
     private var shownByHost: [String: String] = [:]
@@ -1220,7 +1221,7 @@ final class AgentHub {
     private(set) var rosterRebuilds = 0
     private(set) var attentionPasses = 0
 
-    private var liveness: (asked: AgentLiveness, live: AgentLiveness)?
+    private var liveness: (asked: AgentLiveness, live: AgentLiveness, retained: Set<String>)?
 
     private func liveSession(_ session: String) -> Bool {
         guard let liveness, liveness.asked.sessions.contains(session) else { return transport.isLive(session: session) }
@@ -1234,12 +1235,19 @@ final class AgentHub {
 
     private func withLiveness(_ body: () -> Void) {
         guard liveness == nil else { return body() }
+        let retained = retainedSessions
         let asked = AgentLiveness(
-            sessions: Set(scannedIds.values.joined()).union(connectorStateSessions).union(filed.keys),
+            sessions: Set(scannedIds.values.joined()).union(filed.keys).union(retained).union(expected).union(linked.keys)
+                .union(linked.values),
             instances: Set(sessionInstances.values.joined()))
-        liveness = (asked, transport.liveness(sessions: asked.sessions, instances: asked.instances))
+        liveness = (asked, transport.liveness(sessions: asked.sessions, instances: asked.instances), retained)
         defer { liveness = nil }
         body()
+    }
+
+    private var retainedSessions: Set<String> {
+        connectorStateSessions.union(installations.keys).union(registryNames.keys).union(rehelloAsked).union(nextRequested).union(running.keys).union(typedCounts.keys).union(absorbed.keys)
+            .union(steersWaiting.keys).union(nextTyped.keys)
     }
 
     private static func stateChanges(from old: RosterInputs, to new: RosterInputs) -> [String: AgentLiveState]? {
@@ -1325,15 +1333,19 @@ final class AgentHub {
         }
         let reported = namesNotSaved
         rememberNames()
-        lastUsed = lastUsed.filter { handle(of: $0.key) != nil }
+        let present = Set(directory.conversations.map(\.id))
+        lastUsed = lastUsed.filter { present.contains($0.key) }
         let listed = Set((directory.conversations + directory.disconnected).map(\.id))
         pruneHostFollows(listed: listed)
         placeTracker?.notice(Set(placeQueries.map(\.id)))
-        let ended = connectorStateSessions.filter { !listed.contains($0) && !liveSession($0) }
-        forgetConnectorState(keepingEnvironments: { !ended.contains($0) }) { !ended.contains($0) && !exclusions.excludes($0) }
-        installations = installations.filter { !ended.contains($0.key) }
-        nextRequested.subtract(ended)
-        for session in ended { transport.forget(session: session) }
+        let keeping = listed.union(scannedIds.values.joined()).union(liveness?.live.sessions ?? [])
+        let ended = (liveness?.retained ?? retainedSessions).subtracting(keeping)
+        let excluding = exclusions.isKnown ? exclusions.excluded : nil
+        if !ended.isEmpty || excluding != excludedWhenForgotten {
+            forgetConnectorState(keepingEnvironments: { !ended.contains($0) }) { !ended.contains($0) && !(excluding?.contains($0) ?? true) }
+            excludedWhenForgotten = excluding
+        }
+        if !ended.isEmpty { forget(ended) }
         sendLabels()
         let idle = Set(directory.conversations.filter { $0.state == .idle }.map(\.id))
         let stale = now().addingTimeInterval(-Self.runningGrace)
@@ -1474,6 +1486,19 @@ final class AgentHub {
         waitingPrompts = waitingPrompts.filter { live.contains($0.key) || liveSession($0.key) }
     }
 
+    private func forget(_ ended: Set<String>) {
+        installations = installations.filter { !ended.contains($0.key) }
+        nextRequested.subtract(ended)
+        registryNames = registryNames.filter { !ended.contains($0.key) }
+        rehelloAsked.subtract(ended)
+        running = running.filter { !ended.contains($0.key) }
+        typedCounts = typedCounts.filter { !ended.contains($0.key) }
+        absorbed = absorbed.filter { !ended.contains($0.key) }
+        steersWaiting = steersWaiting.filter { !ended.contains($0.key) }
+        nextTyped = nextTyped.filter { !ended.contains($0.key) }
+        for session in ended { transport.forget(session: session) }
+    }
+
     private func forgetConnectorState(keepingEnvironments keptEnvironment: ((String) -> Bool)? = nil, keeping kept: (String) -> Bool) {
         lastEndedTurn = lastEndedTurn.filter { kept($0.key) }
         sessionInstances = sessionInstances.filter { kept($0.key) }
@@ -1489,8 +1514,9 @@ final class AgentHub {
     }
 
     var connectorStateSessions: Set<String> {
-        Set(sessionInstances.keys).union(environments.keys).union(prompts.keys).union(connectorNames.keys)
-            .union(connectorNamesAt.keys).union(labels.keys).union(lastEndedTurn.keys)
+        Set(sessionInstances.keys).union(connectors.values.map(\.session)).union(environments.keys).union(prompts.keys)
+            .union(connectorNames.keys).union(connectorNamesAt.keys).union(labels.keys).union(lastEndedTurn.keys).union(turns.keys)
+            .union(steered.map(\.conversation)).union(leftInBox.keys)
     }
 
     private func startGrace(for session: String) -> Date {
@@ -1755,6 +1781,7 @@ final class AgentHub {
     private func apply(_ event: AgentEvent, reconciling: Bool) -> Named? {
         guard !stopped, let event = local(event) else { return nil }
         var named: Named?
+        let passes = attentionPasses
         defer {
             switch event {
             case .shown, .hello:
@@ -1973,7 +2000,7 @@ final class AgentHub {
             _ = relist(Set([session] + [filed[session]?.session].compactMap { $0 }))
             refresh()
         }
-        if named == nil, reconciling { reconcileAttention() }
+        if named == nil, reconciling, attentionPasses == passes { reconcileAttention() }
         return named
     }
 
@@ -2328,13 +2355,14 @@ final class AgentHub {
         }
         var claims: [String: String] = [:]
         var seen: Set<String> = []
+        var awaited: Set<String> = []
         if !identities.isEmpty {
             let hostKinds = Set(hosts.map(\.kind.id))
             for discovery in discoveries where !hostKinds.contains(discovery.kind.id) {
                 for entry in lastScan[discovery.kind.id] ?? [] {
                     let session = AgentSessionID.make(agent: entry.agent, native: entry.id)
                     if let key = processKey(entry) { seen.insert(key) }
-                    guard let conversation = hostedConversation(claimedBy: session, among: hosted) else { continue }
+                    guard let conversation = hostedConversation(claimedBy: session, among: hosted, awaiting: { awaited.insert($0) }) else { continue }
                     claims[session] = conversation
                     guard filed[conversation]?.session != session, !rehelloAsked.contains(session) || released.contains(conversation),
                           liveSession(session)
@@ -2345,13 +2373,17 @@ final class AgentHub {
             }
         }
         processIdentities = processIdentities.filter { seen.contains($0.key) }
-        expected = expected.filter { !hosted.contains($0) }
+        expected = expected.filter { !hosted.contains($0) && (awaited.contains($0) || liveSession($0)) }
         for (session, conversation) in claims where inHosts[session] != conversation { carry(from: session, to: conversation) }
         for (session, conversation) in inHosts where claims[session] == nil && !hosted.contains(conversation) {
             carry(from: conversation, to: session)
         }
         inHosts = claims
         for (session, conversation) in claims { linked[conversation] = session }
+        let scanned = Set(scannedIds.values.joined())
+        linked = linked.filter { conversation, session in
+            [conversation, session].contains { hosted.contains($0) || scanned.contains($0) || liveSession($0) }
+        }
     }
 
     private func expectListing(_ hello: AgentEvent.Hello) {
@@ -2405,7 +2437,9 @@ final class AgentHub {
         return conversation
     }
 
-    private func hostedConversation(claimedBy session: String, among hosted: Set<String>? = nil) -> String? {
+    private func hostedConversation(
+        claimedBy session: String, among hosted: Set<String>? = nil, awaiting: ((String) -> Void)? = nil
+    ) -> String? {
         guard let (agent, native) = AgentSessionID.split(session),
               let entry = (lastScan[agent] ?? []).first(where: { $0.id == native }), let key = processKey(entry), let pid = entry.pid
         else { return nil }
@@ -2424,6 +2458,7 @@ final class AgentHub {
             else { continue }
             let conversation = AgentSessionID.make(agent: source.kind.id, native: location.conversationKey)
             if listed.contains(conversation) { return conversation }
+            awaiting?(conversation)
             if expected.insert(conversation).inserted {
                 source.expect()
                 let agent = source.kind.id
