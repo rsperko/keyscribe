@@ -1218,6 +1218,7 @@ final class AgentHub {
 
     private var built: (inputs: RosterInputs, revision: Int)?
     private(set) var rosterRebuilds = 0
+    private(set) var attentionPasses = 0
 
     private var liveness: (asked: AgentLiveness, live: AgentLiveness)?
 
@@ -1239,6 +1240,18 @@ final class AgentHub {
         liveness = (asked, transport.liveness(sessions: asked.sessions, instances: asked.instances))
         defer { liveness = nil }
         body()
+    }
+
+    private static func stateChanges(from old: RosterInputs, to new: RosterInputs) -> [String: AgentLiveState]? {
+        guard old.entries.count == new.entries.count else { return nil }
+        var aligned = new
+        var states: [String: AgentLiveState] = [:]
+        for index in new.entries.indices where new.entries[index].state != old.entries[index].state {
+            aligned.entries[index].state = old.entries[index].state
+            states[AgentSessionID.make(agent: new.entries[index].agent, native: new.entries[index].id)] = new.entries[index].state
+        }
+        guard !states.isEmpty, aligned == old else { return nil }
+        return states
     }
 
     func refresh(namesReportedFor: Set<String> = [], scannedAt: [String: Date] = [:]) {
@@ -1298,12 +1311,16 @@ final class AgentHub {
             } ?? [], unreadSince: placeTracker?.failingSince ?? [:],
             rememberedRunning: Set(verdicts.filter(\.value.running).keys))
         if built?.inputs != inputs || built?.revision != directory.revision {
-            rosterRebuilds += 1
-            let running = Dictionary(verdicts.values.map { ($0.saved, $0.running) }, uniquingKeysWith: { first, _ in first })
-            directory.update(
-                entries: inputs.entries, live: inputs.live, titles: inputs.titles, nativeNames: inputs.nativeNames,
-                running: { [weak self] saved in running[saved] ?? self?.stillRunning(saved) ?? false },
-                excluded: inputs.excluded, places: inputs.places, unplaced: inputs.unplaced, unreadSince: inputs.unreadSince)
+            if let built, built.revision == directory.revision, let states = Self.stateChanges(from: built.inputs, to: inputs) {
+                directory.setStates(states)
+            } else {
+                rosterRebuilds += 1
+                let running = Dictionary(verdicts.values.map { ($0.saved, $0.running) }, uniquingKeysWith: { first, _ in first })
+                directory.update(
+                    entries: inputs.entries, live: inputs.live, titles: inputs.titles, nativeNames: inputs.nativeNames,
+                    running: { [weak self] saved in running[saved] ?? self?.stillRunning(saved) ?? false },
+                    excluded: inputs.excluded, places: inputs.places, unplaced: inputs.unplaced, unreadSince: inputs.unreadSince)
+            }
             built = (inputs, directory.revision)
         }
         let reported = namesNotSaved
@@ -1409,6 +1426,7 @@ final class AgentHub {
     }
 
     private func reconcileAttention() {
+        attentionPasses += 1
         let tracked = Set(attention.keys).union(awaitingResult.keys)
         for session in Set(attention.keys).union(goneSince.keys).union(awaitedHandles.keys) where awaitingResult[session] == nil {
             goneSince[session] = nil
@@ -1453,7 +1471,7 @@ final class AgentHub {
             onAttention?(session, handle(of: session) ?? "", nil, false)
         }
         liveSessions = live
-        waitingPrompts = waitingPrompts.filter { live.contains($0.key) }
+        waitingPrompts = waitingPrompts.filter { live.contains($0.key) || liveSession($0.key) }
     }
 
     private func forgetConnectorState(keepingEnvironments keptEnvironment: ((String) -> Bool)? = nil, keeping kept: (String) -> Bool) {
@@ -1709,7 +1727,7 @@ final class AgentHub {
                 settle(named)
                 named = Named()
             }
-            guard let reported = apply(event) else { continue }
+            guard let reported = apply(event, reconciling: named.sessions.isEmpty) else { continue }
             named.sessions.formUnion(reported.sessions)
             named.greeted = named.greeted || reported.greeted
         }
@@ -1717,7 +1735,7 @@ final class AgentHub {
     }
 
     func handle(_ event: AgentEvent) {
-        if let named = apply(event) { settle(named) }
+        if let named = apply(event, reconciling: true) { settle(named) }
     }
 
     private static func readsRoster(_ event: AgentEvent) -> Bool {
@@ -1734,7 +1752,7 @@ final class AgentHub {
         requestScan(rereadingTitles: true, agents: agents)
     }
 
-    private func apply(_ event: AgentEvent) -> Named? {
+    private func apply(_ event: AgentEvent, reconciling: Bool) -> Named? {
         guard !stopped, let event = local(event) else { return nil }
         var named: Named?
         defer {
@@ -1791,8 +1809,9 @@ final class AgentHub {
         case .waiting(let session, let prompt):
             let changed = waitingPrompts[session] != prompt
             waitingPrompts[session] = prompt
+            let revision = directory.revision
             if relist(Set([session] + [filed[session]?.session].compactMap { $0 })) { refresh() }
-            if changed { onChange?() }
+            if changed, directory.revision == revision { onChange?() }
         case .notify(let session, let turn, let on):
             _ = notify(session: session, turn: turn, on: on)
         case .shown(let session, let on, let draft, let newConversation, _, _):
@@ -1954,7 +1973,7 @@ final class AgentHub {
             _ = relist(Set([session] + [filed[session]?.session].compactMap { $0 }))
             refresh()
         }
-        if named == nil { reconcileAttention() }
+        if named == nil, reconciling { reconcileAttention() }
         return named
     }
 

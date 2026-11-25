@@ -205,6 +205,21 @@ public struct AgentDirectory: Sendable {
         conversations.first { $0.pid == pid }
     }
 
+    public mutating func setStates(_ states: [String: AgentLiveState]) {
+        var changed = false
+        for index in conversations.indices {
+            guard let state = states[conversations[index].id], conversations[index].state != state else { continue }
+            conversations[index].state = state
+            changed = true
+        }
+        for index in disconnected.indices {
+            guard let state = states[disconnected[index].id], disconnected[index].state != state else { continue }
+            disconnected[index].state = state
+            changed = true
+        }
+        if changed { revision += 1 }
+    }
+
     public mutating func update(
         entries: [AgentSession], live: Set<String>, titles: [String: String] = [:], nativeNames: [String: String?] = [:],
         running: (RememberedName) -> Bool = { _ in false }, excluded: Set<String> = [], places: [String: AgentPlace] = [:],

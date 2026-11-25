@@ -160,14 +160,22 @@ every rule above applies to it, with these sharpenings:
   connected conversation is no reason to scan quickly: its connector reports its turns, and a rescan every second
   while one was connected cost 12 to 15% CPU on a Mac running about 980 processes (2026-11-20); a rescan every 10
   seconds still cost about 0.14% of a core in a profile with about 430 listed conversations (2026-11-24).
-  Bridge events reach the hub in batches (`AgentEventInbox`): a hello opens a burst that waits up to
-  `AgentEventInbox.defaultHelloWait` for the rest of it, and title, waiting and shown events join an open burst; any
+  Bridge events reach the hub in batches (`AgentEventInbox`): a hello opens a burst that stays open until
+  `AgentEventInbox.defaultHelloWait` passes with nothing joining it, and never past `AgentEventInbox.defaultCeiling`
+  from its first hello; title, waiting and shown events join an open burst; any
   other event, and every event while no burst is open, delivers at once, in order, and a press takes in whatever is
   waiting before it reads the conversations (`AgentHub.drainEvents`). Within a batch the hub settles hellos and titles together,
   before any event that reads the roster (`AgentHub.readsRoster`), so a burst of hellos with their titles (an app
   launch, a host restarting with hundreds of conversations) costs one roster rebuild, one place read and one rescan.
+  While a batch still has hellos or titles to settle, its other events leave attention to that settling rather
+  than each settling it again: a burst of 430 hellos with their shown events took about 78 ms when every event did,
+  and about 9 ms otherwise (debug build, 2026-11-25). A prompt a connector reports is kept while that connector
+  reads live (`AgentTransport`), not only once its conversation is listed live, so a prompt reported in a hello,
+  or before the conversation's first scan, still holds the next dictation.
   The roster is rebuilt only when its inputs, its names, or which name-remembered conversations still run changed
-  (`AgentHub.refresh`); a refresh and the filing before it read every liveness answer in one bridge call
+  (`AgentHub.refresh`), and inputs that differ only in conversations' states change those rows
+  (`AgentDirectory.setStates`) without reassigning names: in a debug build with 430 listed conversations, a turn
+  event that changed one state took about 5 ms and one that also changed a name about 13 ms (2026-11-25); a refresh and the filing before it read every liveness answer in one bridge call
   (`AgentTransport.liveness`), and a rebuild indexes labels,
   containers and names once rather than searching the roster per conversation (`AgentDirectory.update`). Each agent's processes
   are classified once per process listing (`AgentProcessTable.found`), however many scans ask within it. A press

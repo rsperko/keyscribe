@@ -10,16 +10,20 @@ struct AgentEventInboxTests {
     }
 
     final class Timers: @unchecked Sendable {
-        var armed: [DispatchWorkItem] = []
+        var now: TimeInterval = 0
+        var armed: [(due: TimeInterval, item: DispatchWorkItem)] = []
         func fire() {
             guard !armed.isEmpty else { return }
-            let due = armed.removeFirst()
-            if !due.isCancelled { due.perform() }
+            let next = armed.removeFirst()
+            now = max(now, next.due)
+            if !next.item.isCancelled { next.item.perform() }
         }
     }
 
     private func inbox(_ delivered: Delivered, _ timers: Timers) -> AgentEventInbox {
-        AgentEventInbox(helloWait: 0.15, later: { _, item in timers.armed.append(item) }) { delivered.batches.append($0) }
+        AgentEventInbox(
+            helloWait: 0.15, ceiling: 1, now: { timers.now }, later: { delay, item in timers.armed.append((timers.now + delay, item)) }
+        ) { delivered.batches.append($0) }
     }
 
     private func hello(_ session: String) -> AgentEvent {
@@ -102,6 +106,69 @@ struct AgentEventInboxTests {
         inbox.add(.turnStarted(session: "claude:s1", turn: "t1"))
         await yielded()
         #expect(delivered.batches == [[hello("s1"), .shown(session: "claude:s1", on: true), .turnStarted(session: "claude:s1", turn: "t1")]])
+    }
+
+    @Test func aBurstStaysOpenWhileHellosKeepArrivingWithinTheWait() async {
+        let delivered = Delivered(), timers = Timers()
+        let inbox = inbox(delivered, timers)
+        inbox.add(hello("s0"))
+        timers.now = 0.1
+        inbox.add(hello("s1"))
+        timers.fire()
+        await yielded()
+        #expect(delivered.batches.isEmpty)
+        #expect(timers.armed.count == 1)
+        timers.fire()
+        #expect(delivered.batches.map(\.count) == [2])
+        #expect(abs(timers.now - 0.25) < 0.001)
+    }
+
+    @Test func aBurstThatNeverGoesQuietIsDeliveredByItsCeiling() async {
+        let delivered = Delivered(), timers = Timers()
+        let inbox = inbox(delivered, timers)
+        var sent = 0
+        inbox.add(hello("s\(sent)"))
+        while delivered.batches.isEmpty, timers.now < 2 {
+            if let due = timers.armed.first?.due, due <= timers.now + 0.1 {
+                timers.fire()
+                continue
+            }
+            timers.now += 0.1
+            sent += 1
+            inbox.add(hello("s\(sent)"))
+        }
+        #expect(delivered.batches.map(\.count) == [sent + 1])
+        #expect(timers.now <= 1.000_001)
+    }
+
+    @Test func anAnswerArrivingWhileABurstWasExtendedDeliversEverythingAtOnceAndArmsNoFurtherWait() async {
+        let delivered = Delivered(), timers = Timers()
+        let inbox = inbox(delivered, timers)
+        inbox.add(hello("s0"))
+        timers.now = 0.1
+        inbox.add(hello("s1"))
+        inbox.add(.ack(request: "r1"))
+        timers.fire()
+        #expect(delivered.batches.map(\.count) == [3])
+        #expect(timers.armed.isEmpty)
+        await yielded()
+        #expect(delivered.batches.map(\.count) == [3])
+    }
+
+    @Test func aBurstOpeningAfterACeilingDeliveryWaitsItsOwnWindow() async {
+        let delivered = Delivered(), timers = Timers()
+        let inbox = inbox(delivered, timers)
+        inbox.add(hello("s0"))
+        while delivered.batches.isEmpty {
+            timers.now += 0.1
+            inbox.add(.title(session: "claude:s0", text: "t\(timers.now)"))
+            if let due = timers.armed.first?.due, due <= timers.now { timers.fire() }
+        }
+        let opened = timers.now
+        inbox.add(hello("s1"))
+        #expect(timers.armed.last.map { abs($0.due - opened - 0.15) < 1e-9 } == true)
+        while !timers.armed.isEmpty { timers.fire() }
+        #expect(delivered.batches.count == 2)
     }
 
     @Test func drainingDeliversWhatWaitsAtOnce() {

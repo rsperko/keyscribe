@@ -538,6 +538,73 @@ struct AgentHubTests {
         #expect(changes == 2)
     }
 
+    enum PromptSource: String, CaseIterable, Sendable { case hello, waitingEvent }
+    enum PromptRow: String, CaseIterable, Sendable { case notListed, listedNotConnected, connected }
+    enum PromptDelivery: String, CaseIterable, Sendable { case alone, batchedAfterAHello, batchedBeforeARosterRead }
+
+    struct PromptCell: Sendable, CustomTestStringConvertible {
+        let source: PromptSource, row: PromptRow, delivery: PromptDelivery
+        var testDescription: String { "\(source) \(row) \(delivery)" }
+
+        static var all: [PromptCell] {
+            PromptSource.allCases.flatMap { source in
+                PromptRow.allCases.flatMap { row in PromptDelivery.allCases.map { PromptCell(source: source, row: row, delivery: $0) } }
+            }
+        }
+    }
+
+    @Test(arguments: PromptCell.all)
+    func aReportedPromptHoldsTheNextDictationWhereverItsConversationStoodAndHoweverItWasBatched(_ cell: PromptCell) async {
+        let (source, row, delivery) = (cell.source, cell.row, cell.delivery)
+        let (hub, transport, registry, _) = makeHub()
+        if row != .notListed { registry.set("s1", status: "waiting", waitingFor: "custom") }
+        if row == .connected { transport.live.insert("claude:s1") }
+        await hub.rescan()
+        transport.live.insert("claude:s1")
+        let prompt = AgentPrompt(kind: "confirm")
+        var hello = working()
+        if source == .hello { hello.waiting = prompt }
+        hub.prepare(for: hello)
+        let reported: [AgentEvent] = source == .hello ? [.hello(hello)] : [.waiting(session: "claude:s1", prompt: prompt)]
+        switch delivery {
+        case .alone:
+            if source == .waitingEvent { hub.handle(.hello(hello)) }
+            for event in reported { hub.handle(event) }
+        case .batchedAfterAHello:
+            hub.handle((source == .hello ? [] : [.hello(hello)]) + reported + [.shown(session: "claude:s1", on: false)])
+        case .batchedBeforeARosterRead:
+            hub.handle((source == .hello ? [] : [.hello(hello)]) + reported + [.typed(session: "claude:s1")])
+        }
+        registry.set("s1", status: "waiting", waitingFor: "custom")
+        await hub.rescan()
+        #expect(await hub.deliver("use the other file", to: "claude:s1") == .queued("keyscribe", waitingOn: .approval))
+    }
+
+    @Test func aPromptIsForgottenOnceItsConnectorNoLongerReadsLive() async {
+        let (hub, transport, registry, _) = makeHub()
+        registry.set("s1", status: "waiting", waitingFor: "custom")
+        transport.live.insert("claude:s1")
+        await hub.rescan()
+        greet(hub, working())
+        hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "confirm")))
+        transport.live.remove("claude:s1")
+        await hub.rescan()
+        transport.live.insert("claude:s1")
+        await hub.rescan()
+        #expect(await hub.deliver("use the other file", to: "claude:s1") == .queued("keyscribe", waitingOn: .userDialog))
+    }
+
+    @Test func aPromptThatArrivesWithAStateChangeIsAnnouncedOnce() async {
+        let (hub, fake, _) = await twoSources(count: 20)
+        fake.listing = { Self.listed($0, ["f7": .userDialog]) }
+        var changes = 0
+        hub.onChange = { changes += 1 }
+        hub.handle(.waiting(session: "fake:f7", prompt: AgentPrompt(kind: "confirm")))
+        await hub.scansSettled()
+        #expect(changes == 1)
+        #expect(hub.directory.conversations.first { $0.id == "fake:f7" }?.state == .userDialog)
+    }
+
     @Test func aPromptBoxHeldByAReportedApprovalQueuesTheDictationAsWaitingForApproval() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry, status: "busy")
@@ -2725,6 +2792,154 @@ struct AgentHubTests {
         await hub.scansSettled()
         #expect(fake.scans == fakeScans + 1)
         #expect(other.scans == otherScans)
+    }
+
+    private static func listed(_ native: String, _ states: [String: AgentLiveState], named names: [String: String] = [:]) -> AgentSession {
+        let number = Int(native.dropFirst()) ?? 0
+        return AgentSession(
+            agent: "fake", id: native, pid: 1000 + number, cwd: "/src/\(native)", explicitName: names[native], state: states[native] ?? .idle)
+    }
+
+    @Test(arguments: OneConversationEvent.allCases)
+    func aTurnEventThatChangesOnlyOneConversationsStateChangesItsRowWithoutRenamingTheRoster(_ kind: OneConversationEvent) async {
+        let (hub, fake, _) = await twoSources(count: 400)
+        let before: AgentLiveState = kind == .turnComplete ? .working : .idle
+        let after: AgentLiveState = switch kind {
+        case .turnStarted: .working
+        case .turnComplete: .idle
+        case .waiting: .waitingQuestion
+        }
+        var states = ["f7": before]
+        fake.listing = { Self.listed($0, states) }
+        fake.result = .found((0..<400).map { Self.listed("f\($0)", states) })
+        await hub.rescan()
+        var changes = 0
+        hub.onChange = { changes += 1 }
+        let (rebuilds, handles) = (hub.rosterRebuilds, hub.directory.handles)
+        states["f7"] = after
+        hub.handle(event(kind, "fake:f7"))
+        await hub.scansSettled()
+        #expect(hub.rosterRebuilds == rebuilds)
+        #expect(changes == 1)
+        #expect(hub.directory.conversations.first { $0.id == "fake:f7" }?.state == after)
+        #expect(hub.directory.handles == handles)
+        await hub.rescan()
+        #expect(hub.rosterRebuilds == rebuilds)
+    }
+
+    @Test func aScanThatChangesHundredsOfStatesTogetherChangesThoseRowsWithoutRenamingTheRoster() async {
+        let (hub, fake, _) = await twoSources(count: 400)
+        let rebuilds = hub.rosterRebuilds
+        let states = Dictionary(uniqueKeysWithValues: (0..<300).map { ("f\($0)", AgentLiveState.working) })
+        fake.result = .found((0..<400).map { Self.listed("f\($0)", states) })
+        await hub.rescan()
+        #expect(hub.rosterRebuilds == rebuilds)
+        #expect(hub.directory.conversations.filter { $0.agent == "fake" && $0.state == .working }.count == 300)
+    }
+
+    @Test func aBurstOfHellosHandledTogetherSettlesAttentionOnce() async {
+        let (hub, _, _) = await twoSources(count: 300)
+        let passes = hub.attentionPasses
+        hub.handle((0..<300).flatMap { i -> [AgentEvent] in [
+            .hello(.init(protocolVersion: 3, agent: "fake", agentVersion: "", instance: "i\(i)", session: "fake:f\(i)", pid: 1000 + i)),
+            .shown(session: "fake:f\(i)", on: false),
+        ] })
+        #expect(hub.attentionPasses == passes + 1)
+    }
+
+    @Test func aTurnEventWhoseListingAlsoChangedANameRebuildsTheRoster() async {
+        let (hub, fake, _) = await twoSources(count: 20)
+        var names: [String: String] = [:]
+        fake.listing = { Self.listed($0, ["f7": .working], named: names) }
+        let rebuilds = hub.rosterRebuilds
+        names["f7"] = "release notes"
+        hub.handle(.turnStarted(session: "fake:f7", turn: "t1"))
+        await hub.scansSettled()
+        #expect(hub.rosterRebuilds == rebuilds + 1)
+        #expect(hub.handle(of: "fake:f7") == "release notes")
+        #expect(hub.directory.conversations.first { $0.id == "fake:f7" }?.state == .working)
+    }
+
+    @Test func aStateChangeAfterARenameRebuildsTheRosterSoTheRenameStays() async throws {
+        let (hub, fake, _) = await twoSources(count: 20)
+        var states: [String: AgentLiveState] = [:]
+        fake.listing = { Self.listed($0, states) }
+        try hub.rename("fake:f7", to: "docs")
+        let rebuilds = hub.rosterRebuilds
+        states["f7"] = .working
+        hub.handle(.turnStarted(session: "fake:f7", turn: "t1"))
+        await hub.scansSettled()
+        #expect(hub.rosterRebuilds == rebuilds + 1)
+        #expect(hub.handle(of: "fake:f7") == "docs")
+        #expect(hub.directory.conversations.first { $0.id == "fake:f7" }?.state == .working)
+    }
+
+    enum ListingStep: String, CaseIterable, Sendable {
+        case f1Starts, f2Ends, f3Waits, f4Renamed
+
+        var session: String {
+            switch self {
+            case .f1Starts: "fake:f1"
+            case .f2Ends: "fake:f2"
+            case .f3Waits: "fake:f3"
+            case .f4Renamed: "fake:f4"
+            }
+        }
+
+        var event: AgentEvent {
+            switch self {
+            case .f1Starts, .f4Renamed: .turnStarted(session: session, turn: "t1")
+            case .f2Ends: .turnComplete(session: session, reason: "answer", answer: "Done.")
+            case .f3Waits: .waiting(session: session, prompt: nil)
+            }
+        }
+
+        func apply(_ states: inout [String: AgentLiveState], _ names: inout [String: String]) {
+            switch self {
+            case .f1Starts: states["f1"] = .working
+            case .f2Ends: states["f2"] = .idle
+            case .f3Waits: states["f3"] = .waitingQuestion
+            case .f4Renamed:
+                states["f4"] = .working
+                names["f4"] = "release notes"
+            }
+        }
+
+        static var orders: [[ListingStep]] {
+            func permutations(_ steps: [ListingStep]) -> [[ListingStep]] {
+                guard !steps.isEmpty else { return [[]] }
+                return steps.indices.flatMap { i in
+                    permutations(Array(steps[..<i] + steps[(i + 1)...])).map { [steps[i]] + $0 }
+                }
+            }
+            return permutations(allCases)
+        }
+    }
+
+    @Test(arguments: ListingStep.orders)
+    func rowsChangedOneEventAtATimeMatchTheRosterAFreshScanBuilds(_ order: [ListingStep]) async {
+        var states: [String: AgentLiveState] = ["f2": .working]
+        var names: [String: String] = [:]
+        let fake = FakeDiscovery()
+        let transport = FakeTransport()
+        transport.live = Set((0..<8).map { "fake:f\($0)" })
+        let hub = AgentHub(transport: transport, discovery: [fake])
+        fake.result = .found((0..<8).map { Self.listed("f\($0)", states) })
+        fake.listing = { Self.listed($0, states, named: names) }
+        await hub.rescan()
+        for step in order {
+            step.apply(&states, &names)
+            hub.handle(step.event)
+            await hub.scansSettled()
+        }
+
+        let fresh = FakeDiscovery()
+        let freshTransport = FakeTransport()
+        freshTransport.live = transport.live
+        let rebuilt = AgentHub(transport: freshTransport, discovery: [fresh])
+        fresh.result = .found((0..<8).map { Self.listed("f\($0)", states, named: names) })
+        await rebuilt.rescan()
+        #expect(hub.directory.conversations == rebuilt.directory.conversations)
     }
 
     @Test func aHelloScansOnlyTheSourceItsConversationBelongsTo() async {

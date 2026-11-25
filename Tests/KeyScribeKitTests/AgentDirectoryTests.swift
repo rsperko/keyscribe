@@ -27,6 +27,27 @@ struct AgentDirectoryTests {
         #expect(directory.conversation(pid: 10)?.id == "claude:a")
     }
 
+    @Test func statesSetOnRowsMatchTheRowsAFullUpdateBuildsAndCountOnceAsAChange() {
+        func entries(_ a: AgentLiveState, _ b: AgentLiveState) -> [AgentSession] {
+            var both = [started(10, "a", at: 50).session, started(11, "b", at: 60, cwd: "/src/other").session]
+            both[0].state = a
+            both[1].state = b
+            return both
+        }
+        var patched = AgentDirectory()
+        patched.update(entries: entries(.idle, .idle), live: ["claude:b"], excluded: ["claude:a"])
+        let revision = patched.revision
+        patched.setStates(["claude:a": .waitingApproval, "claude:b": .working, "claude:gone": .working])
+        #expect(patched.revision == revision + 1)
+        patched.setStates(["claude:a": .waitingApproval, "claude:b": .working])
+        #expect(patched.revision == revision + 1)
+
+        var rebuilt = AgentDirectory()
+        rebuilt.update(entries: entries(.waitingApproval, .working), live: ["claude:b"], excluded: ["claude:a"])
+        #expect(patched.conversations == rebuilt.conversations)
+        #expect(patched.disconnected == rebuilt.disconnected)
+    }
+
     @Test func aConversationListedBeforeItsFolderIsKnownGetsASayableNameThatTheFolderReplaces() {
         var directory = AgentDirectory()
         directory.update(entries: [hosted("t0", at: 50, cwd: "/src/keyscribe")], live: [])
