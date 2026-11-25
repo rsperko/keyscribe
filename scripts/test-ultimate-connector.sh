@@ -4,7 +4,7 @@
 # test when Node is missing or older than the first version that runs TypeScript directly, so an
 # incompatible Node is never reported as a test failure. Swift builds and tests never need Node.
 # With ULTIMATE_CLONE set, Ultimate's own scripts/check-extension.ts also checks the extension against that
-# checkout's SDK.
+# checkout's SDK: the Solid page on a checkout whose checker knows it (0.1 and later), the React page on an older one.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,8 +12,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLONE="${ULTIMATE_CLONE:-}"
 if [ -n "$CLONE" ]; then
   CHECKER="$CLONE/scripts/check-extension.ts"
-  if [ ! -d "$CLONE/node_modules" ] || ! grep -qF "web.solid.tsx" "$CHECKER" 2>/dev/null; then
-    echo "test-ultimate-connector: $CLONE is not an installed Ultimate 0.1 or later; its scripts/check-extension.ts must check web.solid.tsx" >&2
+  if [ ! -d "$CLONE/node_modules" ] || [ ! -f "$CHECKER" ]; then
+    echo "test-ultimate-connector: $CLONE is not an installed Ultimate checkout; it needs node_modules and scripts/check-extension.ts" >&2
     exit 1
   fi
   echo "test-ultimate-connector: checking the extension with $CLONE at $(git -C "$CLONE" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -42,5 +42,10 @@ if [ -n "$CLONE" ]; then
   trap 'rm -rf "$CHECK"' EXIT
   mkdir "$CHECK/keyscribe"
   cp "$ROOT"/Sources/KeyScribe/Resources/UltimateConnector/* "$CHECK/keyscribe/"
+  if grep -qF "web.solid.tsx" "$CHECKER"; then
+    rm "$CHECK/keyscribe/web.tsx"
+  else
+    rm "$CHECK/keyscribe/web.solid.tsx"
+  fi
   (cd "$CLONE" && timeout 180 "${ULTIMATE_NODE:-$NODE}" scripts/check-extension.ts "$CHECK/keyscribe")
 fi

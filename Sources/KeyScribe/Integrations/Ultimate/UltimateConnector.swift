@@ -2,9 +2,9 @@ import Foundation
 import KeyScribeKit
 
 enum UltimateConnectorFiles {
-    static let names = ["server.ts", "keyscribe.ts", "web.solid.tsx", "README.md"]
+    static let names = ["server.ts", "keyscribe.ts", "web.solid.tsx", "web.tsx", "README.md"]
     static let configName = "keyscribe.json"
-    static let writeOrder = [configName, "keyscribe.ts", "web.solid.tsx", "README.md", "server.ts"]
+    static let writeOrder = [configName, "keyscribe.ts", "web.solid.tsx", "web.tsx", "README.md", "server.ts"]
     private static let extensionLine = "const extension = 'keyscribe'"
 
     static let sources: [String: String]? = {
@@ -25,7 +25,7 @@ enum UltimateConnectorFiles {
 
     static func written(_ sources: [String: String], id: String) -> [String: String] {
         sources.reduce(into: [:]) { files, entry in
-            files[entry.key] = entry.key == "web.solid.tsx"
+            files[entry.key] = entry.key.hasPrefix("web.")
                 ? entry.value.replacingOccurrences(of: extensionLine, with: "const extension = '\(id)'") : entry.value
         }
     }
@@ -120,7 +120,7 @@ final class UltimateConnector: AgentConnector {
     }
 
     static func notAnswering(_ project: String) -> String {
-        "Ultimate is running \(project), but the extension there isn\u{2019}t answering. It needs Ultimate 0.1 or later; if Ultimate is up to date, its status line names the extension problem."
+        "Ultimate is running \(project), but the extension there isn\u{2019}t answering. Ultimate\u{2019}s status line names the extension problem."
     }
 
     private static let unreadableSettings =
@@ -190,7 +190,7 @@ final class UltimateConnector: AgentConnector {
         },
         setupTitle: "Extension",
         purpose: "Dictate to the Ultimate conversation you are looking at and hear its replies read aloud.",
-        installNote: "Ultimate loads the extension at once, in every project it runs on this Mac; nothing restarts. It needs Ultimate 0.1 or later.",
+        installNote: "Ultimate loads the extension at once, in every project it runs on this Mac; nothing restarts.",
         undoOnUninstallLabel: "",
         undoOnUninstallNote: "",
         folderNoun: "user folder",

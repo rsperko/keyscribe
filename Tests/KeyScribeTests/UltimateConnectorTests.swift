@@ -6,7 +6,8 @@ import Testing
 @MainActor
 struct UltimateConnectorTests {
     static let sources = [
-        "server.ts": "server", "keyscribe.ts": "core", "web.solid.tsx": "const extension = 'keyscribe'\nrest", "README.md": "readme",
+        "server.ts": "server", "keyscribe.ts": "core", "web.solid.tsx": "const extension = 'keyscribe'\nrest",
+        "web.tsx": "const extension = 'keyscribe'\nreact", "README.md": "readme",
     ]
 
     private func scratch() -> (home: URL, agents: URL) {
@@ -38,6 +39,7 @@ struct UltimateConnectorTests {
         #expect(read(folder.appendingPathComponent("keyscribe.ts")) == "core")
         #expect(read(folder.appendingPathComponent("README.md")) == "readme")
         #expect(read(folder.appendingPathComponent("web.solid.tsx")) == "const extension = 'keyscribe-dev'\nrest")
+        #expect(read(folder.appendingPathComponent("web.tsx")) == "const extension = 'keyscribe-dev'\nreact")
         let config = try #require(FileManager.default.contents(atPath: folder.appendingPathComponent("keyscribe.json").path))
         let settings = try #require(try JSONSerialization.jsonObject(with: config) as? [String: Any])
         #expect(settings["installation"] as? String == "inst-u")
@@ -70,7 +72,7 @@ struct UltimateConnectorTests {
         let connector = connector(home, agents)
         let folder = home.appendingPathComponent(".ultimate/extensions/keyscribe-dev")
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("old"), withIntermediateDirectories: true)
-        try Data("react".utf8).write(to: folder.appendingPathComponent("web.tsx"))
+        try Data("retired".utf8).write(to: folder.appendingPathComponent("retired.ts"))
         try Data("nested".utf8).write(to: folder.appendingPathComponent("old/kept.ts"))
         try await connector.install(tool: "/bin/ultimate", target: target(home))
         let left = try FileManager.default.contentsOfDirectory(atPath: folder.path)
@@ -81,9 +83,12 @@ struct UltimateConnectorTests {
     @Test func theAppCarriesTheExtensionSourcesAndNamesThePageForThisApp() throws {
         let sources = try #require(UltimateConnectorFiles.sources)
         #expect(Set(sources.keys) == Set(UltimateConnectorFiles.names))
-        let page = try #require(UltimateConnectorFiles.written(sources, id: "keyscribe-dev")["web.solid.tsx"])
-        #expect(page.contains("const extension = 'keyscribe-dev'"))
-        #expect(!page.contains("const extension = 'keyscribe'\n"))
+        let written = UltimateConnectorFiles.written(sources, id: "keyscribe-dev")
+        for name in ["web.solid.tsx", "web.tsx"] {
+            let page = try #require(written[name])
+            #expect(page.contains("const extension = 'keyscribe-dev'"))
+            #expect(!page.contains("const extension = 'keyscribe'\n"))
+        }
     }
 
     @Test func currentFilesInAProjectWhoseExtensionIsNotAnsweringAreNotWorkingNotReady() async throws {
@@ -99,7 +104,8 @@ struct UltimateConnectorTests {
             return
         }
         #expect(message.contains("app"))
-        #expect(message.contains("0.1"))
+        #expect(message.contains("status line"))
+        #expect(!message.contains("0.1"))
         #expect(await asked.paths == [home.appendingPathComponent(".ultimate").path])
         try Data("older".utf8).write(to: home.appendingPathComponent(".ultimate/extensions/keyscribe-dev/keyscribe.ts"))
         guard case .status(.outdated) = await silent.check(tool: "/bin/ultimate", target: target(home)) else {

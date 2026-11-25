@@ -490,12 +490,16 @@ every rule above applies to it, with these sharpenings:
   dictation takes the bridge `submit` path with its receipts, steering and checks. The extension
   (`Resources/UltimateConnector/`) runs inside each Ultimate process that loads `~/.ultimate/extensions`, and only one
   whose state home is under the installed setup's `projects/` (`served`), so a preview instance stays silent. It
-  targets Ultimate 0.1 or later: a Solid page facet (`web.solid.tsx`) and one lifecycle hook, `onOpen`, whose
-  disposable stack ends the connection on every release, reload, unload and shutdown; an older Ultimate passes no
-  stack, so the extension starts nothing and posts a notice naming the version it needs. An install leaves the folder
-  holding only the files this version ships, so an update removes what an older version left behind.
+  runs on Ultimate 0.1 and on the versions before it. It ships both page facets: 0.1 loads the Solid one
+  (`web.solid.tsx`) and prefers it when both are present, and an older Ultimate loads only the React one (`web.tsx`).
+  The server half starts on `onOpen` and ends on whichever lifecycle the host offers: the disposable stack 0.1's
+  `onOpen` passes, or an older Ultimate's `onRelease` and `onClose`. Only a checkout older than 0.1 loads or checks
+  the React page, so `make check-upstream` never covers it: after changing it, run `make test-ultimate-connector`,
+  `make test-ultimate-page-smoke` and `make test-ultimate-live` with `ULTIMATE_CLONE` set to such a checkout. The
+  React page can be deleted once no Ultimate older than 0.1 needs supporting. An install leaves the folder holding only the files this version ships, so an
+  update removes what an older version left behind.
   `make test-ultimate-connector` with `ULTIMATE_CLONE` set runs that checkout's own `scripts/check-extension.ts`
-  against the folder, and refuses a checkout whose checker does not check `web.solid.tsx`;
+  against the folder, with the page facet that checkout loads;
   `make test-ultimate-page-smoke` loads the page in headless Chrome and checks what its page half reports
   (conversation, switching, draft, a dialog, leaving and reloading), and `make check-upstream` runs both against
   Ultimate's newest main, with bb's newest SDK. Current files are not proof the extension runs: Settings reads

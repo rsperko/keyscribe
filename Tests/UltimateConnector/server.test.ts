@@ -152,11 +152,10 @@ function stack() {
 test("each open starts one connection, its stack ends it once, and the next open starts a new one", async () => {
   const made: Array<{ closed: number; close(): void }> = []
   const live: unknown[] = []
-  const open = server.opener(
+  const { open } = server.opener(
     () => true,
     () => { const one = { closed: 0, close() { this.closed += 1 } }; made.push(one); return one },
     { started: (value) => live.push(value), ended: (value) => live.splice(live.indexOf(value), 1) },
-    () => assert.fail("a host with a stack is new enough"),
   )
   const first = stack()
   await open(first)
@@ -177,19 +176,37 @@ test("each open starts one connection, its stack ends it once, and the next open
   assert.equal(made[1].closed, 1)
 })
 
-test("an Ultimate older than 0.1, whose onOpen passes no stack, starts nothing, and says what it needs only where it serves", async () => {
-  for (const serves of [true, false]) {
-    let began = 0
-    const notices: string[] = []
-    const open = server.opener(() => serves, () => { began += 1; return { close() {} } }, { started() {}, ended() {} }, () => notices.push("too old"))
-    await open(undefined)
-    assert.equal(began, 0)
-    assert.deepEqual(notices, serves ? ["too old"] : [])
-  }
-  const openers: Array<(opened?: unknown) => Promise<void>> = []
-  const said: string[] = []
-  server.default({ home: "/nowhere", notice: (message: string) => said.push(message), onOpen: (opener: any) => openers.push(opener) } as any)
-  server.default({ home: "/nowhere", onOpen: (opener: any) => openers.push(opener) } as any)
-  for (const open of openers) await open()
-  assert.deepEqual(said, [])
+test("on an Ultimate older than 0.1, onOpen passes no stack and onRelease or onClose ends the connection once", async () => {
+  const made: Array<{ closed: number; close(): void }> = []
+  const live: unknown[] = []
+  const { open, close } = server.opener(
+    () => true,
+    () => { const one = { closed: 0, close() { this.closed += 1 } }; made.push(one); return one },
+    { started: (value) => live.push(value), ended: (value) => live.splice(live.indexOf(value), 1) },
+  )
+  await open()
+  await open()
+  assert.equal(made.length, 1)
+  await close()
+  await close()
+  assert.equal(made[0].closed, 1)
+  assert.deepEqual(live, [])
+  await open()
+  assert.equal(made.length, 2)
+  assert.deepEqual(live, [made[1]])
+})
+
+test("a host that does not serve this setup starts nothing on either kind of Ultimate", async () => {
+  let began = 0
+  const { open } = server.opener(() => false, () => { began += 1; return { close() {} } }, { started() {}, ended() {} })
+  await open()
+  await open(stack())
+  assert.equal(began, 0)
+})
+
+test("the extension registers onRelease and onClose where the host has them", async () => {
+  const hooks: string[] = []
+  const hook = (named: string) => () => hooks.push(named)
+  server.default({ home: "/nowhere", onOpen: hook("open"), onRelease: hook("release"), onClose: hook("close") } as any)
+  assert.deepEqual(hooks, ["open", "release", "close"])
 })

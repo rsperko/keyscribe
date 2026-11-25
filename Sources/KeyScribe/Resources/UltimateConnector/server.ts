@@ -46,8 +46,9 @@ type Host = {
   harness(): any
   doc(kind: string): any
   emit(tx: unknown, event: unknown, data: unknown): Promise<void> | void
-  notice?(message: string): void
   onOpen(callback: (opened?: Opened) => Promise<void>): void
+  onRelease?(callback: () => Promise<void>): void
+  onClose?(callback: () => Promise<void>): void
 }
 type Opened = { defer(cleanup: () => Promise<void>): void }
 let current: ReturnType<typeof start> | null = null
@@ -374,21 +375,26 @@ function start(host: Host, config: Config) {
 }
 
 export function opener<T extends { close(): void }>(
-  serves: () => boolean, begin: () => T, publish: { started(value: T): void; ended(value: T): void }, tooOld: () => void,
+  serves: () => boolean, begin: () => T, publish: { started(value: T): void; ended(value: T): void },
 ) {
   let running: T | null = null
-  return async (opened?: Opened) => {
-    if (running || !serves()) return
-    if (typeof opened?.defer !== 'function') return tooOld()
-    const started = begin()
-    running = started
-    publish.started(started)
-    opened.defer(async () => {
-      if (running !== started) return
-      running = null
-      publish.ended(started)
-      started.close()
-    })
+  const end = (started: T) => async () => {
+    if (running !== started) return
+    running = null
+    publish.ended(started)
+    started.close()
+  }
+  return {
+    open: async (opened?: Opened) => {
+      if (running || !serves()) return
+      const started = begin()
+      running = started
+      publish.started(started)
+      if (typeof opened?.defer === 'function') opened.defer(end(started))
+    },
+    close: async () => {
+      if (running) await end(running)()
+    },
   }
 }
 
@@ -457,12 +463,14 @@ export default (host: Host) => {
   const config = settings()
   const app = appNameOf(config)
   const tool = readAloudToolName(config?.plugin ?? name)
-  host.onOpen(opener(
+  const lifecycle = opener(
     () => config !== null && served(host, config),
     () => start(host, config!),
     { started: (value) => { current = value }, ended: (value) => { if (current === value) current = null } },
-    () => host.notice?.(`${app}’s extension needs Ultimate 0.1 or later. Update Ultimate to use it.`),
-  ))
+  )
+  host.onOpen(lifecycle.open)
+  host.onRelease?.(lifecycle.close)
+  host.onClose?.(lifecycle.close)
   return defineExtension({
     name,
     tools: [

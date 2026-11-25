@@ -248,16 +248,15 @@ class VerificationTests(unittest.TestCase):
         self.assertFalse({"ONLY", "TARGETS", "REPEAT", "FAIL_FAST", "AGENT"} & seen.keys())
         self.assertEqual(seen["REPLY_WAIT"], "45")
 
-    def test_the_ultimate_connector_tests_refuse_a_checkout_whose_checker_skips_the_solid_page(self):
+    def test_the_ultimate_connector_tests_refuse_a_checkout_that_is_not_installed(self):
         script = Path(__file__).resolve().parent / "test-ultimate-connector.sh"
         clone = self.root / "clone"
-        (clone / "node_modules").mkdir(parents=True)
-        (clone / "scripts").mkdir()
-        (clone / "scripts/check-extension.ts").write_text("include: ['ext/*/web.tsx', 'ext/*/server.ts']\n")
+        (clone / "scripts").mkdir(parents=True)
+        (clone / "scripts/check-extension.ts").write_text("include: ['ext/*/web.solid.tsx', 'ext/*/server.ts']\n")
         answer = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=60,
                                 env=dict(os.environ, ULTIMATE_CLONE=str(clone), NODE=str(self.root / "no-node")))
         self.assertEqual(answer.returncode, 1, answer.stdout + answer.stderr)
-        self.assertIn("Ultimate 0.1 or later", answer.stderr)
+        self.assertIn("not an installed Ultimate checkout", answer.stderr)
         self.assertNotIn("ℹ tests", answer.stdout)
 
     def test_a_failed_prerequisite_blocks_the_expensive_check(self):
