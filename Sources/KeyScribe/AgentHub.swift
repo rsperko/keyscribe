@@ -143,8 +143,7 @@ final class AgentHub {
     private var staleAgents: Set<String> = []
     private var shownExtras: [String: AgentScanExtras] = [:]
     private var scanTask: Task<Void, Never>?
-    private var rescanWanted = false
-    private var rereadWanted = false
+    private var pendingScan: (rereading: Bool, agents: Set<String>?)?
     private var outstanding: [String: Outstanding] = [:]
     private var connectorNamesAt: [String: Date] = [:]
     private var stopped = false
@@ -277,6 +276,10 @@ final class AgentHub {
             AgentPlaceTracker(reader: reader, now: now) { [weak self] in self?.placeQueries ?? [] }
         }
         placeTracker?.onChange = { [weak self] in self?.refresh() }
+        for discovery in discoveries {
+            let agent = discovery.kind.id
+            discovery.follow { [weak self] in self?.requestScan(rereadingTitles: false, agents: [agent]) }
+        }
         silenceHostsTurnedOff()
         for source in self.hosts { watch(source) }
     }
@@ -288,7 +291,7 @@ final class AgentHub {
             switch change {
             case .listing:
                 source.expect()
-                Task { [weak self] in await self?.rescan(rereadingTitles: false) }
+                requestScan(rereadingTitles: false, agents: [agent])
             case .event(let event):
                 self.handle(event.renamingSession { AgentSessionID.make(agent: agent, native: $0) })
             case .delivered(let request, let location, let turn, let position):
@@ -843,7 +846,7 @@ final class AgentHub {
                     let renamed = await source.host.rename(location, to: name)
                     guard renamed, self.hostRenames[id] == nil else { continue }
                     source.expect()
-                    await self.rescan(rereadingTitles: false)
+                    await self.rescan(rereadingTitles: false, agents: [source.kind.id])
                 }
                 self?.renamingInHost.remove(id)
             }
@@ -929,7 +932,7 @@ final class AgentHub {
         send(.admit(id: makeId(), expectedSession: id), to: id)
         refresh()
         onChange?()
-        Task { [weak self] in await self?.rescan(rereadingTitles: true) }
+        requestScan(rereadingTitles: true)
     }
 
     func retrySavingExclusions() {
@@ -998,7 +1001,7 @@ final class AgentHub {
 
     func hungUp(agents: Set<String>) async {
         for source in hosts where agents.contains(source.kind.id) { source.expect() }
-        await rescan(rereadingTitles: false)
+        await rescan(rereadingTitles: false, agents: agents)
     }
 
     func refreshHostsForPress() async {
@@ -1013,7 +1016,6 @@ final class AgentHub {
         return refresh
     }
 
-    var nextLook: Date? { discoveries.compactMap(\.nextLook).min() }
     var drainEvents: @MainActor () -> Void = {}
     var onScanned: (() -> Void)?
     var onProcesses: ((Set<Int>) -> Void)?
@@ -1023,32 +1025,35 @@ final class AgentHub {
         refresh.map { hostScanRounds.finished > $0.after } ?? true
     }
 
-    func rescan(rereadingTitles: Bool = true, wantingHosts: Bool = false) async {
+    func rescan(rereadingTitles: Bool = true, wantingHosts: Bool = false, agents: Set<String>? = nil) async {
+        await requestScan(rereadingTitles: rereadingTitles, wantingHosts: wantingHosts, agents: agents)?.value
+    }
+
+    @discardableResult
+    private func requestScan(rereadingTitles: Bool, wantingHosts: Bool = false, agents: Set<String>? = nil) -> Task<Void, Never>? {
+        guard !stopped else { return nil }
         if wantingHosts { hosts.forEach { $0.want() } }
-        if let scanTask {
-            rescanWanted = true
-            rereadWanted = rereadWanted || rereadingTitles
-            await scanTask.value
-            return
-        }
+        pendingScan = pendingScan.map { ($0.rereading || rereadingTitles, Self.joined($0.agents, agents)) } ?? (rereadingTitles, agents)
+        if let scanTask { return scanTask }
         let task = Task { @MainActor [weak self] in
-            var rereading = rereadingTitles
-            repeat {
-                rereading = rereading || self?.rereadWanted == true
-                self?.rescanWanted = false
-                self?.rereadWanted = false
-                self?.hostScanRounds.started += 1
-                let listed = self?.hostListings
-                await self?.scanOnce(rereadingTitles: rereading)
-                self?.hostScanRounds.finished += 1
-                if self?.hostListings != listed { self?.heardHostReport(from: Self.hostsListed) }
-                self?.heardHostReport(from: Self.scanRound)
-                rereading = self?.rereadWanted ?? false
-            } while self?.rescanWanted == true
+            while let self, !self.stopped, let round = self.pendingScan {
+                self.pendingScan = nil
+                let full = round.agents == nil
+                if full { self.hostScanRounds.started += 1 }
+                let listed = self.hostListings
+                await self.scanOnce(rereadingTitles: round.rereading, only: round.agents)
+                if full { self.hostScanRounds.finished += 1 }
+                if self.hostListings != listed { self.heardHostReport(from: Self.hostsListed) }
+                if full { self.heardHostReport(from: Self.scanRound) }
+            }
             self?.scanTask = nil
         }
         scanTask = task
-        await task.value
+        return task
+    }
+
+    func scansSettled() async {
+        while let scanTask { await scanTask.value }
     }
 
     private struct Outstanding {
@@ -1058,10 +1063,51 @@ final class AgentHub {
         var waiter: FirstAnswer?
     }
 
-    private func scanOnce(rereadingTitles: Bool) async {
+    private static func joined(_ wanted: Set<String>?, _ more: Set<String>?) -> Set<String>? {
+        guard let wanted, let more else { return nil }
+        return wanted.union(more)
+    }
+
+    private func agents(of sessions: Set<String>) -> Set<String> {
+        Set(sessions.flatMap { session in
+            [AgentSessionID.agent(of: session), filed[session].flatMap { AgentSessionID.agent(of: $0.session) }].compactMap { $0 }
+        })
+    }
+
+    var processAgents: Set<String> {
+        Set(discoveries.map(\.kind.id)).subtracting(hosts.map(\.kind.id))
+    }
+
+    var watchingAgents: Set<String> {
+        Set(discoveries.filter { !$0.watchedFolders.isEmpty }.map(\.kind.id))
+    }
+
+    private func relist(_ sessions: Set<String>) -> Bool {
+        var unlisted: Set<String> = []
+        var changed = false
+        for session in sessions {
+            guard let (agent, native) = AgentSessionID.split(session),
+                  let discovery = discoveries.first(where: { $0.kind.id == agent })
+            else { continue }
+            guard let current = discovery.listed(native), var listed = lastScan[agent],
+                  let index = listed.firstIndex(where: { $0.id == native })
+            else {
+                unlisted.insert(agent)
+                continue
+            }
+            guard listed[index] != current else { continue }
+            listed[index] = current
+            lastScan[agent] = listed
+            changed = true
+        }
+        if !unlisted.isEmpty { requestScan(rereadingTitles: false, agents: unlisted) }
+        return changed
+    }
+
+    private func scanOnce(rereadingTitles: Bool, only: Set<String>? = nil) async {
         var results: [(String, AgentScan)] = []
         var scannedAt: [String: Date] = [:]
-        for discovery in discoveries {
+        for discovery in discoveries where only?.contains(discovery.kind.id) ?? true {
             let agent = discovery.kind.id
             if outstanding[agent] == nil { begin(agent: agent) { await discovery.scan(rereadingTitles: rereadingTitles) } }
             let startedAt = outstanding[agent]?.startedAt ?? now()
@@ -1078,7 +1124,8 @@ final class AgentHub {
         for (agent, result) in results {
             switch result {
             case .found(let scanned, let extras):
-                self.scanned(agent, scanned)
+                let source = discoveries.first { $0.kind.id == agent }
+                self.scanned(agent, source?.current(scanned) ?? scanned)
                 lastExtras[agent] = extras
                 discoveryProblems[agent] = extras.problem
                 staleAgents.remove(agent)
@@ -1114,6 +1161,7 @@ final class AgentHub {
         onStillWorkingEnded = nil
         for id in Array(hostReportWaiters.keys) { resumeHostReportWaiter(id, false) }
         for source in hosts { source.host.unwatch() }
+        for discovery in discoveries { discovery.stop() }
         scanTask?.cancel()
         scanTask = nil
         placeTracker?.stop()
@@ -1645,7 +1693,7 @@ final class AgentHub {
         for (agent, sessions) in Dictionary(grouping: retiring, by: { AgentSessionID.agent(of: $0) ?? "" }) {
             discoveries.first { $0.kind.id == agent }?.retire(sessions: Set(sessions.map(AgentSessionID.native)))
         }
-        Task { [weak self] in await self?.rescan(rereadingTitles: false) }
+        requestScan(rereadingTitles: false, agents: Set(retiring.compactMap(AgentSessionID.agent(of:))))
     }
 
     private struct Named {
@@ -1682,7 +1730,8 @@ final class AgentHub {
     private func settle(_ named: Named) {
         refresh(namesReportedFor: named.sessions)
         if named.greeted { readPlaces() }
-        Task { [weak self] in await self?.rescan(rereadingTitles: true) }
+        let agents = agents(of: named.sessions)
+        requestScan(rereadingTitles: true, agents: agents)
     }
 
     private func apply(_ event: AgentEvent) -> Named? {
@@ -1742,8 +1791,8 @@ final class AgentHub {
         case .waiting(let session, let prompt):
             let changed = waitingPrompts[session] != prompt
             waitingPrompts[session] = prompt
+            if relist(Set([session] + [filed[session]?.session].compactMap { $0 })) { refresh() }
             if changed { onChange?() }
-            Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         case .notify(let session, let turn, let on):
             _ = notify(session: session, turn: turn, on: on)
         case .shown(let session, let on, let draft, let newConversation, _, _):
@@ -1857,7 +1906,7 @@ final class AgentHub {
             handingOff[session] = nil
             running[session] = now()
             turns[session] = turn
-            Task { [weak self] in await self?.rescan(rereadingTitles: false) }
+            if relist(Set([session] + [filed[session]?.session].compactMap { $0 })) { refresh() }
         case .turnComplete(let session, let reason, let answer, let after, let turn):
             let hosted = hosts.contains { $0.kind.id == AgentSessionID.agent(of: session) }
             let ended = turn ?? (hosted ? turns[session] : nil)
@@ -1902,8 +1951,8 @@ final class AgentHub {
                 report(reason: reason, answer: answer, after: after, of: session, origin: origin, wasRequested: false)
             }
             if reason == "aborted" { outbox.noteInterrupted(conversation: session) }
+            _ = relist(Set([session] + [filed[session]?.session].compactMap { $0 }))
             refresh()
-            Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         }
         if named == nil { reconcileAttention() }
         return named
@@ -2358,7 +2407,8 @@ final class AgentHub {
             if listed.contains(conversation) { return conversation }
             if expected.insert(conversation).inserted {
                 source.expect()
-                Task { [weak self] in await self?.rescan(rereadingTitles: false) }
+                let agent = source.kind.id
+                requestScan(rereadingTitles: false, agents: [agent])
             }
         }
         return nil
@@ -3014,9 +3064,8 @@ final class AgentRuntime {
         }
     }
 
-    static func pace(settingsOpen: Bool, nextLook: Date?, now: Date) -> Duration? {
-        if settingsOpen { return .seconds(1) }
-        return nextLook.map { .seconds(max(0, $0.timeIntervalSince(now))) }
+    static func pace(settingsOpen: Bool) -> Duration? {
+        settingsOpen ? .seconds(1) : nil
     }
 
     static func places(surfaces: ResolvedSurfaces, sources: [any AgentPlaceReading]) -> CombinedPlaceReader {
@@ -3086,7 +3135,12 @@ final class AgentRuntime {
             processParent: { SystemTerminalFacts.parent(of: $0) })
         box.hub = hub
         hub.drainEvents = { inbox.drain() }
-        let exits = ProcessExitWatcher { [weak hub] in Task { @MainActor in await hub?.rescan(rereadingTitles: false) } }
+        let exits = ProcessExitWatcher { [weak hub] in
+            Task { @MainActor in
+                guard let hub else { return }
+                await hub.rescan(rereadingTitles: false, agents: hub.processAgents)
+            }
+        }
         self.exits = exits
         hub.onProcesses = { [weak exits] in exits?.watch($0) }
         server.onHangUp { agents in Task { @MainActor in await box.hub?.hungUp(agents: agents) } }
@@ -3103,7 +3157,7 @@ final class AgentRuntime {
     private func schedule() {
         pace?.cancel()
         pace = nil
-        guard !stopped, let delay = Self.pace(settingsOpen: settingsOpen, nextLook: hub.nextLook, now: Date()) else { return }
+        guard !stopped, let delay = Self.pace(settingsOpen: settingsOpen) else { return }
         pace = Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
@@ -3119,7 +3173,10 @@ final class AgentRuntime {
     private func watch(_ folders: [URL]) {
         guard folders != watcher?.folders ?? [] else { return }
         watcher = FolderWatcher(folders: folders) { [weak hub] in
-            Task { @MainActor in await hub?.rescan(rereadingTitles: false) }
+            Task { @MainActor in
+                guard let hub else { return }
+                await hub.rescan(rereadingTitles: false, agents: hub.watchingAgents)
+            }
         }
     }
 

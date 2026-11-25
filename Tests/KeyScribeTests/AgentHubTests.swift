@@ -2413,6 +2413,17 @@ struct AgentHubTests {
             return running
         }
         func observe(_ event: AgentEvent) { observed.append(event) }
+        var listing: ((String) -> AgentSession?)?
+        private(set) var listedCalls = 0
+        private(set) var reconciled = 0
+        func listed(_ native: String) -> AgentSession? {
+            listedCalls += 1
+            return listing?(native)
+        }
+        func current(_ sessions: [AgentSession]) -> [AgentSession] {
+            reconciled += 1
+            return sessions.map { listing?($0.id) ?? $0 }
+        }
         func retire(sessions: Set<String>) {
             retired.append(sessions)
             if case .found(let found, let extras) = result { result = .found(found.filter { !sessions.contains($0.id) }, extras) }
@@ -2599,6 +2610,130 @@ struct AgentHubTests {
         await hub.rescan()
         #expect(transport.liveCalls == 0)
         #expect(transport.snapshots == 2)
+    }
+
+    private func twoSources(count: Int = 200) async -> (AgentHub, FakeDiscovery, FakeDiscovery) {
+        let fake = FakeDiscovery()
+        let other = FakeDiscovery(kind: AgentKind(id: "other", displayName: "Other", connectorName: "Other connector"))
+        let transport = FakeTransport()
+        let hub = AgentHub(transport: transport, discovery: [fake, other])
+        fake.result = .found((0..<count).map { AgentSession(agent: "fake", id: "f\($0)", pid: 1000 + $0, cwd: "/src/f\($0)", state: .idle) })
+        other.result = .found((0..<count).map { AgentSession(agent: "other", id: "o\($0)", pid: 5000 + $0, cwd: "/src/o\($0)", state: .idle) })
+        transport.live = Set((0..<count).map { "fake:f\($0)" } + (0..<count).map { "other:o\($0)" })
+        await hub.rescan()
+        return (hub, fake, other)
+    }
+
+    enum ScanTiming: String, CaseIterable, Sendable { case beforeTheFirstRoundStarts, whileTheFirstRoundRuns }
+    enum ScanRequests: String, CaseIterable, Sendable {
+        case oneThenAnother, oneThenAll, allThenOne, oneThenTheSame
+
+        var first: Set<String>? { self == .allThenOne ? nil : ["fake"] }
+        var second: Set<String>? {
+            switch self {
+            case .oneThenAnother, .allThenOne: ["other"]
+            case .oneThenAll: nil
+            case .oneThenTheSame: ["fake"]
+            }
+        }
+    }
+
+    @Test(arguments: ScanTiming.allCases, ScanRequests.allCases)
+    func everyRescanAskedForScansItsSourcesAfterItWasAsked(_ timing: ScanTiming, _ requests: ScanRequests) async {
+        let (hub, fake, other) = await twoSources(count: 3)
+        if timing == .whileTheFirstRoundRuns { fake.blocked = true }
+        let first = Task { @MainActor in await hub.rescan(rereadingTitles: false, agents: requests.first) }
+        if timing == .whileTheFirstRoundRuns {
+            await waitUntil { fake.scans > 1 }
+        }
+        let asked = (fake: fake.scans, other: other.scans)
+        let second = Task { @MainActor in await hub.rescan(rereadingTitles: false, agents: requests.second) }
+        await Task.yield()
+        fake.blocked = false
+        await first.value
+        await second.value
+        let wanted = requests.second ?? ["fake", "other"]
+        if wanted.contains("fake") { #expect(fake.scans > asked.fake) }
+        if wanted.contains("other") { #expect(other.scans > asked.other) }
+    }
+
+    private func waitUntil(_ done: @MainActor () -> Bool) async {
+        let until = Date().addingTimeInterval(5)
+        while !done(), Date() < until { try? await Task.sleep(for: .milliseconds(2)) }
+        #expect(done())
+    }
+
+    enum OneConversationEvent: String, CaseIterable, Sendable { case turnStarted, turnComplete, waiting }
+
+    private func event(_ kind: OneConversationEvent, _ session: String) -> AgentEvent {
+        switch kind {
+        case .turnStarted: .turnStarted(session: session, turn: "t1")
+        case .turnComplete: .turnComplete(session: session, reason: "answer", answer: "Done.")
+        case .waiting: .waiting(session: session, prompt: nil)
+        }
+    }
+
+    @Test(arguments: OneConversationEvent.allCases)
+    func aScanThatStartedBeforeAnEventNeverPutsBackTheStateTheEventReplaced(_ kind: OneConversationEvent) async {
+        let (hub, fake, other) = await twoSources(count: 10)
+        let before: AgentLiveState = kind == .turnStarted ? .idle : .working
+        let after: AgentLiveState = kind == .turnStarted ? .working : .idle
+        var state = before
+        fake.result = .found((0..<10).map { AgentSession(agent: "fake", id: "f\($0)", pid: 1000 + $0, cwd: "/src/f\($0)", state: $0 == 7 ? before : .idle) })
+        fake.listing = { native in
+            AgentSession(agent: "fake", id: native, pid: 1000 + (Int(native.dropFirst()) ?? 0), cwd: "/src/\(native)", state: native == "f7" ? state : .idle)
+        }
+        other.blocked = true
+        let round = Task { @MainActor in await hub.rescan(rereadingTitles: false) }
+        await waitUntil { other.scans > 1 }
+        state = after
+        hub.handle(event(kind, "fake:f7"))
+        other.blocked = false
+        await round.value
+        await hub.scansSettled()
+        #expect(hub.directory.conversations.first { $0.id == "fake:f7" }?.state == after)
+    }
+
+    @Test func aScanOfHundredsOfConversationsIsReconciledWithItsSourceOncePerRound() async {
+        let (hub, fake, _) = await twoSources(count: 400)
+        let (calls, reconciled) = (fake.listedCalls, fake.reconciled)
+        await hub.rescan(rereadingTitles: false)
+        #expect(fake.listedCalls == calls)
+        #expect(fake.reconciled == reconciled + 1)
+    }
+
+    @Test(arguments: OneConversationEvent.allCases)
+    func anEventAboutOneConversationListedFromMemoryScansNoSource(_ kind: OneConversationEvent) async {
+        let (hub, fake, other) = await twoSources()
+        fake.listing = { native in
+            AgentSession(agent: "fake", id: native, pid: 1000 + (Int(native.dropFirst()) ?? 0), cwd: "/src/\(native)",
+                         state: native == "f7" && kind == .turnStarted ? .working : .idle)
+        }
+        let (fakeScans, otherScans) = (fake.scans, other.scans)
+        hub.handle(event(kind, "fake:f7"))
+        await hub.scansSettled()
+        #expect(fake.scans == fakeScans)
+        #expect(other.scans == otherScans)
+        #expect(hub.directory.conversations.first { $0.id == "fake:f7" }?.state == (kind == .turnStarted ? .working : .idle))
+    }
+
+    @Test(arguments: OneConversationEvent.allCases)
+    func anEventAboutOneConversationScansOnlyTheSourceThatListsIt(_ kind: OneConversationEvent) async {
+        let (hub, fake, other) = await twoSources()
+        let (fakeScans, otherScans) = (fake.scans, other.scans)
+        hub.handle(event(kind, "fake:f7"))
+        await hub.scansSettled()
+        #expect(fake.scans == fakeScans + 1)
+        #expect(other.scans == otherScans)
+    }
+
+    @Test func aHelloScansOnlyTheSourceItsConversationBelongsTo() async {
+        let (hub, fake, other) = await twoSources()
+        let (fakeScans, otherScans) = (fake.scans, other.scans)
+        hub.handle(.hello(.init(protocolVersion: 3, agent: "other", agentVersion: "", instance: "i1", session: "other:o3", pid: 5003, title: "task")))
+        await hub.scansSettled()
+        #expect(other.scans == otherScans + 1)
+        #expect(fake.scans == fakeScans)
     }
 
     @Test func aBurstOfHellosHandledTogetherRebuildsTheRosterAndRescansOnce() async {
@@ -3251,96 +3386,230 @@ struct AgentHubTests {
         #expect(hub.directory.conversations.first?.state == .working)
     }
 
-    enum TitleWrite: String, CaseIterable, Sendable { case beforeTheEnd, afterTheEndScan, afterAnOlderScanDroppedTheConversation }
+    final class TranscriptWatches: @unchecked Sendable {
+        private let lock = NSLock()
+        private var changed: [String: @Sendable () -> Void] = [:]
+        private var openedNames: [String] = []
+        var failing = false
 
-    @Test(arguments: TitleWrite.allCases)
-    func aTitleItsTranscriptGainsAroundATurnEndShowsOnARoutineScanWithNoSecondHello(_ write: TitleWrite) async throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-late-title-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: dir) }
+        var opened: [String] { lock.withLock { openedNames } }
+        var open: Int { lock.withLock { changed.count } }
+        func isOpen(_ name: String) -> Bool { lock.withLock { changed[name] != nil } }
+
+        func watch(_ url: URL, _ onChange: @escaping @Sendable () -> Void) -> (@Sendable () -> Void)? {
+            let name = url.lastPathComponent
+            return lock.withLock {
+                guard !failing else { return nil }
+                changed[name] = onChange
+                openedNames.append(name)
+                return { [weak self] in self?.lock.withLock { _ = self?.changed.removeValue(forKey: name) } }
+            }
+        }
+
+        func write(_ name: String) { lock.withLock { changed[name] }?() }
+    }
+
+    final class Sleeps: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiting: [(id: UUID, length: Duration, resume: CheckedContinuation<Void, Never>)] = []
+
+        var pending: [Duration] { lock.withLock { waiting.map(\.length) } }
+
+        func sleep(_ length: Duration) async {
+            let id = UUID()
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    let cancelled = lock.withLock {
+                        guard !Task.isCancelled else { return true }
+                        waiting.append((id, length, continuation))
+                        return false
+                    }
+                    if cancelled { continuation.resume() }
+                }
+            } onCancel: {
+                lock.withLock { waiting.firstIndex { $0.id == id }.map { waiting.remove(at: $0) } }?.resume.resume()
+            }
+        }
+
+        func release(_ matching: (Duration) -> Bool) {
+            let released = lock.withLock {
+                let chosen = waiting.filter { matching($0.length) }
+                waiting.removeAll { matching($0.length) }
+                return chosen
+            }
+            for sleep in released { sleep.resume.resume() }
+        }
+    }
+
+    final class Count: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        var count: Int { lock.withLock { value } }
+        func add() { lock.withLock { value += 1 } }
+    }
+
+    private struct TitleRig {
+        let hub: AgentHub
+        let registry: Registry
+        let scans: Count
+        let watches: TranscriptWatches
+        let sleeps: Sleeps
+        let titles: ClaudeTranscriptTitles
+        let folder: URL
+
+        func writeTitle(_ title: String, session: String = "s1") throws {
+            try Data(#"{"type":"ai-title","aiTitle":"\#(title)","sessionId":"claude:\#(session)"}"#.utf8)
+                .write(to: folder.appendingPathComponent("\(session).jsonl"))
+        }
+
+        @MainActor var title: String? { hub.directory.conversations.first { $0.id == "claude:s1" }?.title }
+        static let recheck = Duration.seconds(ClaudeDiscovery.titleRecheck)
+    }
+
+    private func titleRig(_ dir: URL) throws -> TitleRig {
         let folder = dir.appendingPathComponent("projects/-src-keyscribe", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let clock = ClaudeTranscriptTitlesTests.Clock()
-        clock.now = Date()
         let registry = Registry()
+        let scans = Count()
+        let watches = TranscriptWatches()
+        let sleeps = Sleeps()
+        let titles = ClaudeTranscriptTitles(configDirs: [dir])
         let transport = FakeTransport()
         let hub = AgentHub(
-            transport: transport, scan: { registry.entries },
-            transcriptTitles: ClaudeTranscriptTitles(configDirs: [dir]), scanDeadline: .seconds(30), now: { clock.now })
+            transport: transport, scan: { scans.add(); return registry.entries }, transcriptTitles: titles,
+            transcriptWatch: { watches.watch($0, $1) }, titleSpacing: { await sleeps.sleep($0) }, scanDeadline: .seconds(30))
         registry.set("s1")
         transport.live.insert("claude:s1")
-        await hub.rescan()
-        hub.handle(labelHello())
-        await hub.rescan(rereadingTitles: false)
-        #expect(hub.directory.conversations.first?.title == nil)
-
-        let title = { try Data(#"{"type":"ai-title","aiTitle":"Fix the flaky test","sessionId":"claude:s1"}"#.utf8).write(to: folder.appendingPathComponent("s1.jsonl")) }
-        if write == .beforeTheEnd { try title() }
-        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
-        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
-        if write == .afterAnOlderScanDroppedTheConversation {
-            registry.remove("s1")
-            await hub.rescan(rereadingTitles: false)
-            registry.set("s1")
-        }
-        await hub.rescan(rereadingTitles: false)
-        if write != .beforeTheEnd { try title() }
-        clock.now += ClaudeDiscovery.titleRecheck
-        await hub.rescan(rereadingTitles: false)
-        #expect(hub.directory.conversations.first?.title == "Fix the flaky test")
+        try Data().write(to: folder.appendingPathComponent("s1.jsonl"))
+        return TitleRig(hub: hub, registry: registry, scans: scans, watches: watches, sleeps: sleeps, titles: titles, folder: folder)
     }
 
-    @Test func aWatchedTranscriptIsCheckedNoMoreOftenThanItsRecheckEvenWhenScansComeEverySecond() async throws {
+    private func turnEnded(_ rig: TitleRig, _ session: String = "claude:s1") async {
+        rig.hub.handle(.turnComplete(session: session, reason: "answer", answer: "Done."))
+        await rig.hub.scansSettled()
+    }
+
+    enum TitleWrite: String, CaseIterable, Sendable { case beforeTheEnd, afterTheEnd, afterAnEndBeforeTheFirstScan }
+
+    @Test(arguments: TitleWrite.allCases)
+    func aTitleItsTranscriptGainsAroundATurnEndArrivesWithNoSecondHello(_ write: TitleWrite) async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-late-title-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let rig = try titleRig(dir)
+        if write == .afterAnEndBeforeTheFirstScan {
+            await turnEnded(rig)
+            await rig.hub.rescan()
+        } else {
+            await rig.hub.rescan()
+            rig.hub.handle(labelHello())
+            await rig.hub.scansSettled()
+            if write == .beforeTheEnd { try rig.writeTitle("Fix the flaky test") }
+            rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+            await turnEnded(rig)
+        }
+        await waitUntil { rig.watches.isOpen("s1.jsonl") }
+        if write != .beforeTheEnd {
+            #expect(rig.title == nil)
+            await waitUntil { rig.sleeps.pending.isEmpty == false }
+            try rig.writeTitle("Fix the flaky test")
+            rig.watches.write("s1.jsonl")
+        }
+        await waitUntil { rig.title == "Fix the flaky test" }
+    }
+
+    @Test func aTranscriptWhoseWatchCannotOpenIsStillReadOnceAndHoldsNoSlotOrTimer() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-unwatched-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let rig = try titleRig(dir)
+        rig.watches.failing = true
+        try rig.writeTitle("Old title")
+        await rig.hub.rescan()
+        #expect(rig.title == "Old title")
+        try rig.writeTitle("Written before the end")
+        await turnEnded(rig)
+        await waitUntil { rig.title == "Written before the end" }
+        #expect(rig.watches.open == 0)
+        #expect(rig.sleeps.pending.isEmpty)
+    }
+
+    @Test func aWriteDuringTheSpacingIsReadOnceTheSpacingEndsWithNoSecondWrite() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-title-cadence-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
-        let folder = dir.appendingPathComponent("projects/-src-keyscribe", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let clock = ClaudeTranscriptTitlesTests.Clock()
-        clock.now = Date()
-        let registry = Registry()
-        let hub = AgentHub(
-            transport: FakeTransport(), scan: { registry.entries },
-            transcriptTitles: ClaudeTranscriptTitles(configDirs: [dir]), scanDeadline: .seconds(30), now: { clock.now })
-        registry.set("s1")
-        await hub.rescan()
-        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
-        await hub.rescan(rereadingTitles: false)
-        try Data(#"{"type":"ai-title","aiTitle":"Later","sessionId":"claude:s1"}"#.utf8).write(to: folder.appendingPathComponent("s1.jsonl"))
-        clock.now += ClaudeDiscovery.titleRecheck - 1
-        await hub.rescan(rereadingTitles: false)
-        #expect(hub.directory.conversations.first?.title == nil)
-        clock.now += 1
-        await hub.rescan(rereadingTitles: false)
-        #expect(hub.directory.conversations.first?.title == "Later")
-        clock.now += ClaudeDiscovery.titleWatch
-        try Data(#"{"type":"ai-title","aiTitle":"Much later","sessionId":"claude:s1"}"#.utf8).write(to: folder.appendingPathComponent("s1.jsonl"))
-        await hub.rescan(rereadingTitles: false)
-        #expect(hub.directory.conversations.first?.title == "Later")
+        let rig = try titleRig(dir)
+        await rig.hub.rescan()
+        await turnEnded(rig)
+        await waitUntil { rig.watches.isOpen("s1.jsonl") }
+        try rig.writeTitle("Later")
+        rig.watches.write("s1.jsonl")
+        await waitUntil { rig.title == "Later" }
+        let reads = rig.titles.reads
+        try rig.writeTitle("Within the spacing")
+        rig.watches.write("s1.jsonl")
+        let pacing = { (length: Duration) in length > .zero && length <= TitleRig.recheck }
+        await waitUntil { rig.sleeps.pending.contains(where: pacing) }
+        #expect(rig.titles.reads == reads)
+        #expect(rig.title == "Later")
+        rig.sleeps.release(pacing)
+        await waitUntil { rig.title == "Within the spacing" }
     }
 
-    @Test func theHubWantsAnotherLookOnlyWhileATurnsTitleMayStillArrive() async throws {
-        let clock = ClaudeTranscriptTitlesTests.Clock()
-        clock.now = Date()
-        let registry = Registry()
-        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, scanDeadline: .seconds(30), now: { clock.now })
-        registry.set("s1")
-        await hub.rescan()
-        #expect(hub.nextLook == nil)
-
-        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
-        await hub.rescan(rereadingTitles: false)
-        #expect(hub.nextLook == clock.now + ClaudeDiscovery.titleRecheck)
-
-        clock.now += ClaudeDiscovery.titleWatch
-        await hub.rescan(rereadingTitles: false)
-        #expect(hub.nextLook == nil)
+    @Test func transcriptWritesThatLeaveTheTitleAloneStartNoScan() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-title-same-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let rig = try titleRig(dir)
+        await rig.hub.rescan()
+        await turnEnded(rig)
+        await waitUntil { rig.watches.isOpen("s1.jsonl") && !rig.sleeps.pending.isEmpty }
+        let (scans, reads) = (rig.scans.count, rig.titles.reads)
+        try Data(#"{"type":"assistant","sessionId":"claude:s1"}"#.utf8).write(to: rig.folder.appendingPathComponent("s1.jsonl"))
+        rig.watches.write("s1.jsonl")
+        await waitUntil { rig.titles.reads == reads + 1 }
+        await rig.hub.scansSettled()
+        #expect(rig.scans.count == scans)
     }
 
-    @Test func theRuntimeWakesEverySecondWhileSettingsIsOpenAndOtherwiseOnlyForALookThatIsDue() {
-        let now = Date(timeIntervalSince1970: 1000)
-        #expect(AgentRuntime.pace(settingsOpen: true, nextLook: nil, now: now) == .seconds(1))
-        #expect(AgentRuntime.pace(settingsOpen: false, nextLook: nil, now: now) == nil)
-        #expect(AgentRuntime.pace(settingsOpen: false, nextLook: now + 4, now: now) == .seconds(4))
-        #expect(AgentRuntime.pace(settingsOpen: false, nextLook: now - 4, now: now) == .zero)
+    enum WatchEnd: String, CaseIterable, Sendable { case itsTimeRunsOut, itsConversationLeavesTheList, theHubStops }
+
+    @Test(arguments: WatchEnd.allCases)
+    func aTitleWatchClosesWithNoWriteAndArmsNoTimerOfItsOwn(_ end: WatchEnd) async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-title-watch-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let rig = try titleRig(dir)
+        await rig.hub.rescan()
+        await turnEnded(rig)
+        await waitUntil { rig.watches.isOpen("s1.jsonl") }
+        #expect(AgentRuntime.pace(settingsOpen: false) == nil)
+        switch end {
+        case .itsTimeRunsOut: rig.sleeps.release { $0 > TitleRig.recheck }
+        case .itsConversationLeavesTheList:
+            rig.registry.remove("s1")
+            await rig.hub.rescan(rereadingTitles: false)
+        case .theHubStops: rig.hub.stop()
+        }
+        await waitUntil { rig.watches.open == 0 }
+        #expect(rig.sleeps.pending.isEmpty)
+    }
+
+    @Test func turnEndsInManyConversationsKeepABoundedNumberOfWatchesOpen() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-title-cap-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let rig = try titleRig(dir)
+        let many = ClaudeDiscovery.titleWatchLimit + 10
+        for index in 0..<many {
+            rig.registry.set("s\(index)", pid: 100 + index)
+            try rig.writeTitle("", session: "s\(index)")
+        }
+        await rig.hub.rescan()
+        for index in 0..<many { rig.hub.handle(.turnComplete(session: "claude:s\(index)", reason: "answer", answer: "Done.")) }
+        await rig.hub.scansSettled()
+        await waitUntil { rig.watches.opened.count >= ClaudeDiscovery.titleWatchLimit }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.watches.open <= ClaudeDiscovery.titleWatchLimit)
+    }
+
+    @Test func theRuntimeWakesEverySecondWhileSettingsIsOpenAndOtherwiseNever() {
+        #expect(AgentRuntime.pace(settingsOpen: true) == .seconds(1))
+        #expect(AgentRuntime.pace(settingsOpen: false) == nil)
     }
 
     @Test func theProcessOfAConversationRememberedByNameIsWatchedUntilItsNameIsReleased() async throws {

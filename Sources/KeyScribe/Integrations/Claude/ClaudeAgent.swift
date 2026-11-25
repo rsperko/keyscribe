@@ -11,30 +11,115 @@ final class ClaudeDiscovery: AgentDiscovery {
     private var lastByFolder: [String: [ClaudeRegistryEntry]] = [:]
     private(set) var watchedFolders: [URL] = []
     private let now: () -> Date
-    private var titleWatches: [String: (until: Date, checked: Date?)] = [:]
+    private let watchTranscript: TranscriptWatch
+    private let spacing: @Sendable (Duration) async -> Void
+    private var changed: (() -> Void)?
+    private var titleWatches: [String: (id: UUID, until: Date, task: Task<Void, Never>)] = [:]
+    private var awaitingScan: [String: Date] = [:]
+
+    typealias TranscriptWatch = @Sendable (URL, @escaping @Sendable () -> Void) -> (@Sendable () -> Void)?
 
     nonisolated static let titleWatch: TimeInterval = 120
     nonisolated static let titleRecheck: TimeInterval = 5
+    nonisolated static let titleWatchLimit = 32
+
+    func follow(_ changed: @escaping () -> Void) {
+        self.changed = changed
+    }
 
     func observe(_ event: AgentEvent) {
-        if case .turnComplete(let session, _, _, _, _) = event {
-            titleWatches[session] = (now().addingTimeInterval(Self.titleWatch), nil)
+        guard case .turnComplete(let session, _, _, _, _) = event, titles != nil else { return }
+        let until = now().addingTimeInterval(Self.titleWatch)
+        if let entry = entry(session) {
+            watchTitle(session, entry, until: until)
+        } else {
+            awaitingScan[session] = until
+            while awaitingScan.count > Self.titleWatchLimit, let oldest = awaitingScan.min(by: { $0.value < $1.value })?.key {
+                awaitingScan[oldest] = nil
+            }
         }
     }
 
-    var nextLook: Date? {
-        let at = now()
-        return titleWatches.values.filter { $0.until > at }.map { watch in
-            min(watch.until, watch.checked.map { $0.addingTimeInterval(Self.titleRecheck) } ?? at)
-        }.min()
+    func retire(sessions: Set<String>) {
+        for session in sessions { endTitleWatch(session) }
     }
 
-    private func titlesDue() -> Set<String> {
+    func stop() {
+        for session in Array(titleWatches.keys) { endTitleWatch(session) }
+        awaitingScan = [:]
+    }
+
+    isolated deinit {
+        for watch in titleWatches.values { watch.task.cancel() }
+    }
+
+    private func entry(_ session: String) -> ClaudeRegistryEntry? {
+        lastByFolder.values.joined().first { $0.sessionId == session }
+    }
+
+    private func endTitleWatch(_ session: String) {
+        titleWatches.removeValue(forKey: session)?.task.cancel()
+        awaitingScan[session] = nil
+    }
+
+    private func watchTitle(_ session: String, _ entry: ClaudeRegistryEntry, until: Date) {
+        guard let titles else { return }
+        titleWatches.removeValue(forKey: session)?.task.cancel()
+        let (watchFile, spacing, now, id) = (watchTranscript, spacing, now, UUID())
+        let task = Task { @MainActor [weak self] in
+            let (signals, signal) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
+            let expiry = Task { @MainActor [weak self] in
+                await spacing(.seconds(max(0, until.timeIntervalSince(now()))))
+                guard !Task.isCancelled, self?.titleWatches[session]?.id == id else { return }
+                self?.endTitleWatch(session)
+            }
+            var close: (@Sendable () -> Void)?
+            defer {
+                expiry.cancel()
+                close?()
+                if self?.titleWatches[session]?.id == id { self?.titleWatches[session] = nil }
+            }
+            guard let transcript = await Task.detached(operation: { titles.transcript(for: entry) }).value, !Task.isCancelled
+            else { return }
+            close = watchFile(transcript) { signal.yield() }
+            guard close != nil else {
+                let changed = await Task.detached(operation: { titles.reread(entry) }).value
+                if changed, !Task.isCancelled { self?.changed?() }
+                return
+            }
+            var writes = signals.makeAsyncIterator()
+            var readAt: Date?
+            var opening = true
+            repeat {
+                if let readAt, now().timeIntervalSince(readAt) < Self.titleRecheck {
+                    await spacing(.seconds(Self.titleRecheck - now().timeIntervalSince(readAt)))
+                }
+                guard !Task.isCancelled, now() < until else { return }
+                let changed = await Task.detached(operation: { titles.reread(entry) }).value
+                guard !Task.isCancelled else { return }
+                if changed { self?.changed?() }
+                readAt = opening ? nil : now()
+                opening = false
+            } while await writes.next() != nil
+        }
+        titleWatches[session] = (id, until, task)
+        while titleWatches.count > Self.titleWatchLimit, let oldest = titleWatches.min(by: { $0.value.until < $1.value.until })?.key {
+            endTitleWatch(oldest)
+        }
+    }
+
+    private func titlesScanned(_ sessions: Set<String>) {
         let at = now()
-        titleWatches = titleWatches.filter { $0.value.until > at }
-        let due = titleWatches.filter { $0.value.checked.map { at.timeIntervalSince($0) >= Self.titleRecheck } ?? true }.keys
-        for session in due { titleWatches[session]?.checked = at }
-        return Set(due)
+        for session in titleWatches.keys where !sessions.contains(session) { endTitleWatch(session) }
+        let due = awaitingScan.filter { $0.value > at }
+        awaitingScan = [:]
+        for (session, until) in due {
+            if let entry = entry(session) {
+                watchTitle(session, entry, until: until)
+            } else {
+                awaitingScan[session] = until
+            }
+        }
     }
 
     nonisolated static let partialProblem = "Some Claude Code session lists couldn\u{2019}t be read. Conversations seen earlier stay listed."
@@ -43,10 +128,14 @@ final class ClaudeDiscovery: AgentDiscovery {
         scanEach: @escaping @Sendable () -> ClaudeRegistryScanner.Scan, titles: ClaudeTranscriptTitles? = nil,
         stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning,
         isRunning: @escaping @Sendable (Int) -> Bool = ProcessStart.isRunning(pid:),
+        transcriptWatch: @escaping TranscriptWatch = TranscriptFileWatch.open,
+        titleSpacing: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) },
         now: @escaping () -> Date = Date.init
     ) {
         scanRegistry = scanEach
         self.now = now
+        watchTranscript = transcriptWatch
+        spacing = titleSpacing
         self.titles = titles
         running = stillRunning
         self.isRunning = isRunning
@@ -54,11 +143,14 @@ final class ClaudeDiscovery: AgentDiscovery {
 
     convenience init(
         scan: @escaping @Sendable () -> [ClaudeRegistryEntry]?, titles: ClaudeTranscriptTitles? = nil,
-        stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning, now: @escaping () -> Date = Date.init
+        stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning,
+        transcriptWatch: @escaping TranscriptWatch = TranscriptFileWatch.open,
+        titleSpacing: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        now: @escaping () -> Date = Date.init
     ) {
         self.init(
             scanEach: { scan().map { ClaudeRegistryScanner.Scan(entries: $0, unreadable: []) } ?? ClaudeRegistryScanner.Scan(entries: [], unreadable: [Self.unknownFolder]) },
-            titles: titles, stillRunning: stillRunning, now: now)
+            titles: titles, stillRunning: stillRunning, transcriptWatch: transcriptWatch, titleSpacing: titleSpacing, now: now)
     }
 
     convenience init(
@@ -88,7 +180,7 @@ final class ClaudeDiscovery: AgentDiscovery {
     }
 
     func scan(rereadingTitles: Bool) async -> AgentScan {
-        let (scanRegistry, titles, previous, isRunning, due) = (scanRegistry, titles, lastByFolder, isRunning, titlesDue())
+        let (scanRegistry, titles, previous, isRunning) = (scanRegistry, titles, lastByFolder, isRunning)
         let (scan, kept, watched) = await Task.detached { () -> (AgentScan, [String: [ClaudeRegistryEntry]], [String]) in
             let found = scanRegistry()
             var entries = found.entries
@@ -102,7 +194,7 @@ final class ClaudeDiscovery: AgentDiscovery {
             titles?.forget(keeping: Set(entries.map(\.sessionId)))
             let sessions = entries.map { entry in
                 var session = entry.session
-                if let recorded = titles?.titles(for: entry, rereading: rereadingTitles || due.contains(entry.sessionId)) {
+                if let recorded = titles?.titles(for: entry, rereading: rereadingTitles) {
                     session.title = AgentTitle(
                         explicitName: recorded.explicitName, generatedTitle: recorded.generatedTitle ?? session.title.generatedTitle)
                 }
@@ -115,6 +207,7 @@ final class ClaudeDiscovery: AgentDiscovery {
             return (.found(sessions, AgentScanExtras(setups: setups, problem: problem, carried: carried)), kept, found.watched)
         }.value
         lastByFolder = kept
+        if case .found(let sessions, _) = scan { titlesScanned(Set(sessions.map(\.id))) }
         watchedFolders = watched.map { URL(fileURLWithPath: $0, isDirectory: true) }
         return scan
     }
@@ -130,6 +223,8 @@ extension AgentHub {
     convenience init(
         transport: AgentTransport, scan: @escaping @Sendable () -> [ClaudeRegistryEntry]?, names: AgentNameStore? = nil,
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil, transcriptTitles: ClaudeTranscriptTitles? = nil,
+        transcriptWatch: @escaping ClaudeDiscovery.TranscriptWatch = TranscriptFileWatch.open,
+        titleSpacing: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) },
         receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), checkWait: Duration = AgentHub.defaultCheckWait,
         disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline,
         places: (any AgentPlaceReading)? = nil,
@@ -137,9 +232,24 @@ extension AgentHub {
         stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning
     ) {
         self.init(
-            transport: transport, discovery: [ClaudeDiscovery(scan: scan, titles: transcriptTitles, stillRunning: stillRunning, now: now)],
+            transport: transport, discovery: [ClaudeDiscovery(
+                scan: scan, titles: transcriptTitles, stillRunning: stillRunning, transcriptWatch: transcriptWatch,
+                titleSpacing: titleSpacing, now: now)],
             names: names, focus: focus, front: front, glance: glance, receiptTimeout: receiptTimeout, handOffLimit: handOffLimit,
             checkWait: checkWait, disconnectGrace: disconnectGrace, scanDeadline: scanDeadline, places: places, now: now, makeId: makeId)
+    }
+}
+
+enum TranscriptFileWatch {
+    static func open(_ url: URL, _ changed: @escaping @Sendable () -> Void) -> (@Sendable () -> Void)? {
+        let descriptor = Darwin.open(url.path, O_EVTONLY)
+        guard descriptor >= 0 else { return nil }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor, eventMask: [.write, .extend, .delete, .rename], queue: .global(qos: .utility))
+        source.setEventHandler { changed() }
+        source.setCancelHandler { close(descriptor) }
+        source.resume()
+        return { source.cancel() }
     }
 }
 

@@ -279,6 +279,17 @@ final class HostDiscovery: AgentDiscovery {
 
     func expect() { last = nil }
 
+    func current(_ sessions: [AgentSession]) -> [AgentSession] {
+        overlaid(sessions)
+    }
+
+    func listed(_ native: String) -> AgentSession? {
+        guard isEnabled, let last, now().timeIntervalSince(last.at) < interval(after: last.scan),
+              case .found(let sessions, _) = last.scan, let session = sessions.first(where: { $0.id == native })
+        else { return nil }
+        return overlaid([session]).first
+    }
+
     func scan(rereadingTitles: Bool) async -> AgentScan {
         guard allowed() else {
             last = nil

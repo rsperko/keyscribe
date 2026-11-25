@@ -65,6 +65,10 @@ final class ExtensionDiscovery: AgentDiscovery {
         }
     }
 
+    func listed(_ native: String) -> AgentSession? { sessions[native] }
+
+    func current(_ scanned: [AgentSession]) -> [AgentSession] { scanned.map { sessions[$0.id] ?? $0 } }
+
     func scan(rereadingTitles: Bool) async -> AgentScan {
         let (pids, isRunning, processes) = (Set(sessions.values.compactMap(\.pid)), isRunning, processes)
         let (alive, found) = await Task.detached { (pids.filter(isRunning), processes()) }.value

@@ -14,6 +14,9 @@ final class ClaudeTranscriptTitles: @unchecked Sendable {
     private let lock = NSLock()
     private var cache: [String: Cached] = [:]
     private var misses: Set<String> = []
+    private var tailReads = 0
+
+    var reads: Int { lock.withLock { tailReads } }
 
     init(configDirs: [URL]) {
         self.configDirs = configDirs
@@ -27,6 +30,17 @@ final class ClaudeTranscriptTitles: @unchecked Sendable {
         lock.withLock { read(entry, rereading: rereading) }
     }
 
+    func reread(_ entry: ClaudeRegistryEntry) -> Bool {
+        lock.withLock {
+            let before = cache[entry.sessionId]?.titles ?? .init()
+            return read(entry, rereading: true) != before
+        }
+    }
+
+    func transcript(for entry: ClaudeRegistryEntry) -> URL? {
+        lock.withLock { cache[entry.sessionId]?.url ?? lookUp(entry) }
+    }
+
     private func read(_ entry: ClaudeRegistryEntry, rereading: Bool) -> ClaudeTranscriptTitle {
         if !rereading {
             if let cached = cache[entry.sessionId] { return cached.titles }
@@ -34,6 +48,7 @@ final class ClaudeTranscriptTitles: @unchecked Sendable {
         }
         guard let url = cache[entry.sessionId]?.url ?? lookUp(entry), let modified = Self.modified(url) else { return .init() }
         if let cached = cache[entry.sessionId], cached.url == url, cached.modified == modified { return cached.titles }
+        tailReads += 1
         let titles = Self.readTail(url).map { ClaudeTranscriptTitle.parse(in: $0.data, startsMidLine: $0.cut) } ?? .init()
         cache[entry.sessionId] = Cached(url: url, modified: modified, titles: titles)
         return titles

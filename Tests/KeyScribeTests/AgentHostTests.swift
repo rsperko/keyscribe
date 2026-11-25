@@ -540,6 +540,57 @@ struct AgentHostTests {
         return hub
     }
 
+    private func readyHost(_ host: FakeHost, _ transport: FakeTransport, claude: FakeDiscovery, clock: AgentHubTests.Clock) async -> AgentHub {
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host, transport: transport, claude: claude, now: { clock.now })
+        await hub.rescan()
+        var hello = Self.hello(Self.id("t1"), features: ["readiness", "notify"])
+        hello.agent = "example"
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(hello))
+        await hub.scansSettled()
+        return hub
+    }
+
+    private func state(_ hub: AgentHub) -> AgentLiveState? {
+        hub.directory.conversations.first { $0.id == Self.id("t1") }?.state
+    }
+
+    @Test func aHostedTurnTakesAFreshListingFromMemoryAndAStaleOneRescansOnlyItsHost() async {
+        let (host, transport, claude, clock) = (FakeHost(), FakeTransport(), FakeDiscovery(kind: .claude), AgentHubTests.Clock())
+        let hub = await readyHost(host, transport, claude: claude, clock: clock)
+        let (hostScans, claudeScans) = (host.scans, claude.scans)
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "u1"))
+        await hub.scansSettled()
+        #expect(host.scans == hostScans)
+        #expect(claude.scans == claudeScans)
+        #expect(state(hub) == .working)
+
+        clock.now += HostDiscovery.idleInterval
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Done."))
+        await hub.scansSettled()
+        #expect(host.scans == hostScans + 1)
+        #expect(claude.scans == claudeScans)
+        #expect(state(hub) == .idle)
+    }
+
+    @Test func aHostListingHeldAcrossATurnEndNeverPutsBackTheEarlierState() async {
+        let (host, transport, claude, clock) = (FakeHost(), FakeTransport(), FakeDiscovery(kind: .claude), AgentHubTests.Clock())
+        let hub = await readyHost(host, transport, claude: claude, clock: clock)
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "u1"))
+        await hub.scansSettled()
+        clock.now += HostDiscovery.idleInterval
+        host.scanGate.closed = true
+        let round = Task { @MainActor in await hub.rescan(rereadingTitles: false) }
+        for _ in 0..<2000 where host.scanGate.waiting == 0 { await Task.yield() }
+        clock.now += 1
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Done."))
+        host.scanGate.open()
+        await round.value
+        await hub.scansSettled()
+        #expect(state(hub) == .idle)
+    }
+
     private func submitted(_ transport: FakeTransport) async -> (id: String, text: String)? {
         for _ in 0..<400 {
             for (command, session) in transport.sent where session == Self.id("t1") {
@@ -1283,6 +1334,7 @@ struct AgentHostTests {
             switch event {
             case .listed:
                 host.conversations = [Self.thread("t1")]
+                host.watcher?(.listing)
                 await hub.rescan()
             case .pluginHello:
                 let hello = Self.pluginHello(Self.id("t1"), features: ["promptDigest", "merge"])
@@ -1390,6 +1442,7 @@ struct AgentHostTests {
         transport.liveInstances.insert(Self.pluginInstance)
         hub.handle(.hello(plugin))
         host.conversations = [Self.thread("t1")]
+        host.watcher?(.listing)
         await hub.rescan()
         #expect(hub.filing(for: Self.hello("claude:s1")) == nil)
         transport.liveInstances.remove(Self.pluginInstance)
@@ -3476,11 +3529,11 @@ struct AgentHostTests {
     @Test func anAgentPlacedInAConversationItsHostDoesNotListYetHasTheHostAskedAtOnceButOnlyOnce() async throws {
         let host = FakeHost()
         let claude = FakeDiscovery(kind: .claude)
-        claude.result = .found([Self.claudeSession()])
         let hub = makeHub(host, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1"]])
         await hub.rescan()
+        claude.result = .found([Self.claudeSession()])
         host.conversations = [Self.thread("t1")]
-        for _ in 0..<50 where hub.directory.conversations.map(\.id) != [Self.id("t1")] { try await Task.sleep(for: .milliseconds(10)) }
+        await hub.rescan()
         #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
         let scans = host.scans
         #expect(hub.filing(for: Self.hello("claude:s1")) == Self.id("t1"))

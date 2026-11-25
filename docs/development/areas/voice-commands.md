@@ -137,15 +137,25 @@ every rule above applies to it, with these sharpenings:
   agent's runtime offers one;
   a tick or a poll does work only for sessions with a command waiting (`AgentCommandQueue.waitingSessions`), and the
   hub reads every conversation's liveness in one call (`AgentTransport.liveness`). The
-  hub rescans every second only while Settings is open. Otherwise nothing wakes on a period: it rescans on a change in a
-  watched session folder (`AgentDiscovery.watchedFolders`), on a connector's hello, turn start and turn end, when a
-  process a listed or name-remembered conversation runs in exits (`ProcessExitWatcher`), at a press, and once a
+  hub rescans every second only while Settings is open. Otherwise nothing wakes on a period, and a rescan asks only the
+  sources the event could have changed (`AgentHub.rescan(agents:)`): a change in a watched session folder asks the
+  sources that watch one (`AgentDiscovery.watchedFolders`), a connector's hello or title asks the source of that
+  conversation and of the agent filed under it, and a process exit asks the sources whose conversations have processes
+  (`ProcessExitWatcher`). A turn start, turn end or prompt in one conversation takes that conversation from its source's
+  memory (`AgentDiscovery.listed`) and rescans nothing; a source that cannot answer from memory is rescanned alone:
+  Claude Code, whose state is its session registry, and a host whose cached listing is older than its interval, so a
+  host's titles still refresh on turn events as they did. A scan's results are reconciled with their source's memory in
+  one pass when committed (`AgentDiscovery.current`), so a scan that started before an event never puts back the state
+  the event replaced.
+  Requests for a rescan merge into one pending request that each round takes whole (`AgentHub.requestScan`), so a
+  request made while a round is starting or running is never dropped, and a press waits only for a round that asked
+  every source. The hub also rescans at a press, and once a
   connector that hung up still does not read live an active window after its own hang-up (`AgentBridgeServer.onHangUp`;
   each hang-up keeps its own deadline, so a connector that replaced its poll, as Ultimate does when its members
   change, is never reported, and one that hangs up just before another's check is still checked at its own), which also drops the cached listing of a host whose connector it was (`AgentHub.hungUp`), since
   a host's conversations have no process of their own to watch;
-  and when a discovery asks for another look by a deadline
-  (`AgentDiscovery.nextLook`, such as a title Claude Code may still write after a turn ends; `AgentRuntime.pace`). A
+  and when a discovery reports that what it lists changed (`AgentDiscovery.follow`, such as a title Claude Code wrote
+  after a turn ended). A
   candidate that no connector announces is therefore found at the next press or while Settings is open. A
   connected conversation is no reason to scan quickly: its connector reports its turns, and a rescan every second
   while one was connected cost 12 to 15% CPU on a Mac running about 980 processes (2026-11-20); a rescan every 10
@@ -729,10 +739,17 @@ every rule above applies to it, with these sharpenings:
   message with the same words queued earlier, or a fill left unsent and replaced, is never reported as the dictation. It
   reports no title, since Claude Code gives one only to classic hooks: a name the user sets reaches the hub through
   Claude Code's session registry, which it watches, and a generated title through the transcript. `ClaudeDiscovery`
-  alone keeps which conversations to look at: each turn end watches that conversation for `ClaudeDiscovery.titleWatch`,
-  and each scan takes a snapshot of the watches due (at most every `ClaudeDiscovery.titleRecheck`) and reads only those
-  transcripts that changed, so a title written just after the end still arrives, no scan can drop a watch another
-  turn end added, and the title cache's lock is never taken on the main actor. `classic.Elicitation` is the one classic hook left: Claude Code reports an MCP server's request
+  alone keeps which conversations to look at: each turn end gives that conversation one watch task for
+  `ClaudeDiscovery.titleWatch` (at most `ClaudeDiscovery.titleWatchLimit` at once). The task opens a watch on the
+  transcript file, then reads the title once, and reads it again on each write, taking only the newest write and
+  leaving at least `ClaudeDiscovery.titleRecheck` between those reads, so a burst of writes costs one read after it.
+  It asks for a rescan of Claude Code alone only when a read changed the cached title (`ClaudeTranscriptTitles.reread`),
+  and that rescan reads the cache the watch refreshed, so a scan that started before the read can never bring back the
+  older title. The task ends at its deadline, when its conversation leaves the list or is retired, when the hub stops,
+  and at once when the transcript cannot be found, or after one read when it cannot be watched (Claude Code writes it
+  before a turn can end; the next turn end tries again); ending it closes the watch and frees its place. A turn end that arrives before the conversation's
+  first scan starts its watch at that scan. Nothing runs on a period, and the title
+  cache's lock is never taken on the main actor. `classic.Elicitation` is the one classic hook left: Claude Code reports an MCP server's request
   for input nowhere else, it runs only when one asks, and it only holds a prompt-box Return during the moment the dialog
   may not be drawn yet, which the box's own readiness check covers once it is. `managed-plugin.test.ts` loads a
   `prepend` plugin that passes those events by.
