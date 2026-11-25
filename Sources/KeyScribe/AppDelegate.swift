@@ -893,6 +893,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 settingsController.agents.onShow = { [weak hub = runtime.hub] id in Task { _ = await hub?.open(id) } }
                 settingsController.agents.onCancelReadAloud = { [weak hub = runtime.hub] in hub?.cancelReadAloud($0) }
                 settingsController.agents.onCheckAgain = { [weak hub = runtime.hub] in Task { await hub?.rescan(rereadingTitles: true, wantingHosts: true) } }
+                settingsController.agents.roster = { [weak self, weak hub = runtime.hub] in
+                    guard let hub else { return AgentsSettingsModel.Roster() }
+                    return AgentsSettingsModel.Roster(
+                        conversations: hub.directory.conversations, candidates: hub.candidates, disconnected: hub.disconnected,
+                        olderConnectors: hub.olderConnectors, lastSeen: hub.lastSeen,
+                        readAloud: hub.readAloud.union(self?.spokenResult?.pendingRequested ?? []), readNextAloud: hub.readNextAloud,
+                        prompts: hub.openPrompts)
+                }
                 showAgents(runtime.hub)
                 let spoken = SpokenResultOutput(
                     client: llmClient, permits: AIServiceCatalog.permits, speech: spokenVoice.makeSpeech(attempts: spokenAttempts),
@@ -992,18 +1000,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController.agents.onShow = nil
             settingsController.agents.onCancelReadAloud = nil
             settingsController.agents.onCheckAgain = nil
+            settingsController.agents.roster = nil
             settingsController.agents.show([])
         }
     }
 
     private func showAgents(_ hub: AgentHub) {
         let hadError = settingsController.agents.hasError
-        settingsController.agents.show(
-            hub.directory.conversations, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved,
-            discoveryProblems: hub.discoveryProblems, discoveredSetups: hub.discoveredSetupsByAgent, candidates: hub.candidates,
-            disconnected: hub.disconnected, exclusionsNotSaved: hub.exclusionsNotSaved, olderConnectors: hub.olderConnectors,
-            lastSeen: hub.lastSeen, readAloud: hub.readAloud.union(spokenResult?.pendingRequested ?? []), readNextAloud: hub.readNextAloud,
-            prompts: hub.openPrompts)
+        settingsController.agents.changed(AgentsSettingsModel.Status(
+            namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved, discoveryProblems: hub.discoveryProblems,
+            discoveredSetups: hub.discoveredSetupsByAgent, exclusionsNotSaved: hub.exclusionsNotSaved))
         if hadError != settingsController.agents.hasError { settingsController.refreshProblems() }
     }
 

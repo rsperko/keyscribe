@@ -190,6 +190,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
                 agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, surfaces: ConnectorSurfaces(surfaces)),
             hosts: agentIntegrations.hosts.map(\.kind))
         modes.agents = agents
+        agents.listing = false
         agents.load(spokenResult: settings.agents.spokenResult)
         agents.onSpokenResultChange = { [model] in model.setSpokenResult($0) }
         agents.load(hosts: settings.agents.hosts)
@@ -338,6 +339,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         }
         refreshProblems()
         startProblemPoll()
+        agents.listing = true
         onOpenChange?(true)
         if let destination { navigation.destination = destination }
         if let window {
@@ -373,6 +375,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         problemPollTask?.cancel()
         problemPollTask = nil
+        agents.listing = false
         onOpenChange?(false)
         // "Navigated away" equals "closed" for retained transcript state — a memory/privacy invariant.
         handleHistoryPaneChange(active: false)

@@ -137,7 +137,12 @@ every rule above applies to it, with these sharpenings:
   agent's runtime offers one;
   a tick or a poll does work only for sessions with a command waiting (`AgentCommandQueue.waitingSessions`), and the
   hub reads every conversation's liveness in one call (`AgentTransport.liveness`). The
-  hub rescans every second only while Settings is open. Otherwise nothing wakes on a period, and a rescan asks only the
+  hub rescans every second only while Settings is open, and the Settings conversation list is built only then
+  (`AgentsSettingsModel.listing`): while Settings is closed a roster change updates only the problems, the badges and
+  the setups found (`AgentsSettingsModel.changed`), and the roster is read whole, at one moment, only to build the list
+  (`AgentsSettingsModel.roster`), so opening Settings lists the latest one. Terminals are described only for a list being
+  built, so on opening the rows appear first and their terminal names follow; that is the accepted cost of a closed
+  Settings doing no work. Otherwise nothing wakes on a period, and a rescan asks only the
   sources the event could have changed (`AgentHub.rescan(agents:)`): a change in a watched session folder asks the
   sources that watch one (`AgentDiscovery.watchedFolders`), a connector's hello or title asks the source of that
   conversation and of the agent filed under it, and a process exit asks the sources whose conversations have processes

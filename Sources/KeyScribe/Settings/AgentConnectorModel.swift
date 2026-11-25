@@ -441,6 +441,12 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
         if changed { rebuild() } else { applyUses() }
     }
 
+    func show(discovered folders: [String]) {
+        guard folders != discovered else { return }
+        discovered = folders
+        rebuild()
+    }
+
     @discardableResult
     func choose(folder: URL) -> ConnectorSetupModel? {
         let path = ConnectorFolders.canonical(folder).path

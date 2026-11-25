@@ -678,6 +678,68 @@ struct AgentsSettingsModelTests {
         #expect(model.connectors[0].discoveryProblem == nil)
     }
 
+    @Test func whileSettingsIsClosedEventsReadNoRosterAndOpeningListsTheLatestOne() {
+        let terminals = Terminals()
+        let (model, _, dir) = makeModel(terminals: terminals)
+        var current = AgentsSettingsModel.Roster()
+        var reads = 0
+        model.listing = false
+        model.roster = {
+            reads += 1
+            return current
+        }
+        for event in 0..<100 {
+            var backend = conversation("backend", pid: 1, setup: defaultFolder(dir))
+            backend.state = event.isMultiple(of: 2) ? .working : .idle
+            current = AgentsSettingsModel.Roster(conversations: [backend, conversation("docs\(event)", pid: 2 + event)], readAloud: ["backend"])
+            model.changed(AgentsSettingsModel.Status())
+        }
+        #expect(reads == 0)
+        #expect(model.rows.isEmpty)
+        #expect(terminals.asked.isEmpty)
+        #expect(model.connectors[0].setups[0].usedBy.isEmpty)
+        model.listing = true
+        #expect(reads == 1)
+        #expect(model.rows.map(\.id) == ["backend", "docs99"])
+        #expect(model.rows.map(\.state) == ["Ready", "Ready"])
+        #expect(model.rows.first?.readAloud == .thisReply)
+        #expect(model.connectors[0].setups[0].usedBy == ["backend"])
+        model.changed(AgentsSettingsModel.Status())
+        #expect(reads == 2)
+        model.listing = false
+        current = AgentsSettingsModel.Roster(conversations: [conversation("web", pid: 500)])
+        model.changed(AgentsSettingsModel.Status())
+        #expect(model.rows.map(\.id) == ["backend", "docs99"])
+        model.listing = true
+        #expect(model.rows.map(\.id) == ["web"])
+        #expect(reads == 3)
+    }
+
+    @Test func whileSettingsIsClosedProblemsAndDiscoveredSetupsStayCurrent() {
+        let (model, _, dir) = makeModel()
+        model.listing = false
+        model.changed(AgentsSettingsModel.Status(namesProblem: "unreadable", discoveryProblems: ["claude": "denied"]))
+        #expect(model.hasError)
+        #expect(model.connectors[0].discoveryProblem == "denied")
+        model.changed(AgentsSettingsModel.Status(discoveredSetups: ["claude": ["/work/.claude"]], exclusionsNotSaved: "read only"))
+        #expect(model.hasError)
+        #expect(model.connectors[0].setups.map(\.folder.path) == [defaultFolder(dir), "/work/.claude"])
+        model.changed(AgentsSettingsModel.Status())
+        #expect(!model.hasError)
+    }
+
+    @Test func aLateTerminalDescriptionKeepsThePromptsLabel() async {
+        let terminals = Terminals()
+        terminals.byPid = [1: "Ghostty"]
+        let (model, _, _) = makeModel(terminals: terminals)
+        var dialog = conversation("backend", pid: 1)
+        dialog.state = .userDialog
+        model.show([dialog], prompts: ["backend": AgentPrompt(kind: "confirm")])
+        await until { model.rows.first?.terminal == "Ghostty" }
+        #expect(model.rows.first?.terminal == "Ghostty")
+        #expect(model.rows.first?.state == "Waiting for approval")
+    }
+
     private func conversation(_ id: String, pid: Int, title: String? = nil, setup: String? = nil) -> AgentConversation {
         AgentConversation(id: id, agent: "claude", pid: pid, cwd: "/src/\(id)", handle: id, state: .idle, connectorLive: true, title: title, setup: setup)
     }

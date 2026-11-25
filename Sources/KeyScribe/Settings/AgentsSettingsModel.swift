@@ -164,17 +164,29 @@ final class AgentsSettingsModel: ObservableObject {
     private let describeTerminal: @Sendable (Int) -> String?
     private var terminals: [Int: String?] = [:]
     @Published private var discoveryProblems: [String: String] = [:]
-    private var shown: [AgentConversation]?
-    private struct Extras {
-        var setups: [String: [String]]
-        var candidates: [AgentCandidate]
-        var disconnected: [AgentConversation]
-        var olderConnectors: Set<String>
-        var lastSeen: Set<String>
-        var readAloud: Set<String>
-        var readNextAloud: Set<String>
+    struct Roster {
+        var conversations: [AgentConversation] = []
+        var candidates: [AgentCandidate] = []
+        var disconnected: [AgentConversation] = []
+        var olderConnectors: Set<String> = []
+        var lastSeen: Set<String> = []
+        var readAloud: Set<String> = []
+        var readNextAloud: Set<String> = []
+        var prompts: [String: AgentPrompt] = [:]
     }
-    private var shownExtras: Extras?
+    struct Status {
+        var namesProblem: String?
+        var namesNotSaved: String?
+        var discoveryProblems: [String: String]?
+        var discoveredSetups: [String: [String]] = [:]
+        var exclusionsNotSaved: String?
+    }
+    var roster: (() -> Roster)?
+    var listing = true {
+        didSet { if listing, !oldValue, let roster { list(roster()) } }
+    }
+    private var discoveredSetups: [String: [String]] = [:]
+    private var listed: Roster?
     let agentsDir: URL
     let setups: ConnectorSetupRegistry
     let hosts: [AgentKind]
@@ -227,18 +239,37 @@ final class AgentsSettingsModel: ObservableObject {
         disconnected: [AgentConversation] = [], exclusionsNotSaved: String? = nil, olderConnectors: Set<String> = [],
         lastSeen: Set<String> = [], readAloud: Set<String> = [], readNextAloud: Set<String> = [], prompts: [String: AgentPrompt] = [:]
     ) {
-        if exclusionsNotSaved != self.exclusionsNotSaved { self.exclusionsNotSaved = exclusionsNotSaved }
-        shownExtras = Extras(
-            setups: discoveredSetups, candidates: candidates, disconnected: disconnected, olderConnectors: olderConnectors, lastSeen: lastSeen,
-            readAloud: readAloud, readNextAloud: readNextAloud)
+        apply(Status(
+            namesProblem: namesProblem, namesNotSaved: namesNotSaved, discoveryProblems: discoveryProblems,
+            discoveredSetups: discoveredSetups, exclusionsNotSaved: exclusionsNotSaved))
+        list(Roster(
+            conversations: conversations, candidates: candidates, disconnected: disconnected, olderConnectors: olderConnectors,
+            lastSeen: lastSeen, readAloud: readAloud, readNextAloud: readNextAloud, prompts: prompts))
+    }
+
+    func changed(_ status: Status) {
+        apply(status)
+        if listing, let roster { return list(roster()) }
+        for connector in connectors { connector.show(discovered: discoveredSetups[connector.kind.id] ?? []) }
+    }
+
+    private func apply(_ status: Status) {
+        if status.exclusionsNotSaved != exclusionsNotSaved { exclusionsNotSaved = status.exclusionsNotSaved }
         if setupsProblem != setups.problem { setupsProblem = setups.problem }
-        if namesProblem != self.namesProblem { self.namesProblem = namesProblem }
-        if let discoveryProblems, discoveryProblems != self.discoveryProblems { self.discoveryProblems = discoveryProblems }
-        for connector in connectors where connector.discoveryProblem != self.discoveryProblems[connector.kind.id] {
-            connector.discoveryProblem = self.discoveryProblems[connector.kind.id]
+        if status.namesProblem != namesProblem { namesProblem = status.namesProblem }
+        if let problems = status.discoveryProblems, problems != discoveryProblems { discoveryProblems = problems }
+        for connector in connectors where connector.discoveryProblem != discoveryProblems[connector.kind.id] {
+            connector.discoveryProblem = discoveryProblems[connector.kind.id]
         }
-        if namesNotSaved != self.namesNotSaved { self.namesNotSaved = namesNotSaved }
-        shown = conversations
+        if status.namesNotSaved != namesNotSaved { namesNotSaved = status.namesNotSaved }
+        discoveredSetups = status.discoveredSetups
+    }
+
+    private func list(_ roster: Roster) {
+        listed = roster
+        let conversations = roster.conversations, candidates = roster.candidates, disconnected = roster.disconnected
+        let lastSeen = roster.lastSeen, olderConnectors = roster.olderConnectors, prompts = roster.prompts
+        let readAloud = roster.readAloud, readNextAloud = roster.readNextAloud
         describeNewTerminals(conversations.compactMap(\.pid) + candidates.map(\.pid) + disconnected.compactMap(\.pid))
         var next = conversations.map { conversation in
             let lastSeen = lastSeen.contains(conversation.id) && (!conversation.reachable || conversation.host != nil)
@@ -263,7 +294,7 @@ final class AgentsSettingsModel: ObservableObject {
                 startedAt: candidate.startedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) })
         }
         if next != rows { rows = next }
-        let away = namesProblem != nil ? [] : disconnected.map { conversation in
+        let away = self.namesProblem != nil ? [] : disconnected.map { conversation in
             Row(
                 id: conversation.id, name: conversation.handle, folder: conversation.cwd, state: "Disconnected", connected: false,
                 agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil }, title: conversation.title,
@@ -293,8 +324,9 @@ final class AgentsSettingsModel: ObservableObject {
     }
 
     private func describeNewTerminals(_ pids: [Int]) {
-        terminals = terminals.filter { pids.contains($0.key) }
-        let missing = pids.filter { terminals[$0] == nil }
+        let present = Set(pids)
+        terminals = terminals.filter { present.contains($0.key) }
+        let missing = present.filter { terminals[$0] == nil }
         guard !missing.isEmpty else { return }
         for pid in missing { terminals[pid] = .some(nil) }
         let describe = describeTerminal
@@ -302,13 +334,7 @@ final class AgentsSettingsModel: ObservableObject {
             let found = await Task.detached { missing.map { ($0, describe($0)) } }.value
             guard let self else { return }
             for (pid, terminal) in found { self.terminals[pid] = .some(terminal) }
-            if let shown = self.shown, let extras = self.shownExtras {
-                self.show(
-                    shown, namesProblem: self.namesProblem, namesNotSaved: self.namesNotSaved,
-                    discoveredSetups: extras.setups, candidates: extras.candidates, disconnected: extras.disconnected,
-                    exclusionsNotSaved: self.exclusionsNotSaved, olderConnectors: extras.olderConnectors, lastSeen: extras.lastSeen,
-                    readAloud: extras.readAloud, readNextAloud: extras.readNextAloud)
-            }
+            if self.listing, let listed = self.listed { self.list(listed) }
         }
     }
 
