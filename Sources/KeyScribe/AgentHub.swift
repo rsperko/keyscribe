@@ -6,10 +6,16 @@ protocol AgentTransport: AnyObject {
     func enqueue(_ command: AgentCommand, for session: String, instance: String?)
     func isLive(session: String) -> Bool
     func isLive(instance: String) -> Bool
+    func liveness(sessions: Set<String>, instances: Set<String>) -> AgentLiveness
     func withdraw(_ id: String) -> Bool
     func forget(session: String)
     func rehello(session: String)
     func silence(agents: Set<String>)
+}
+
+struct AgentLiveness: Equatable {
+    var sessions: Set<String>
+    var instances: Set<String>
 }
 
 extension AgentBridgeServer: AgentTransport {}
@@ -127,6 +133,12 @@ final class AgentHub {
     private(set) var discoveryProblems: [String: String] = [:]
     private var shownProblems: [String: String] = [:]
     private var lastScan: [String: [AgentSession]] = [:]
+    private var scannedIds: [String: Set<String>] = [:]
+
+    private func scanned(_ agent: String, _ sessions: [AgentSession]) {
+        lastScan[agent] = sessions
+        scannedIds[agent] = Set(sessions.map { AgentSessionID.make(agent: $0.agent, native: $0.id) })
+    }
     private var lastExtras: [String: AgentScanExtras] = [:]
     private var staleAgents: Set<String> = []
     private var shownExtras: [String: AgentScanExtras] = [:]
@@ -287,7 +299,7 @@ final class AgentHub {
                       listed.contains(where: { $0.id == location.conversationKey })
                 else { return }
                 source.note(state, at: location)
-                self.lastScan[agent] = source.overlaid(listed)
+                self.scanned(agent, source.overlaid(listed))
                 self.refresh()
             }
         }
@@ -547,7 +559,7 @@ final class AgentHub {
         let carrier = AgentSessionID.make(
             agent: source.kind.id,
             native: AgentHostLocation(host: source.kind.id, instance: copy.instance, native: Self.newConversationNative).conversationKey)
-        let heard = transport.isLive(session: carrier) || directory.conversations.contains {
+        let heard = liveSession(carrier) || directory.conversations.contains {
             $0.connectorLive && $0.host?.host == source.kind.id && $0.host?.instance == copy.instance
         }
         guard heard else { return .notConnected(copy.name) }
@@ -556,11 +568,11 @@ final class AgentHub {
             return .windowUnknown(copy.name)
         }
         let slot = Self.slot(source.kind.id, copy.instance)
-        if let thread = shownByHost[slot], transport.isLive(session: thread),
+        if let thread = shownByHost[slot], liveSession(thread),
            focus.conversation.map({ AgentSessionID.make(agent: source.kind.id, native: $0.conversationKey) == thread }) ?? !focus.resolvesConversation {
             return (directory.conversations + disconnected).contains { $0.id == thread } ? nil : .notListed(copy.name)
         }
-        if focus.allowsNewConversation, let page = newConversationShown[slot], transport.isLive(session: page) {
+        if focus.allowsNewConversation, let page = newConversationShown[slot], liveSession(page) {
             return features(of: page).contains("start") ? nil : .cannotStart(copy.name)
         }
         return focus.pageSilent ? .pageSilent(copy.name) : .nothingShown(copy.name)
@@ -652,7 +664,7 @@ final class AgentHub {
 
     private func startCarrier(_ source: HostDiscovery, instance: String?) -> String? {
         guard source.isEnabled, let carrier = shown(in: newConversationShown, host: source.kind.id, instance: instance),
-              transport.isLive(session: carrier),
+              liveSession(carrier),
               features(of: carrier).contains("start"), !exclusions.excludes(carrier)
         else { return nil }
         return carrier
@@ -746,13 +758,13 @@ final class AgentHub {
         if let focus, focus.resolvesConversation {
             guard let location = focus.conversation, let app = focus.app else { return nil }
             let reported = shown(in: shownByHost, by: source, instance: app.instance)
-                .flatMap { id in transport.isLive(session: id) ? mine.first { $0.id == id }?.host : nil }
+                .flatMap { id in liveSession(id) ? mine.first { $0.id == id }?.host : nil }
             guard reported == location, locations.contains(location), let shown = mine.first(where: { $0.host == location }) else { return nil }
             return FrontSession(id: shown.id, app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name, window: app.window))
         }
         let app = focus?.app
         let reported = shown(in: shownByHost, by: source, instance: app?.instance)
-            .flatMap { id in transport.isLive(session: id) ? mine.first { $0.id == id }?.host : nil }
+            .flatMap { id in liveSession(id) ? mine.first { $0.id == id }?.host : nil }
         guard case .shown(let location, let app) = await within(
             hostDeadline, otherwise: AgentHostFront.unknown, { await source.host.front(among: locations, reported: reported, in: app) }),
               let shown = mine.first(where: { $0.host == location })
@@ -769,7 +781,7 @@ final class AgentHub {
     static let focusTimeout: Duration = .seconds(3)
 
     func focusInPlace(_ session: String, definition: String, within timeout: Duration = focusTimeout) async -> TerminalSelection {
-        guard transport.isLive(session: session), holder(of: session) != nil else { return .notFound }
+        guard liveSession(session), holder(of: session) != nil else { return .notFound }
         let features = features(of: session)
         guard features.contains("focus"), features.contains("focusDefinitions") else {
             return directory.conversations.first(where: { $0.id == session }).map(runsOlderConnector) == true ? .outdated : .unsupported
@@ -969,6 +981,7 @@ final class AgentHub {
         switch loaded {
         case .names(let names, let remembered, let excluded):
             directory = AgentDirectory(chosen: names, remembered: remembered)
+            built = nil
             savedRemembered = remembered
             namesProblem = nil
             exclusions.adopt(excluded)
@@ -983,19 +996,28 @@ final class AgentHub {
     private let disconnectGrace: Duration
     private let scanDeadline: Duration
 
+    func hungUp(agents: Set<String>) async {
+        for source in hosts where agents.contains(source.kind.id) { source.expect() }
+        await rescan(rereadingTitles: false)
+    }
+
     func refreshHostsForPress() async {
-        guard hosts.contains(where: \.isEnabled) else { return }
-        await rescan(rereadingTitles: false, wantingHosts: true)
+        await rescan(rereadingTitles: false, wantingHosts: hosts.contains(where: \.isEnabled))
     }
 
     struct HostRefresh { fileprivate let after: Int }
 
     func startHostRefreshForPress() -> HostRefresh? {
-        guard hosts.contains(where: \.isEnabled) else { return nil }
-        let refresh = HostRefresh(after: hostScanRounds.started)
+        let refresh = hosts.contains(where: \.isEnabled) ? HostRefresh(after: hostScanRounds.started) : nil
         Task { await refreshHostsForPress() }
         return refresh
     }
+
+    var nextLook: Date? { discoveries.compactMap(\.nextLook).min() }
+    var drainEvents: @MainActor () -> Void = {}
+    var onScanned: (() -> Void)?
+    var onProcesses: ((Set<Int>) -> Void)?
+    private var processesShown: Set<Int> = []
 
     func hostsRefreshed(_ refresh: HostRefresh?) -> Bool {
         refresh.map { hostScanRounds.finished > $0.after } ?? true
@@ -1056,7 +1078,7 @@ final class AgentHub {
         for (agent, result) in results {
             switch result {
             case .found(let scanned, let extras):
-                lastScan[agent] = scanned
+                self.scanned(agent, scanned)
                 lastExtras[agent] = extras
                 discoveryProblems[agent] = extras.problem
                 staleAgents.remove(agent)
@@ -1065,9 +1087,12 @@ final class AgentHub {
                 staleAgents.insert(agent)
             }
         }
-        settleFiling()
-        refresh(scannedAt: scannedAt)
+        withLiveness {
+            settleFiling()
+            refresh(scannedAt: scannedAt)
+        }
         applyCarriedNames()
+        onScanned?()
     }
 
     private func begin(agent: String, _ scan: @escaping @MainActor () async -> AgentScan) {
@@ -1084,6 +1109,9 @@ final class AgentHub {
 
     func stop() {
         stopped = true
+        endCues { _ in true }
+        onStillWorking = nil
+        onStillWorkingEnded = nil
         for id in Array(hostReportWaiters.keys) { resumeHostReportWaiter(id, false) }
         for source in hosts { source.host.unwatch() }
         scanTask?.cancel()
@@ -1128,7 +1156,48 @@ final class AgentHub {
         }
     }
 
-    func refresh(nameReportedFor: String? = nil, scannedAt: [String: Date] = [:]) {
+    private struct RosterInputs: Equatable {
+        var entries: [AgentSession]
+        var live: Set<String>
+        var titles: [String: String]
+        var nativeNames: [String: String?]
+        var excluded: Set<String>
+        var places: [String: AgentPlace]
+        var unplaced: Set<String>
+        var unreadSince: [String: Date]
+        var rememberedRunning: Set<String>
+    }
+
+    private var built: (inputs: RosterInputs, revision: Int)?
+    private(set) var rosterRebuilds = 0
+
+    private var liveness: (asked: AgentLiveness, live: AgentLiveness)?
+
+    private func liveSession(_ session: String) -> Bool {
+        guard let liveness, liveness.asked.sessions.contains(session) else { return transport.isLive(session: session) }
+        return liveness.live.sessions.contains(session)
+    }
+
+    private func liveInstance(_ instance: String) -> Bool {
+        guard let liveness, liveness.asked.instances.contains(instance) else { return transport.isLive(instance: instance) }
+        return liveness.live.instances.contains(instance)
+    }
+
+    private func withLiveness(_ body: () -> Void) {
+        guard liveness == nil else { return body() }
+        let asked = AgentLiveness(
+            sessions: Set(scannedIds.values.joined()).union(connectorStateSessions).union(filed.keys),
+            instances: Set(sessionInstances.values.joined()))
+        liveness = (asked, transport.liveness(sessions: asked.sessions, instances: asked.instances))
+        defer { liveness = nil }
+        body()
+    }
+
+    func refresh(namesReportedFor: Set<String> = [], scannedAt: [String: Date] = [:]) {
+        withLiveness { rebuild(namesReportedFor: namesReportedFor, scannedAt: scannedAt) }
+    }
+
+    private func rebuild(namesReportedFor: Set<String>, scannedAt: [String: Date]) {
         let before = directory.revision
         let problemsBefore = shownProblems
         var entries: [AgentSession] = []
@@ -1152,7 +1221,7 @@ final class AgentHub {
             }
             for entry in found {
                 let id = AgentSessionID.make(agent: entry.agent, native: entry.id)
-                if nameReportedFor != id, let previous = registryNames[id], previous != entry.explicitName,
+                if !namesReportedFor.contains(id), let previous = registryNames[id], previous != entry.explicitName,
                    (connectorNamesAt[id] ?? .distantPast) <= (scannedAt[entry.agent] ?? .distantFuture) {
                     connectorNames[id] = nil
                 }
@@ -1169,22 +1238,33 @@ final class AgentHub {
             entries += found
         }
         let excluded = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter(exclusions.excludes))
-        let live = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter { !excluded.contains($0) && transport.isLive(session: $0) })
+        let entryIds = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) })
+        let live = entryIds.subtracting(excluded).filter(liveSession)
         let hostListed = lastExtras.values.reduce(into: Set<String>()) { $0.formUnion($1.listed) }
-        directory.update(
-            entries: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning, excluded: excluded,
-            places: effectivePlaces,
+        let verdicts = directory.remembered.filter { !entryIds.contains($0.key) }.mapValues { (saved: $0, running: stillRunning($0)) }
+        let inputs = RosterInputs(
+            entries: entries, live: live, titles: shown, nativeNames: nativeNames, excluded: excluded, places: effectivePlaces,
             unplaced: placeTracker.map { tracker in
                 tracker.unchecked(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) })
                     .subtracting(tracker.places.keys).subtracting(hostListed)
-            } ?? [], unreadSince: placeTracker?.failingSince ?? [:])
+            } ?? [], unreadSince: placeTracker?.failingSince ?? [:],
+            rememberedRunning: Set(verdicts.filter(\.value.running).keys))
+        if built?.inputs != inputs || built?.revision != directory.revision {
+            rosterRebuilds += 1
+            let running = Dictionary(verdicts.values.map { ($0.saved, $0.running) }, uniquingKeysWith: { first, _ in first })
+            directory.update(
+                entries: inputs.entries, live: inputs.live, titles: inputs.titles, nativeNames: inputs.nativeNames,
+                running: { [weak self] saved in running[saved] ?? self?.stillRunning(saved) ?? false },
+                excluded: inputs.excluded, places: inputs.places, unplaced: inputs.unplaced, unreadSince: inputs.unreadSince)
+            built = (inputs, directory.revision)
+        }
         let reported = namesNotSaved
         rememberNames()
         lastUsed = lastUsed.filter { handle(of: $0.key) != nil }
         let listed = Set((directory.conversations + directory.disconnected).map(\.id))
         pruneHostFollows(listed: listed)
         placeTracker?.notice(Set(placeQueries.map(\.id)))
-        let ended = connectorStateSessions.filter { !listed.contains($0) && !transport.isLive(session: $0) }
+        let ended = connectorStateSessions.filter { !listed.contains($0) && !liveSession($0) }
         forgetConnectorState(keepingEnvironments: { !ended.contains($0) }) { !ended.contains($0) && !exclusions.excludes($0) }
         installations = installations.filter { !ended.contains($0.key) }
         nextRequested.subtract(ended)
@@ -1196,6 +1276,12 @@ final class AgentHub {
         releaseHeld()
         reconcileAttention()
         shownProblems = discoveryProblems
+        let processes = Set((directory.conversations + directory.disconnected).compactMap(\.pid))
+            .union(directory.remembered.filter { !listed.contains($0.key) }.compactMap(\.value.pid))
+        if processes != processesShown {
+            processesShown = processes
+            onProcesses?(processes)
+        }
         let extrasChanged = lastExtras != shownExtras
         shownExtras = lastExtras
         if directory.revision != before || namesNotSaved != reported || discoveryProblems != problemsBefore || extrasChanged { onChange?() }
@@ -1544,6 +1630,7 @@ final class AgentHub {
         let retiring = Set(installations.filter { $0.value == installation }.keys)
         guard !retiring.isEmpty else { return }
         let kept = { (session: String) in !retiring.contains(session) }
+        endCues { !kept($0) }
         awaitingResult = awaitingResult.filter { kept($0.key) }
         awaitedRequests = awaitedRequests.filter { kept($0.key) }
         nextTyped = nextTyped.filter { kept($0.key) }
@@ -1561,8 +1648,46 @@ final class AgentHub {
         Task { [weak self] in await self?.rescan(rereadingTitles: false) }
     }
 
+    private struct Named {
+        var sessions: Set<String> = []
+        var greeted = false
+    }
+
+    func handle(_ events: [AgentEvent]) {
+        guard !stopped else { return }
+        var named = Named()
+        for event in events {
+            if !named.sessions.isEmpty, Self.readsRoster(event) {
+                settle(named)
+                named = Named()
+            }
+            guard let reported = apply(event) else { continue }
+            named.sessions.formUnion(reported.sessions)
+            named.greeted = named.greeted || reported.greeted
+        }
+        if !named.sessions.isEmpty { settle(named) }
+    }
+
     func handle(_ event: AgentEvent) {
-        guard !stopped, let event = local(event) else { return }
+        if let named = apply(event) { settle(named) }
+    }
+
+    private static func readsRoster(_ event: AgentEvent) -> Bool {
+        switch event {
+        case .hello, .title, .shown, .waiting: false
+        case .ack, .submitted, .checked, .refused, .undelivered, .focused, .typed, .turnStarted, .absorbed, .turnComplete, .notify: true
+        }
+    }
+
+    private func settle(_ named: Named) {
+        refresh(namesReportedFor: named.sessions)
+        if named.greeted { readPlaces() }
+        Task { [weak self] in await self?.rescan(rereadingTitles: true) }
+    }
+
+    private func apply(_ event: AgentEvent) -> Named? {
+        guard !stopped, let event = local(event) else { return nil }
+        var named: Named?
         defer {
             switch event {
             case .shown, .hello:
@@ -1575,7 +1700,7 @@ final class AgentHub {
         }
         if case .turnComplete(let session, _, _, _, let turn?) = event, lastEndedTurn[session] == turn {
             Log.agents.info("ignored a second end of one turn in \(self.handle(of: session) ?? "a conversation", privacy: .private)")
-            return
+            return nil
         }
         if let session = event.session, let agent = AgentSessionID.agent(of: session) {
             discoveries.first { $0.kind.id == agent }?.observe(event.renamingSession(AgentSessionID.native))
@@ -1585,7 +1710,7 @@ final class AgentHub {
         }
         if let session = event.session, exclusions.excludes(session) {
             if case .hello(let hello) = event { installations[session] = hello.installation }
-            return
+            return nil
         }
         switch event {
         case .hello(let hello):
@@ -1606,14 +1731,14 @@ final class AgentHub {
             }
             connectorNamesAt[hello.session] = now()
             expectListing(hello)
-            refresh(nameReportedFor: hello.session)
-            readPlaces()
-            Task { [weak self] in await self?.rescan(rereadingTitles: true) }
+            named = Named(sessions: [hello.session], greeted: true)
         case .title(let session, let text):
-            connectorNames[session] = .some(text.isEmpty ? nil : text)
+            let name: String? = text.isEmpty ? nil : text
             connectorNamesAt[session] = now()
-            refresh(nameReportedFor: session)
-            Task { [weak self] in await self?.rescan(rereadingTitles: true) }
+            if connectorNames[session] != .some(name) {
+                connectorNames[session] = .some(name)
+                named = Named(sessions: [session])
+            }
         case .waiting(let session, let prompt):
             let changed = waitingPrompts[session] != prompt
             waitingPrompts[session] = prompt
@@ -1780,7 +1905,8 @@ final class AgentHub {
             refresh()
             Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         }
-        reconcileAttention()
+        if named == nil { reconcileAttention() }
+        return named
     }
 
     var readAloud: Set<String> { requested }
@@ -2102,7 +2228,7 @@ final class AgentHub {
             rehelloAsked.insert(hello.session)
             return nil
         }
-        if let holder = filed[claimed], holder.instance != hello.instance, transport.isLive(instance: holder.instance) {
+        if let holder = filed[claimed], holder.instance != hello.instance, liveInstance(holder.instance) {
             rehelloAsked.insert(hello.session)
             return nil
         }
@@ -2119,7 +2245,7 @@ final class AgentHub {
         })
         for (conversation, _) in filed where !hosted.contains(conversation) {
             filed[conversation] = nil
-            if transport.isLive(session: conversation) { transport.rehello(session: conversation) }
+            if liveSession(conversation) { transport.rehello(session: conversation) }
         }
         var released: Set<String> = []
         for conversation in Set(sessionInstances.keys).filter(hasHostPlugin) {
@@ -2143,7 +2269,7 @@ final class AgentHub {
                     guard let conversation = hostedConversation(claimedBy: session, among: hosted) else { continue }
                     claims[session] = conversation
                     guard filed[conversation]?.session != session, !rehelloAsked.contains(session) || released.contains(conversation),
-                          transport.isLive(session: session)
+                          liveSession(session)
                     else { continue }
                     rehelloAsked.insert(session)
                     transport.rehello(session: session)
@@ -2163,7 +2289,7 @@ final class AgentHub {
     private func expectListing(_ hello: AgentEvent.Hello) {
         guard AgentSessionID.agent(of: hello.session) == hello.agent, !Self.carriesNewConversations(hello.session),
               let source = hosts.first(where: { $0.kind.id == hello.agent }), source.isEnabled,
-              !(lastScan[source.kind.id] ?? []).contains(where: { AgentSessionID.make(agent: $0.agent, native: $0.id) == hello.session }),
+              !(scannedIds[source.kind.id] ?? []).contains(hello.session),
               expected.insert(hello.session).inserted
         else { return }
         source.expect()
@@ -2173,7 +2299,7 @@ final class AgentHub {
         guard AgentSessionID.agent(of: hello.session) == hello.agent,
               let source = hosts.first(where: { $0.kind.id == hello.agent }), source.isEnabled
         else { return false }
-        return (lastScan[source.kind.id] ?? []).contains { AgentSessionID.make(agent: $0.agent, native: $0.id) == hello.session }
+        return scannedIds[source.kind.id]?.contains(hello.session) ?? false
     }
 
     private func counterpart(of id: String) -> String? {
@@ -2259,7 +2385,7 @@ final class AgentHub {
     private func waitForReply(_ turn: String, of session: String, requested isRequested: Bool) {
         if awaitingResult[session] != turn { stopAwaiting(session) }
         awaitingResult[session] = turn
-        if isRequested { requested.insert(session) }
+        if isRequested { requested.insert(session) } else { cueWhileWorking(turn, of: session) }
     }
 
     func awaitTypedTurn(of session: String, request: String) {
@@ -2270,7 +2396,40 @@ final class AgentHub {
         if nextTyped[session]?.request == request { nextTyped[session] = nil }
     }
 
+    static let stillWorkingFirst: Duration = .seconds(60)
+    static let stillWorkingAgain: Duration = .seconds(300)
+    var stillWorkingWanted: () -> Bool = { false }
+    var onStillWorking: ((_ conversation: String, _ handle: String, _ working: @escaping @MainActor () -> Bool) -> Void)?
+    var onStillWorkingEnded: ((_ conversation: String) -> Void)?
+    private var stillWorkingCues: [String: Task<Void, Never>] = [:]
+
+    private func cueWhileWorking(_ turn: String, of conversation: String) {
+        guard stillWorkingCues[conversation] == nil, stillWorkingWanted() else { return }
+        let sleep = sleep
+        let working: @MainActor () -> Bool = { [weak self] in
+            guard let self, !self.stopped else { return false }
+            return self.awaitingResult[conversation] == turn && self.waitingPrompts[conversation] == nil && self.attention[conversation] == nil
+        }
+        stillWorkingCues[conversation] = Task { [weak self] in
+            var wait = Self.stillWorkingFirst
+            while true {
+                try? await sleep(wait)
+                guard !Task.isCancelled, let self, !self.stopped, self.awaitingResult[conversation] == turn else { return }
+                if working() { self.onStillWorking?(conversation, self.handle(of: conversation) ?? "", working) }
+                wait = Self.stillWorkingAgain
+            }
+        }
+    }
+
+    private func endCues(where ending: (String) -> Bool) {
+        for conversation in stillWorkingCues.keys where ending(conversation) {
+            stillWorkingCues.removeValue(forKey: conversation)?.cancel()
+            onStillWorkingEnded?(conversation)
+        }
+    }
+
     private func stopAwaiting(_ session: String) {
+        endCues { $0 == session }
         awaitingResult[session] = nil
         awaitedRequests[session] = nil
         awaitedStamp[session] = nil
@@ -2547,8 +2706,8 @@ final class AgentHub {
 
     private func holder(of session: String) -> String? {
         let known = sessionInstances[session] ?? []
-        if let plugin = plugin(of: session), transport.isLive(instance: plugin) { return plugin }
-        return known.last { connectors[$0]?.isHost == false && transport.isLive(instance: $0) } ?? known.last
+        if let plugin = plugin(of: session), liveInstance(plugin) { return plugin }
+        return known.last { connectors[$0]?.isHost == false && liveInstance($0) } ?? known.last
     }
 
     private func plugin(of session: String) -> String? {
@@ -2561,7 +2720,7 @@ final class AgentHub {
 
     private func hasHostPlugin(_ session: String) -> Bool { plugin(of: session) != nil }
 
-    private func pluginHolds(_ session: String) -> Bool { plugin(of: session).map(transport.isLive(instance:)) ?? false }
+    private func pluginHolds(_ session: String) -> Bool { plugin(of: session).map { liveInstance($0) } ?? false }
 
     private func pluginState(_ session: String) -> String {
         guard hasHostPlugin(session) else { return "no plugin has said hello for it" }
@@ -2571,7 +2730,7 @@ final class AgentHub {
 
     private func send(_ command: AgentCommand, to session: String, via holder: String? = nil) {
         let holder = holder ?? self.holder(of: session)
-        transport.enqueue(command, for: session, instance: holder.flatMap { transport.isLive(instance: $0) ? $0 : nil })
+        transport.enqueue(command, for: session, instance: holder.flatMap { liveInstance($0) ? $0 : nil })
     }
 
     private func joinDraft(_ text: String, in id: String) async -> HostJoin {
@@ -2842,13 +3001,22 @@ final class AgentRuntime {
     private let server: AgentBridgeServer
     private var pace: Task<Void, Never>?
     private var watcher: FolderWatcher?
+    private var exits: ProcessExitWatcher?
     private var stopped = false
     var settingsOpen = false {
-        didSet { if settingsOpen && !oldValue { wake() } }
+        didSet {
+            guard settingsOpen != oldValue else { return }
+            if settingsOpen {
+                Task { @MainActor [weak self] in await self?.look() }
+            } else {
+                schedule()
+            }
+        }
     }
 
-    static func rescanInterval(settingsOpen: Bool) -> Duration {
-        settingsOpen ? .seconds(1) : .seconds(10)
+    static func pace(settingsOpen: Bool, nextLook: Date?, now: Date) -> Duration? {
+        if settingsOpen { return .seconds(1) }
+        return nextLook.map { .seconds(max(0, $0.timeIntervalSince(now))) }
     }
 
     static func places(surfaces: ResolvedSurfaces, sources: [any AgentPlaceReading]) -> CombinedPlaceReader {
@@ -2879,6 +3047,7 @@ final class AgentRuntime {
         let directory = Self.bridgeDirectory(supportDir: supportDir)
         let token = try AgentBridgeToken.loadOrCreate(in: directory)
         let box = HubBox()
+        let inbox = AgentEventInbox { box.hub?.handle($0) }
         let exclusions = AgentExclusions(nil)
         server = AgentBridgeServer(
             directory: directory, token: token,
@@ -2895,13 +3064,14 @@ final class AgentRuntime {
             },
             onNotify: { event, answer in
                 Task { @MainActor in
+                    inbox.drain()
                     guard case .notify(let session, let turn, let on) = event else { return answer(false) }
                     answer(box.hub?.notify(session: session, turn: turn, on: on) ?? false)
                 }
             },
             onReport: Self.reports(hosts: hosts, setups: setups)
         ) { event in
-            Task { @MainActor in box.hub?.handle(event) }
+            inbox.add(event)
         }
         hub = AgentHub(
             transport: server, discovery: discovery,
@@ -2915,30 +3085,35 @@ final class AgentRuntime {
             processEnvironment: { pid, keys in SystemTerminalFacts.arguments(of: pid, keeping: keys)?.environment ?? [:] },
             processParent: { SystemTerminalFacts.parent(of: $0) })
         box.hub = hub
-        server.onHangUp { Task { @MainActor in box.hub?.refresh() } }
+        hub.drainEvents = { inbox.drain() }
+        let exits = ProcessExitWatcher { [weak hub] in Task { @MainActor in await hub?.rescan(rereadingTitles: false) } }
+        self.exits = exits
+        hub.onProcesses = { [weak exits] in exits?.watch($0) }
+        server.onHangUp { agents in Task { @MainActor in await box.hub?.hungUp(agents: agents) } }
         try server.start()
-        Task { @MainActor [weak self] in
-            await self?.hub.rescan()
-            self?.wake()
-        }
+        hub.onScanned = { [weak self] in self?.scanned() }
+        Task { @MainActor [weak self] in await self?.hub.rescan() }
     }
 
-    private func wake() {
-        guard !stopped else { return }
+    private func scanned() {
+        watch(hub.watchedFolders)
+        schedule()
+    }
+
+    private func schedule() {
         pace?.cancel()
+        pace = nil
+        guard !stopped, let delay = Self.pace(settingsOpen: settingsOpen, nextLook: hub.nextLook, now: Date()) else { return }
         pace = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                guard let interval = await self?.step() else { return }
-                try? await Task.sleep(for: interval)
-            }
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await self?.look()
         }
     }
 
-    private func step() async -> Duration {
+    private func look() async {
         hub.tickPlaces(settingsOpen: settingsOpen)
         await hub.rescan(rereadingTitles: false, wantingHosts: settingsOpen)
-        watch(hub.watchedFolders)
-        return Self.rescanInterval(settingsOpen: settingsOpen)
     }
 
     private func watch(_ folders: [URL]) {
@@ -2958,6 +3133,7 @@ final class AgentRuntime {
         pace?.cancel()
         pace = nil
         watcher = nil
+        exits = nil
         hub.stop()
         server.stop()
     }

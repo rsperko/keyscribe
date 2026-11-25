@@ -84,7 +84,7 @@ enum RewriteEvalRunner {
         return !records.contains { $0.error != nil }
     }
 
-    private static func resolveConnection(id: String?) -> Connection? {
+    static func resolveConnection(id: String?) -> Connection? {
         let set = ConnectionStore.loadOrDefault(supportDir: KeyScribePaths.supportDir)
         guard !set.connections.isEmpty else {
             print("error: no saved connections (\(ConnectionStore.fileName)); add one in Settings → AI Service")

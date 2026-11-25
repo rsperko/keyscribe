@@ -10,8 +10,15 @@ type Request = { path: string; body: any; answer: (status: number, text?: string
 const home = "/u/.ultimate/projects/app-1234"
 const session = (id: number) => `${id}@${home}`
 
-function harness(options: { conversations?: Summary[]; ready?: boolean; holdShown?: boolean; submit?: (id: number, text: string, images: Image[], requestId: string) => Promise<number> } = {}) {
+function harness(options: {
+  conversations?: Summary[]; ready?: boolean; holdShown?: boolean; watches?: boolean; acks?: boolean; holdReadyRead?: boolean
+  submit?: (id: number, text: string, images: Image[], requestId: string) => Promise<number>
+} = {}) {
   const requests: Request[] = []
+  const watching: Array<{ folder: string; fn: () => void; broken: () => void }> = []
+  const order: string[] = []
+  let releaseRead: (() => void) | null = null
+  let watchable = true
   const timers: Array<{ at: number; fn: () => void; id: number }> = []
   const logs: string[] = []
   const submitted: Array<{ id: number; text: string; images: Image[]; requestId: string }> = []
@@ -46,6 +53,8 @@ function harness(options: { conversations?: Summary[]; ready?: boolean; holdShow
     pid: 4242,
     now: () => now,
     read: async (path) => {
+      if (path === "/s/ready.json") order.push("read")
+      if (path === "/s/ready.json" && options.holdReadyRead) await new Promise<void>((resolve) => { releaseRead = resolve })
       const text = files[path]
       if (text === undefined) throw new Error("ENOENT")
       return text
@@ -80,6 +89,14 @@ function harness(options: { conversations?: Summary[]; ready?: boolean; holdShow
     },
     random: () => "rnd",
     log: (message) => { logs.push(message) },
+    ...(options.watches ? {
+      watch: (folder: string, fn: () => void, broken: () => void) => {
+        if (!watchable) return null
+        order.push("watch")
+        watching.push({ folder, fn, broken })
+        return () => {}
+      },
+    } : {}),
   }
   const connector = keyscribe(ultimate, host, async () => config)
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -88,7 +105,7 @@ function harness(options: { conversations?: Summary[]; ready?: boolean; holdShow
   }
   async function connect() {
     await flush()
-    for (const r of requests.filter((r) => r.body.op === "hello" && !r.settled)) r.answer(200, "{}")
+    for (const r of requests.filter((r) => r.body.op === "hello" && !r.settled)) r.answer(200, options.acks ? '{"ok":true,"acks":true}' : "{}")
     await flush()
   }
   const events = (op: string) => requests.filter((r) => r.path === "/event" && r.body.op === op).map((r) => r.body)
@@ -100,7 +117,9 @@ function harness(options: { conversations?: Summary[]; ready?: boolean; holdShow
     await flush()
   }
   return {
-    connector, state, requests, submitted, logs, events, poll, command, flush, connect,
+    connector, state, requests, submitted, logs, events, poll, command, flush, connect, files, watching, timers,
+    refuseWatch: () => { watchable = false },
+    order, releaseRead: () => { releaseRead?.(); releaseRead = null },
     advance: async (ms: number) => {
       now += ms
       for (const timer of [...timers].sort((a, b) => a.at - b.at)) {
@@ -162,6 +181,90 @@ test("while the app is not running the connector sends nothing and checks again 
   await h.flush()
   assert.equal(h.requests.length, 0)
   assert.ok(h.logs.some((log) => log.includes("not running")))
+})
+
+test("while the app is not running a connector that can watch its folder arms no timer and connects as soon as it starts", async () => {
+  const h = harness({ ready: false, watches: true })
+  await h.flush()
+  assert.equal(h.requests.length, 0)
+  assert.equal(h.timers.length, 0)
+  assert.deepEqual(h.watching.map((w) => w.folder), ["/s"])
+  h.files["/s/ready.json"] = JSON.stringify({ launch: "L2", protocol: 3 })
+  h.watching[0].fn()
+  await h.flush()
+  assert.ok(h.events("hello").length > 0)
+})
+
+test("the folder is watched before the ready file is read, so a start between the two is never missed", async () => {
+  const h = harness({ ready: false, watches: true })
+  await h.flush()
+  assert.deepEqual(h.order.slice(0, 2), ["watch", "read"])
+})
+
+test("the app starting while the ready file is being read is checked again once the read ends", async () => {
+  const h = harness({ ready: false, watches: true, holdReadyRead: true })
+  await h.flush()
+  h.files["/s/ready.json"] = JSON.stringify({ launch: "L2", protocol: 3 })
+  h.watching[0].fn()
+  h.releaseRead()
+  await h.flush()
+  h.releaseRead()
+  await h.flush()
+  assert.ok(h.events("hello").length > 0)
+})
+
+test("a watch that breaks falls back to checking on a timer, without spinning", async () => {
+  const h = harness({ ready: false, watches: true })
+  await h.flush()
+  assert.equal(h.timers.length, 0)
+  h.watching[0].broken()
+  await h.flush()
+  assert.equal(h.timers.length, 1)
+  assert.equal(h.requests.length, 0)
+})
+
+test("a connector that cannot watch the app's folder checks again on a timer", async () => {
+  const h = harness({ ready: false, watches: true })
+  h.refuseWatch()
+  await h.flush()
+  assert.equal(h.requests.length, 0)
+  assert.equal(h.timers.length, 1)
+})
+
+test("once the app says acknowledgments may ride on the next poll, they go there instead of as events of their own", async () => {
+  const h = harness({ acks: true })
+  await h.connect()
+  await h.command({ op: "status", id: "s1", expectedSession: session(61), text: "login fix" })
+  assert.deepEqual(h.events("ack"), [])
+  assert.deepEqual(h.poll()?.body.acks, [{ request: "s1", instance: h.poll()?.body.members.find((m: any) => m.session === session(61)).instance }])
+  await h.command({ op: "status", id: "s2", expectedSession: session(53), text: "app" })
+  assert.equal(h.poll()?.body.acks.length, 1)
+})
+
+test("acknowledgments on a poll replaced before it is answered go on the next poll, and leave once one is answered", async () => {
+  const h = harness({ acks: true })
+  await h.connect()
+  assert.equal(h.poll()?.body.wait, 310)
+  await h.command({ op: "status", id: "s1", expectedSession: session(61), text: "x" })
+  const carrying = h.poll()
+  assert.deepEqual(carrying?.body.acks.map((a: any) => a.request), ["s1"])
+  h.state.conversations.push({ id: 70, named: false, cwd: "/h/wt/70", busy: false })
+  h.connector.changed()
+  await h.connect()
+  const next = h.poll()
+  assert.notEqual(next, carrying)
+  assert.deepEqual(next?.body.acks.map((a: any) => a.request), ["s1"])
+  next?.answer(200, "[]")
+  await h.flush()
+  assert.equal(h.poll()?.body.acks, undefined)
+})
+
+test("an app that has not said so still gets each acknowledgment as an event", async () => {
+  const h = harness()
+  await h.connect()
+  await h.command({ op: "status", id: "s1", expectedSession: session(61), text: "login fix" })
+  assert.deepEqual(h.events("ack").map((e) => e.request), ["s1"])
+  assert.equal(h.poll()?.body.acks, undefined)
 })
 
 test("a turn reports its start, what it came after, and its final reply", async () => {

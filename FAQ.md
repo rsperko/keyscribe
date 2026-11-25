@@ -250,6 +250,9 @@ These also work without saving anything:
   does not change that destination.
 - **“repeat that”** or **“say that again”** replays the last spoken reply from an agent (see
   [Can KeyScribe read an agent's reply aloud?](#can-keyscribe-read-an-agents-reply-aloud)).
+- **“read the whole reply”** reads the last reply from an agent in full rather than its summary, even when no summary
+  could be made. Its code is called a code block, a link is said as “a link”, a path as its file name, a table row by
+  row, and issue numbers are left out. Nothing is sent anywhere for it.
 - **“that sounded wrong”** keeps the reply you just heard with its History entry: its audio while it is
   still held, otherwise only its text and a report. They last until you delete the entry or History's
   retention removes it. In Agent mode it is a command only while Read Agent Replies Aloud is on and a reply
@@ -929,7 +932,10 @@ Both only stop the speech: the agent keeps working. The
 **Read Agent Replies Aloud** item in the menu bar menu turns the feature off and on. Only instructions you dictated, and
 work you asked the agent to have KeyScribe read aloud (below), are spoken about. To hear the last one again, say **"repeat that"** or **"say that
 again"** as the whole dictation, with either the Agent or the Voice Commands shortcut; with the Agent
-shortcut, a longer dictation that starts that way is sent to the agent as usual. A conversation that is in front of you when it finishes is
+shortcut, a longer dictation that starts that way is sent to the agent as usual. To hear the whole reply rather than its
+summary, say **"read the whole reply"** the same way. To know a long turn is still going, turn on **Say when a long turn
+is still working**: a turn your dictation started that runs past a minute gets a short "Still working." notice naming the
+conversation, and another every five minutes, unless that conversation is in front of you. A conversation that is in front of you when it finishes is
 skipped, since you can already see its reply, unless you asked for that reply to be read aloud. If KeyScribe can't tell what is in front, for example because
 your terminal hasn't been given Automation access for voice commands yet, the summary still plays.
 If a reply sounded wrong, choose **Last Reply in History…** in the menu bar menu. **Play** replays what you heard:

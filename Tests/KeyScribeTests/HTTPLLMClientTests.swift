@@ -596,7 +596,7 @@ struct HTTPLLMClientTests {
         }
         let out = try await client.complete(system: "s", user: "u", connection: connection)
         #expect(out == "OK")
-        #expect(firstRun.count == 2)
+        try #require(firstRun.count == 2)
         let retried = (firstRun[1]?["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]
         #expect(retried?["thinkingBudget"] as? Int == 0)
         #expect(retried?["thinkingLevel"] == nil)
@@ -607,7 +607,7 @@ struct HTTPLLMClientTests {
             return (resp(request.url!, 200), ok)
         }
         _ = try await client.complete(system: "s", user: "u", connection: connection)
-        #expect(secondRun.count == 1)
+        try #require(secondRun.count == 1)
         let cached = (secondRun[0]?["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]
         #expect(cached?["thinkingBudget"] as? Int == 0)
     }
@@ -826,7 +826,7 @@ struct HTTPLLMClientTests {
             return (resp(request.url!, step.0), step.1)
         }
         _ = try await stubbedClient().complete(system: "SYS", user: "USR", connection: compatConnection())
-        #expect(bodies.count == 2)
+        try #require(bodies.count == 2)
         #expect((bodies[0]?["messages"] as? [[String: Any]])?.count == 2)
         let retryMessages = bodies[1]?["messages"] as? [[String: Any]]
         #expect(retryMessages?.count == 1)

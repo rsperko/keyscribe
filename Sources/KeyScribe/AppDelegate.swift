@@ -266,6 +266,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 InstalledEngineFilter.shouldRun(engineId: engine.id)
                     && (self?.speechModels?.isEngineUsable(engine.id) ?? true)
             },
+            isSessionLocked: { SessionLockMonitor.isSessionLocked() },
             llmClient: llmClient)
         controller.preloadActiveEngineIfNeeded()
         if let scriptedCapture {
@@ -920,6 +921,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
                 runtime.hub.onWithdraw = { [weak spoken] in spoken?.withdraw(conversation: $0) }
+                runtime.hub.stillWorkingWanted = { [weak spoken] in spoken?.wantsStillWorking ?? false }
+                runtime.hub.onStillWorking = { [weak spoken] in spoken?.stillWorking(conversation: $0, handle: $1, while: $2) }
+                runtime.hub.onStillWorkingEnded = { [weak spoken] in spoken?.stopStillWorking(conversation: $0) }
                 runtime.hub.speaks = { [weak self] in self?.settings.agents.spokenResult.enabled ?? false }
                 let bundled = Dictionary(
                     settingsController.agents.connectors.map { ($0.kind.id, $0.connector.bundledVersion) }, uniquingKeysWith: { first, _ in first })

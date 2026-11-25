@@ -221,6 +221,7 @@ struct VoiceCommandRunnerTests {
         var replay: SpokenResultOutput.Replay = .repeating("docs")
         var kept: SessionReturns.KeptReply = .kept("docs")
         private(set) var replays = 0
+        private(set) var wholes: [Bool] = []
         private(set) var keeps = 0
         private(set) var opened: [String] = []
         private(set) var reads = 0
@@ -235,7 +236,11 @@ struct VoiceCommandRunnerTests {
                     return self.result
                 },
                 handle: { self.handles[$0] },
-                replay: { self.replays += 1; return self.replay },
+                replay: { whole in
+                    self.replays += 1
+                    self.wholes.append(whole)
+                    return self.replay
+                },
                 keepReply: { self.keeps += 1; return self.kept })
         }
     }
@@ -254,6 +259,17 @@ struct VoiceCommandRunnerTests {
         #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { false }) == .abandoned)
         #expect(sessions.replays == 2)
         #expect(system.activatedPids.isEmpty)
+    }
+
+    @Test func readTheWholeReplyAsksForTheWholeLastReplyNotItsSummary() async {
+        let (runner, _) = make()
+        let sessions = Sessions()
+        runner.returnToSessions(sessions.returns)
+        #expect(await runner.run(transcript: "read the whole reply", places: [], origin: nil, stillWanted: { true })
+                == .done(summary: "docs", command: "Reads the last reply in full, without its code, links or ids."))
+        #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { true })
+                == .done(summary: "docs", command: "Replays the last spoken reply."))
+        #expect(sessions.wholes == [true, false])
     }
 
     @Test func thatSoundedWrongKeepsTheLastReplyAndSaysWhenThereIsNone() async {

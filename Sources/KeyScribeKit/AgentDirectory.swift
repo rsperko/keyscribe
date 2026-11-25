@@ -66,7 +66,7 @@ public struct AgentPlaceName: Equatable, Sendable {
     public var word: String { term ?? level.rawValue }
 }
 
-public struct RememberedName: Codable, Equatable, Sendable {
+public struct RememberedName: Codable, Hashable, Sendable {
     public var name: String
     public var pid: Int?
     public var startedAt: Int
@@ -217,35 +217,57 @@ public struct AgentDirectory: Sendable {
         }
         let before = handleById
         var placed: [String: (name: String, place: AgentPlaceName)] = [:]
-        var sharing: [String: (label: String, members: [String], surface: String)] = [:]
+        var sharing: [String: (label: String, groups: [String], surface: String)] = [:]
         let known = places
-        var labelled: [(entry: AgentSession, place: AgentPlace, label: AgentPlace.Label, base: String, key: String, members: [String])] = []
+        var agentLabelHolders: [String: [String]] = [:]
+        var containerHolders: [String: [String]] = [:]
+        for entry in entries {
+            let id = conversationId(entry)
+            guard let place = known[id] else { continue }
+            let keys = Set(place.labels.filter { $0.level == .agent }.compactMap { usable($0.text).map(AgentHandles.matchKey) })
+            for key in keys { agentLabelHolders[key, default: []].append(id) }
+            for container in Set(place.containers) { containerHolders[container, default: []].append(id) }
+        }
+        var labelled: [(entry: AgentSession, place: AgentPlace, label: AgentPlace.Label, base: String, key: String, source: String)] = []
         for entry in entries {
             let id = conversationId(entry)
             guard let place = known[id], let label = place.labels.first(where: { !$0.onlyAfterVerb && usable($0.text) != nil }),
                   let base = usable(label.text)
             else { continue }
-            let members = label.level == .agent
-                ? entries.map(conversationId).filter { other in
-                    known[other]?.labels.contains { $0.level == .agent && usable($0.text).map(AgentHandles.matchKey) == AgentHandles.matchKey(base) } == true
-                }
-                : entries.map(conversationId).filter { known[$0]?.containers.contains(label.container) == true }
-            labelled.append((entry, place, label, base, AgentHandles.matchKey(base), members))
+            let key = AgentHandles.matchKey(base)
+            labelled.append((entry, place, label, base, key, label.level == .agent ? "agent \(key)" : "container \(label.container)"))
         }
-        let membersByKey = Dictionary(grouping: labelled, by: { "\($0.label.level == .agent) \($0.key)" }).mapValues { group in
-            group.flatMap(\.members).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        func holders(of source: String) -> [String] {
+            source.hasPrefix("agent ") ? agentLabelHolders[String(source.dropFirst(6))] ?? [] : containerHolders[String(source.dropFirst(10))] ?? []
         }
+        func union(_ lists: [[String]]) -> [String] {
+            var seen: Set<String> = []
+            return lists.flatMap { $0 }.filter { seen.insert($0).inserted }
+        }
+        var sourcesByGroup: [String: [String]] = [:]
+        var sourcesSeen: Set<String> = []
+        for item in labelled {
+            let group = "\(item.label.level == .agent) \(item.key)"
+            if sourcesSeen.insert("\(group)\u{0}\(item.source)").inserted { sourcesByGroup[group, default: []].append(item.source) }
+        }
+        let membersByKey = sourcesByGroup.mapValues { union($0.map(holders)) }
         func workspace(_ id: String, apartFrom base: String) -> String? {
             (known[id]?.labels.first { $0.level == .workspace }?.text ?? known[id]?.workspace).flatMap { usable($0) }.flatMap {
                 AgentHandles.matchKey($0) == AgentHandles.matchKey(base) ? nil : $0
             }
         }
+        var apartByGroup: [String: Bool] = [:]
         for item in labelled {
             let id = conversationId(item.entry)
             let byAgent = AgentHandles.matchKey(item.base) == AgentHandles.matchKey(item.entry.agent) ? nil : usable("\(item.base) \(item.entry.agent)")
-            let members = membersByKey["\(item.label.level == .agent) \(item.key)"] ?? item.members
-            let workspaces = members.map { workspace($0, apartFrom: item.base) }
-            let apart = workspaces.allSatisfy { $0 != nil } && Set(workspaces.compactMap { $0.map(AgentHandles.matchKey) }).count == members.count
+            let group = "\(item.label.level == .agent) \(item.key)"
+            let members = membersByKey[group] ?? []
+            let apart = apartByGroup[group] ?? {
+                let workspaces = members.map { workspace($0, apartFrom: item.base) }
+                let apart = workspaces.allSatisfy { $0 != nil } && Set(workspaces.compactMap { $0.map(AgentHandles.matchKey) }).count == members.count
+                apartByGroup[group] = apart
+                return apart
+            }()
             let ownWorkspace = workspace(id, apartFrom: item.base).flatMap { usable("\($0) \(item.base)") }
             let earlier = [nativeNameById[id], remembering[id]?.native].compactMap { $0 }.map(AgentHandles.matchKey)
             let given = [byAgent, ownWorkspace].compactMap { $0 }.first { earlier.contains(AgentHandles.matchKey($0)) }
@@ -255,16 +277,18 @@ public struct AgentDirectory: Sendable {
                           AgentPlaceName(
                               surface: item.label.surface ?? item.place.surface, level: item.label.level, label: item.label.text, term: item.label.term))
             guard qualifies else { continue }
-            let held = sharing[item.key]?.members ?? []
-            sharing[item.key] = (sharing[item.key]?.label ?? item.base, held + members.filter { !held.contains($0) }, item.label.surface ?? item.place.surface)
+            let held = sharing[item.key]?.groups ?? []
+            sharing[item.key] = (
+                sharing[item.key]?.label ?? item.base, held.last == group || held.contains(group) ? held : held + [group], item.label.surface ?? item.place.surface)
         }
         let liveIds = Set(entries.map(conversationId))
         for conversation in conversations + disconnected where !liveIds.contains(conversation.id) {
             if let saved = remembering(conversation) { remembering[conversation.id] = saved }
         }
+        let runningProcesses = Set(entries.compactMap { entry in entry.pid.flatMap { pid in entry.startedAt.map { "\(pid) \($0)" } } })
         remembering = remembering.filter { id, saved in
             guard !liveIds.contains(id) else { return true }
-            let replaced = saved.pid != nil && entries.contains { $0.pid == saved.pid && $0.startedAt == saved.startedAt }
+            let replaced = saved.pid.map { runningProcesses.contains("\($0) \(saved.startedAt)") } ?? false
             return !replaced && running(saved)
         }
         for (id, handle) in handleById where !liveIds.contains(id) && !folderUnknown.contains(id) {
@@ -318,13 +342,17 @@ public struct AgentDirectory: Sendable {
             }
             nativeNameById[id] = native
         }
+        var inUse = Set(handleById.values.map(AgentHandles.matchKey))
+        let chosenBy = Dictionary(grouping: chosen, by: { AgentHandles.matchKey($0.value) }).mapValues { Set($0.map(\.key)) }
+        let held = Set(remembering.values.map { AgentHandles.matchKey($0.name) })
         for entry in entries where handleById[conversationId(entry)] == nil {
-            guard let previous = chosen[conversationId(entry)] ?? retired[conversationId(entry)] else { continue }
+            let id = conversationId(entry)
+            guard let previous = chosen[id] ?? retired[id] else { continue }
             let key = AgentHandles.matchKey(previous)
-            let inUse = handleById.values.contains { AgentHandles.matchKey($0) == key }
-            let chosenByAnother = chosen.contains { $0.key != conversationId(entry) && AgentHandles.matchKey($0.value) == key }
-            let heldForAnother = remembering.values.contains { AgentHandles.matchKey($0.name) == key }
-            if !inUse && !chosenByAnother && !heldForAnother { handleById[conversationId(entry)] = previous }
+            let chosenByAnother = chosenBy[key].map { !$0.subtracting([id]).isEmpty } ?? false
+            guard !inUse.contains(key), !chosenByAnother, !held.contains(key) else { continue }
+            handleById[id] = previous
+            inUse.insert(key)
         }
         let away = Set(chosen.filter { !liveIds.contains($0.key) }.values).union(remembering.values.map(\.name))
         let named = entries.filter { preferred[conversationId($0)] != nil }.sorted { conversationId($0) < conversationId($1) }
@@ -341,14 +369,16 @@ public struct AgentDirectory: Sendable {
         placeNameById = placed.mapValues(\.place).merging(placeNameById.filter { unplaced.contains($0.key) }) { now, _ in now }
         preferredById = preferred
         let assignedKeys = Set(handleById.values.map(AgentHandles.matchKey))
-        placeShared = Dictionary(sharing.values.filter { !assignedKeys.contains(AgentHandles.matchKey($0.label)) }.map { shared in
-            let agents = entries.filter { shared.members.contains(conversationId($0)) }.map(\.agent)
+        let agentById = Dictionary(entries.map { (conversationId($0), $0.agent) }, uniquingKeysWith: { first, _ in first })
+        placeShared = Dictionary(sharing.values.filter { !assignedKeys.contains(AgentHandles.matchKey($0.label)) }.map { sharedGroups in
+            let shared = (label: sharedGroups.label, members: union(sharedGroups.groups.map { membersByKey[$0] ?? [] }), surface: sharedGroups.surface)
+            let agents = shared.members.compactMap { agentById[$0] }
             return (shared.label, AgentRecipient.SharedName(
                 names: shared.members.compactMap { handleById[$0] }.sorted(),
                 tellApartIn: Set(agents).count < agents.count ? shared.surface : nil))
         }, uniquingKeysWith: { first, _ in first })
         var sharedByKey = Dictionary(grouping: placeShared.keys, by: AgentHandles.matchKey)
-        for (word, other) in otherNames(entries: entries, places: known, outranked: outranked, usable: usable) {
+        for (word, other) in otherNames(entries: entries, places: known, containerHolders: containerHolders, outranked: outranked, usable: usable) {
             let key = AgentHandles.matchKey(word)
             if case .also = other.kind, other.names.count == 1 {
                 for shared in sharedByKey[key] ?? [] { placeShared[shared] = nil }
@@ -361,6 +391,7 @@ public struct AgentDirectory: Sendable {
         }
         indexPreviousNames()
 
+        let othersByHandle = otherNamesByHandle()
         let next = entries.map {
             AgentConversation(
                 id: conversationId($0), agent: $0.agent, pid: $0.pid, cwd: $0.cwd,
@@ -369,7 +400,7 @@ public struct AgentDirectory: Sendable {
                 startedAt: $0.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }, setup: $0.setup,
                 nameSource: chosen[conversationId($0)] != nil ? .chosen : sources[conversationId($0)] ?? .folder,
                 placeName: placeNameById[conversationId($0)],
-                placeSurface: known[conversationId($0)]?.surface, otherNames: otherNames(for: conversationId($0)),
+                placeSurface: known[conversationId($0)]?.surface, otherNames: handleById[conversationId($0)].flatMap { othersByHandle[$0] } ?? [],
                 placeUnreadSince: unreadSince[conversationId($0)], host: $0.host, innerAgent: $0.innerAgent)
         }.sorted { $0.handle < $1.handle }
         let shown = next.filter { !excluded.contains($0.id) }
@@ -382,11 +413,12 @@ public struct AgentDirectory: Sendable {
     }
 
     private func otherNames(
-        entries: [AgentSession], places: [String: AgentPlace], outranked: [String: String], usable: (String) -> String?
+        entries: [AgentSession], places: [String: AgentPlace], containerHolders: [String: [String]], outranked: [String: String],
+        usable: (String) -> String?
     ) -> [String: AgentRecipient.SharedName] {
         let names = Set(handleById.values.map(AgentHandles.matchKey))
-        let ids = entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }
         var found: [String: (word: String, ids: [String], kind: AgentRecipient.SharedName.Kind)] = [:]
+        var foundIds: [String: Set<String>] = [:]
         for entry in entries {
             let id = AgentSessionID.make(agent: entry.agent, native: entry.id)
             guard handleById[id] != nil else { continue }
@@ -397,7 +429,7 @@ public struct AgentDirectory: Sendable {
                 case .agent, .pane: return (label.text, .also(seenAs))
                 case .title: return (label.text, .afterVerb(seenAs))
                 case .tab, .workspace:
-                    let alone = ids.filter { places[$0]?.containers.contains(label.container) == true }.count == 1
+                    let alone = containerHolders[label.container]?.count == 1
                     return alone ? (label.text, .held(seenAs)) : nil
                 }
             } } ?? []
@@ -407,13 +439,18 @@ public struct AgentDirectory: Sendable {
                 guard let word = usable(text) else { continue }
                 let key = AgentHandles.matchKey(word)
                 guard !names.contains(key) else { continue }
-                guard let earlier = found[key] else {
+                guard found[key] != nil else {
                     found[key] = (word, [id], kind)
+                    foundIds[key] = [id]
                     continue
                 }
-                found[key] = earlier.ids.contains(id)
-                    ? (earlier.word, earlier.ids, Self.weaker(earlier.kind, kind) == kind ? earlier.kind : kind)
-                    : (earlier.word, earlier.ids + [id], Self.weaker(earlier.kind, kind))
+                let earlier = found[key]!.kind
+                if foundIds[key, default: []].insert(id).inserted {
+                    found[key]?.ids.append(id)
+                    found[key]?.kind = Self.weaker(earlier, kind)
+                } else if Self.weaker(earlier, kind) != kind {
+                    found[key]?.kind = kind
+                }
             }
         }
         return Dictionary(found.values.map { other in
@@ -434,14 +471,18 @@ public struct AgentDirectory: Sendable {
     }
 
     public func otherNames(for id: String) -> [String] {
-        guard let handle = handleById[id] else { return [] }
-        return placeShared.filter { entry in
-            guard entry.value.names == [handle] else { return false }
-            switch entry.value.kind {
-            case .also, .afterVerb: return true
-            case .place, .held: return false
+        handleById[id].flatMap { otherNamesByHandle()[$0] } ?? []
+    }
+
+    private func otherNamesByHandle() -> [String: [String]] {
+        var byHandle: [String: [String]] = [:]
+        for (word, shared) in placeShared where shared.names.count == 1 {
+            switch shared.kind {
+            case .also, .afterVerb: byHandle[shared.names[0], default: []].append(word)
+            case .place, .held: break
             }
-        }.keys.sorted()
+        }
+        return byHandle.mapValues { $0.sorted() }
     }
 
     public func renameProblem(_ id: String, to raw: String) -> AgentHandles.RenameError? {

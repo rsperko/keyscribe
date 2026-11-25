@@ -71,6 +71,12 @@ public enum DevCLI {
                 --variants <a,b,...>    Limit to these prompt variants (default: all, including baseline).
                 --repeat <n>            Attempts per case × variant (default 1).
                 --raw                   Emit each model output as RAW <variant> <case> <verdict> <text>.
+              --spoken-eval <dir>     Summarize each long agent reply in <dir>/cases.json the way Read Agent Replies Aloud
+                                      does, and check that what would be spoken says what the case needs, avoids what it must not say,
+                                      and reads no number out. Exits non-zero when any attempt falls short.
+                --connection <id>       Saved connection to call (required when more than one is saved).
+                --repeat <n>            Attempts per case (default 1).
+                --prompt <file>         Use this summary prompt instead of the built-in one.
               --warmup-probe          Per installed engine: load time, then the bundled warm-up clip transcribed
                                       three times, so the first-after-load cost the warm-up clip pays is visible.
                                       Honors --engines. Run the built app, which bundles the clip.
@@ -491,6 +497,26 @@ public enum DevCLI {
             Task.detached {
                 let passed = await RewriteEvalRunner.run(
                     dir: dir, variantIds: variants, connectionId: connectionId, repeats: repeats, raw: raw)
+                ok.store(passed, ordering: .relaxed)
+                done.signal()
+            }
+            done.wait()
+            exit(ok.load(ordering: .relaxed) ? 0 : 1)
+        }
+
+        if let i = CommandLine.arguments.firstIndex(of: "--spoken-eval"), i + 1 < CommandLine.arguments.count {
+            let args = CommandLine.arguments
+            func value(_ flag: String) -> String? {
+                guard let j = args.firstIndex(of: flag), j + 1 < args.count else { return nil }
+                return args[j + 1]
+            }
+            let dir = URL(fileURLWithPath: args[i + 1])
+            let repeats = max(1, value("--repeat").flatMap { Int($0) } ?? 1)
+            let prompt = value("--prompt").map { URL(fileURLWithPath: $0) }
+            let done = DispatchSemaphore(value: 0)
+            let ok = Atomic<Bool>(false)
+            Task.detached {
+                let passed = await SpokenEvalRunner.run(dir: dir, connectionId: value("--connection"), repeats: repeats, promptFile: prompt)
                 ok.store(passed, ordering: .relaxed)
                 done.signal()
             }

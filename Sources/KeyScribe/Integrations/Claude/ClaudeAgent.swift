@@ -22,6 +22,13 @@ final class ClaudeDiscovery: AgentDiscovery {
         }
     }
 
+    var nextLook: Date? {
+        let at = now()
+        return titleWatches.values.filter { $0.until > at }.map { watch in
+            min(watch.until, watch.checked.map { $0.addingTimeInterval(Self.titleRecheck) } ?? at)
+        }.min()
+    }
+
     private func titlesDue() -> Set<String> {
         let at = now()
         titleWatches = titleWatches.filter { $0.value.until > at }

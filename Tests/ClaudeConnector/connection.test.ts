@@ -274,7 +274,7 @@ test('a connector without its settings stays dormant', async ($, on) => {
 test('losing the connection clears only the status this connector set, once', async ($, on) => {
   const h = harness(on)
   await h.connect($)
-  await h.clock.advance(28000)
+  await h.clock.advance(310000)
   await h.settle()
   expect(h.statuses).toEqual([])
 
@@ -285,7 +285,7 @@ test('losing the connection clears only the status this connector set, once', as
   await h.deliver([{ op: 'status', id: 'r1', expectedSession: 's1', text: 'Dictating' }])
   await h.answerEvents()
   expect(h.statuses).toEqual(['Dictating'])
-  await h.clock.advance(28000)
+  await h.clock.advance(310000)
   await h.settle()
   await h.clock.advance(2000)
   await h.settle()

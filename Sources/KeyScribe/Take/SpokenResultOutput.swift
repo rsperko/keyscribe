@@ -7,7 +7,7 @@ final class SpokenResultOutput {
     struct Queued: Equatable {
         let conversation: String
         let name: String
-        let body: String
+        var body: String
         var unavailable = false
         var notice = false
         var replayed = false
@@ -24,6 +24,9 @@ final class SpokenResultOutput {
         var returned: String?
         var failure: String?
         var cause: SpokenResult.Cause?
+        var reply: String?
+        var mergedReplies: [Queued] = []
+        var progress = false
         var text: String { standalone ? body : SpokenResult.prefaced(body, name: name, cause: cause) }
         var unheard: [Source] {
             guard !replayed, !notice, !standalone, !heardAlready else { return [] }
@@ -142,6 +145,7 @@ final class SpokenResultOutput {
 
     private var hasWorkAhead: Bool {
         !queued.isEmpty || !generating.isEmpty || !checkingNotice.isEmpty || replay != nil || answering != nil
+            || !progressChecks.isEmpty
     }
 
     private var busy: Bool { hasWorkAhead || (playing != nil && !announced) }
@@ -162,6 +166,8 @@ final class SpokenResultOutput {
     }
     private var playingRequested: Set<String> = []
     private var noticed: [String: AgentAttention] = [:]
+    private var lastReply: Queued?
+    private var progressChecks: [String: Task<Void, Never>] = [:] { didSet { noteBusy() } }
     private(set) var pendingRequested: Set<String> = [] {
         didSet { if pendingRequested != oldValue { onPendingChange?() } }
     }
@@ -301,6 +307,8 @@ final class SpokenResultOutput {
         for key in Array(generating.keys) { drop(preparing: key) { _ in .stopped } }
         for task in checkingNotice.values { task.cancel() }
         checkingNotice = [:]
+        for task in progressChecks.values { task.cancel() }
+        progressChecks = [:]
         queued = []
         pendingRequested = []
         playingRequested = []
@@ -327,6 +335,8 @@ final class SpokenResultOutput {
         if replay?.conversation == conversation { replay = nil }
         if answering?.item.conversation == conversation { answering = nil }
         if heard?.conversation == conversation { heard = nil }
+        if lastReply?.conversation == conversation { lastReply = nil }
+        stopStillWorking(conversation: conversation)
         guard let playing, playing.conversation == conversation else { return }
         if !announced { report([playing], why) }
         self.playing = nil
@@ -339,6 +349,7 @@ final class SpokenResultOutput {
     }
 
     func withdraw(conversation: String) {
+        stopStillWorking(conversation: conversation)
         defer { settle() }
         let why = { Unread.cancelled(name: $0) }
         drop(preparing: conversation, why)
@@ -377,6 +388,7 @@ final class SpokenResultOutput {
 
     private func supersede(_ conversation: String, requested: Bool, by origin: String?) {
         let why = { Unread.replaced(name: $0) }
+        stopStillWorking(conversation: conversation)
         drop(preparing: conversation, sparing: origin, why)
         if requested { drop(preparing: Self.requestedKey(conversation), sparing: origin, why) }
         drop(queuedWhere: { $0.conversation == conversation && !$0.refusal && (requested || !$0.requested) }, sparing: origin, why)
@@ -398,7 +410,7 @@ final class SpokenResultOutput {
         let plan = SpokenResult.plan(answer: answer, configured: !settings.connection.isEmpty)
         announce(
             conversation: conversation, handle: handle, plan == .nothing && requested ? .speak(SpokenResult.noTextBody) : plan,
-            requested: requested, origin: origin, cause: cause, agent: agent)
+            requested: requested, origin: origin, cause: cause, agent: agent, reply: plan == .nothing ? nil : answer)
     }
 
     func ended(conversation: String, handle: String, body: String, requested: Bool, origin: String? = nil, agent: String? = nil) {
@@ -408,7 +420,7 @@ final class SpokenResultOutput {
 
     private func announce(
         conversation: String, handle: String, _ plan: SpokenResult.Plan, requested: Bool, origin: String?, cause: SpokenResult.Cause? = nil,
-        agent: String? = nil
+        agent: String? = nil, reply: String? = nil
     ) {
         let source = Source(origin: origin, failure: nil, agent: agent)
         let settings = settings()
@@ -457,10 +469,10 @@ final class SpokenResultOutput {
             self.enqueue(summary.text.isEmpty
                 ? Queued(
                     conversation: conversation, name: handle, body: SpokenResult.unavailableBody, unavailable: true, requested: requested,
-                    order: order, origin: origin, agent: agent, failure: summary.failure, cause: cause)
+                    order: order, origin: origin, agent: agent, failure: summary.failure, cause: cause, reply: reply)
                 : Queued(
                     conversation: conversation, name: handle, body: summary.text, requested: requested, order: order, connection: summarizedBy,
-                    origin: origin, agent: agent, returned: summary.returned, cause: cause))
+                    origin: origin, agent: agent, returned: summary.returned, cause: cause, reply: reply))
         }, name: handle, origin: origin, agent: agent)
     }
 
@@ -488,6 +500,7 @@ final class SpokenResultOutput {
     }
 
     func attention(conversation: String, handle: String, _ attention: AgentAttention?, requested: Bool = false) {
+        stopStillWorking(conversation: conversation)
         if let attention, noticed[conversation] == attention { return }
         noticed[conversation] = nil
         checkingNotice.removeValue(forKey: conversation)?.cancel()
@@ -522,6 +535,43 @@ final class SpokenResultOutput {
         }
     }
 
+    var wantsStillWorking: Bool { settings().enabled && settings().stillWorking }
+
+    func stillWorking(conversation: String, handle: String, while working: @escaping @MainActor () -> Bool) {
+        guard wantsStillWorking, progressChecks[conversation] == nil, quiet(conversation), silent, free else { return }
+        load()
+        let inFront = inFront
+        progressChecks[conversation] = Task { [weak self] in
+            let shown = await inFront(conversation)
+            guard !Task.isCancelled, let self else { return }
+            self.progressChecks.removeValue(forKey: conversation)
+            guard !shown, working(), self.wantsStillWorking, self.quiet(conversation), self.silent, self.free else { return self.settle() }
+            self.load()
+            self.play(
+                Queued(conversation: conversation, name: handle, body: SpokenResult.stillWorkingBody, notice: true, progress: true),
+                while: { [weak self] in working() && self?.wantsStillWorking == true })
+        }
+    }
+
+    func stopStillWorking(conversation: String) {
+        progressChecks.removeValue(forKey: conversation)?.cancel()
+        if playing?.progress == true, playing?.conversation == conversation, !announced { playing = nil; speech.stop() }
+    }
+
+    private func quiet(_ conversation: String) -> Bool {
+        playing?.conversation != conversation && !queued.contains { $0.conversation == conversation }
+            && generating[conversation] == nil && generating[Self.requestedKey(conversation)] == nil
+            && checkingNotice[conversation] == nil && noticed[conversation] == nil
+    }
+
+    private var free: Bool {
+        settings().textOnly ? !silencer.isBusy && mayShow() : silencer.isAvailable(for: speech) && !speech.isSpeaking
+    }
+
+    private var silent: Bool {
+        playing == nil && queued.isEmpty && generating.isEmpty && checkingNotice.isEmpty && replay == nil && answering == nil
+    }
+
     func describe(_ prompt: AgentPrompt, handle: String) async -> String? {
         let described = await description(of: prompt, handle: handle)?.text
         return described == SpokenResult.notice(.waiting(prompt)) ? nil : described
@@ -535,6 +585,7 @@ final class SpokenResultOutput {
 
     func answer(conversation: String, handle: String, _ text: String, whileTrue stillTrue: @escaping () -> Bool) -> Bool {
         guard settings().enabled else { return false }
+        stopStillWorking(conversation: conversation)
         if !conversation.isEmpty {
             checkingNotice.removeValue(forKey: conversation)?.cancel()
             queued.removeAll { $0.conversation == conversation && $0.notice && !$0.refusal }
@@ -602,6 +653,18 @@ final class SpokenResultOutput {
         return .repeating(heard.name)
     }
 
+    var hasReplyToRead: Bool { lastReply?.reply != nil }
+
+    func readWholeLast() -> Replay {
+        guard settings().enabled else { return .off }
+        guard var whole = lastReply, let reply = whole.reply else { return .nothingHeard }
+        load()
+        whole.body = SpokenResult.whole(reply)
+        replay = whole
+        playNext()
+        return .repeating(whole.name)
+    }
+
     private func enqueue(_ item: Queued) {
         var item = item
         if item.order == nil {
@@ -609,7 +672,9 @@ final class SpokenResultOutput {
             nextOrder += 1
         }
         let order = item.order ?? 0
-        drop(queuedWhere: { $0.conversation == item.conversation && $0.refusal == item.refusal && (item.requested || !$0.requested) }, sparing: item.origin) {
+        drop(queuedWhere: {
+            $0.conversation == item.conversation && $0.refusal == item.refusal && (item.requested || !$0.requested) && (!item.notice || $0.notice)
+        }, sparing: item.origin) {
             .replaced(name: $0)
         }
         queued.insert(item, at: queued.firstIndex { ($0.order ?? 0) > order } ?? queued.endIndex)
@@ -626,7 +691,10 @@ final class SpokenResultOutput {
         announced = true
         pendingRequested.subtract(playingRequested)
         playingRequested = []
-        heard = playing
+        if !playing.replayed { heard = playing }
+        if !playing.replayed, !playing.notice {
+            if let latest = playing.mergedReplies.last { lastReply = latest } else if playing.reply != nil { lastReply = playing }
+        }
         syncDuck()
         onSpeaking?(Speaking(name: playing.name, text: playing.body, textOnly: playing.shownOnly))
         if !playing.replayed, !playing.standalone, !playing.notice, !playing.heardAlready {
@@ -645,7 +713,7 @@ final class SpokenResultOutput {
     }
 
     private func ended() {
-        if playing?.shownOnly != true, silencer.resumesInterrupted, var interrupted = playing, interrupted.notice {
+        if playing?.shownOnly != true, silencer.resumesInterrupted, var interrupted = playing, interrupted.notice, !interrupted.progress {
             interrupted.replayed = true
             queued.insert(interrupted, at: 0)
         }
@@ -700,7 +768,6 @@ final class SpokenResultOutput {
             answering = nil
             return
         }
-        let free = settings().textOnly ? !silencer.isBusy && mayShow() : silencer.isAvailable(for: speech) && !speech.isSpeaking
         guard playing == nil, free else { return }
         if let answering {
             self.answering = nil
@@ -722,7 +789,8 @@ final class SpokenResultOutput {
             next = Queued(
                 conversation: next.conversation, name: notice.name, body: notice.body, unavailable: true, origin: next.origin, agent: next.agent,
                 merged: merged.isEmpty ? [] : ([next] + merged).map { Source(origin: $0.origin, failure: $0.failure, agent: $0.agent) },
-                failure: next.failure, cause: merged.isEmpty ? next.cause : nil)
+                failure: next.failure, cause: merged.isEmpty ? next.cause : nil, reply: merged.isEmpty ? next.reply : nil,
+                mergedReplies: merged.isEmpty ? [] : ([next] + merged).filter { $0.reply != nil })
         }
         play(next, requested: next.requested ? [next.conversation] : [])
     }

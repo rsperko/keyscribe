@@ -11,11 +11,11 @@ struct SpokenHelpTests {
     private typealias Heading = SpokenHelp.Heading
 
     private func agent(
-        focused: String? = "backend", example: String? = nil, readsReplies: Bool = false, canRepeat: Bool = false,
+        focused: String? = "backend", example: String? = nil, readsReplies: Bool = false, canRepeat: Bool = false, canRead: Bool = false,
         stages: [any PipelineStage] = []
     ) -> SpokenHelp {
         SpokenHelp.agent(
-            title: "Agent", focused: focused, example: example, readsReplies: readsReplies, canRepeat: canRepeat, stages: stages)
+            title: "Agent", focused: focused, example: example, readsReplies: readsReplies, canRepeat: canRepeat, canRead: canRead, stages: stages)
     }
 
     private func voice(
@@ -35,7 +35,7 @@ struct SpokenHelpTests {
         #expect(help.group(Heading.commands).map(\.said) == [
             "tell backend run the unit tests", "run the unit tests", "ask backend what changed", "tell conversation one \u{2026}",
             "open backend", "check on backend", "check on all conversations", "rename this conversation to \u{2026}",
-            "repeat that", "that sounded wrong", "go back", "cancel",
+            "repeat that", "read the whole reply", "that sounded wrong", "go back", "cancel",
         ])
         #expect(!help.rows.contains { $0.effect.localizedCaseInsensitiveContains("recipient") || $0.effect.contains("Later instructions") })
         for row in help.rows { #expect(!row.effect.isEmpty) }
@@ -101,6 +101,9 @@ struct SpokenHelpTests {
         #expect(agent(readsReplies: true).rows.first { $0.said == "repeat that" }?.note == "There\u{2019}s nothing to repeat yet")
         #expect(voice(readsReplies: true).rows.first { $0.said == "repeat that" }?.note == "There\u{2019}s nothing to repeat yet")
         #expect(voice(readsReplies: true, canRepeat: true).rows.first { $0.said == "repeat that" }?.note == nil)
+        #expect(agent(readsReplies: true).rows.first { $0.said == "read the whole reply" }?.note == "There\u{2019}s nothing to repeat yet")
+        #expect(agent(readsReplies: true, canRepeat: true).rows.first { $0.said == "read the whole reply" }?.note == "There\u{2019}s nothing to repeat yet")
+        #expect(agent(readsReplies: true, canRepeat: true, canRead: true).rows.first { $0.said == "read the whole reply" }?.note == nil)
     }
 
     private func mode(_ id: String, _ name: String, phrases: [String], output: Mode.Output = .cursor) -> Mode {
@@ -290,7 +293,7 @@ struct SpokenHelpTests {
     @Test func voiceCommandHelpOffersRepeatAndKeepOnlyWhenRepliesAreReadAloud() {
         #expect(voice(apps: ["Notes", "Safari"]).rows.map(\.said) == ["open Notes", "switch to Safari", "go back", "cancel"])
         #expect(voice(apps: ["Notes", "Safari"], findsInApps: true, readsReplies: true, canRepeat: true).group(Heading.commands).map(\.said) == [
-            "open Notes", "switch to Safari", "open Notes \u{2026}", "repeat that", "that sounded wrong", "go back", "cancel",
+            "open Notes", "switch to Safari", "open Notes \u{2026}", "repeat that", "read the whole reply", "that sounded wrong", "go back", "cancel",
         ])
     }
 

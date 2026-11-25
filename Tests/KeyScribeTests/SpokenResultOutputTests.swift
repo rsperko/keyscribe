@@ -81,12 +81,13 @@ struct SpokenResultOutputTests {
         settings: SpokenResultSettings = SpokenResultSettings(enabled: true, connection: "omlx"), llm: FakeLLM = FakeLLM(), permits: Bool = true,
         silencer: SpeechSilencer = SpeechSilencer(), deadlineSeconds: Double = 30, describeDeadlineSeconds: Double = 30,
         inFront: @escaping @MainActor (String) async -> Bool = { _ in false }, duck: @escaping (Bool) -> Void = { _ in },
-        duckGrace: Duration = .seconds(60), note: @escaping (String) -> Void = { _ in }
+        duckGrace: Duration = .seconds(60), note: @escaping (String) -> Void = { _ in },
+        liveSettings: (() -> SpokenResultSettings)? = nil
     ) -> (SpokenResultOutput, FakeSpeech, FakeLLM) {
         let speech = FakeSpeech()
         let connection = connection
         let output = SpokenResultOutput(
-            client: llm, permits: { _ in permits }, speech: speech, silencer: silencer, settings: { settings },
+            client: llm, permits: { _ in permits }, speech: speech, silencer: silencer, settings: liveSettings ?? { settings },
             connection: { $0 == connection.id ? connection : nil }, deadlineSeconds: deadlineSeconds,
             describeDeadlineSeconds: describeDeadlineSeconds, inFront: inFront, duck: duck, duckGrace: duckGrace, note: note)
         return (output, speech, llm)
@@ -489,6 +490,211 @@ struct SpokenResultOutputTests {
         speech.start()
         speech.finish()
         #expect(heard().map(\.text) == ["docs: Docs done."])
+    }
+
+    @Test func theWholeLastReplyIsReadOnRequestInItsSpokenFormAndNeverRecordedAsHeard() async {
+        let (output, speech, llm) = make()
+        let heard = listening(output)
+        let reply = Self.wordy + "\n\n- CI fails on lint, see https://ci.example.com/run/88."
+        output.finished(conversation: "pi:s1", handle: "api", answer: reply, origin: "a")
+        await settled()
+        speech.start()
+        speech.finish()
+        #expect(speech.spoken.last?.text == "api: \(llm.reply)")
+
+        #expect(output.readWholeLast() == .repeating("api"))
+        await settled()
+        #expect(speech.spoken.last?.text == "api: \(SpokenResult.whole(reply))")
+        #expect(speech.spoken.last?.text.hasSuffix("CI fails on lint, see a link.") == true)
+        speech.start()
+        speech.finish()
+        #expect(heard().map(\.text) == ["api: \(llm.reply)"])
+    }
+
+    final class Front { var shown = true }
+
+    final class HeldFront: @unchecked Sendable {
+        var waiting: CheckedContinuation<Bool, Never>?
+        func ask() async -> Bool { await withCheckedContinuation { waiting = $0 } }
+        func answer(_ shown: Bool) { waiting?.resume(returning: shown); waiting = nil }
+    }
+
+    @Test func stillWorkingIsSaidOnlyWhenTurnedOnAndTheConversationIsNotInFront() async {
+        let (off, offSpeech, _) = make()
+        off.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        #expect(offSpeech.spoken.isEmpty)
+
+        let front = Front()
+        let (output, speech, _) = make(
+            settings: SpokenResultSettings(enabled: true, connection: "omlx", stillWorking: true), inFront: { _ in front.shown })
+        output.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        #expect(speech.spoken.isEmpty)
+        front.shown = false
+        output.stillWorking(conversation: "pi:s1", handle: "api", while: { false })
+        await settled()
+        #expect(speech.spoken.isEmpty)
+        output.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api: \(SpokenResult.stillWorkingBody)"])
+    }
+
+    @Test func aReplyThatArrivesWhileTheStillWorkingCheckWaitsIsNeverReplacedByIt() async {
+        let held = HeldFront()
+        let (output, speech, _) = make(
+            settings: SpokenResultSettings(enabled: true, connection: "omlx", stillWorking: true),
+            inFront: { conversation in conversation == "pi:s1" ? await held.ask() : false })
+        output.finished(conversation: "pi:s0", handle: "cli", answer: "Playing.")
+        await settled()
+        speech.start()
+        output.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done here.")
+        await settled()
+        held.answer(false)
+        await settled()
+        speech.finish()
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["cli: Playing.", "api: Done here."])
+    }
+
+    @Test func stopCancelsAStillWorkingCheckThatIsStillWaitingOnFocus() async {
+        let held = HeldFront()
+        let (output, speech, _) = make(
+            settings: SpokenResultSettings(enabled: true, connection: "omlx", stillWorking: true), inFront: { _ in await held.ask() })
+        output.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        #expect(!output.isIdle)
+        output.stop()
+        held.answer(false)
+        await settled()
+        #expect(speech.spoken.isEmpty)
+    }
+
+    @Test func aStillWorkingCueIsNeverQueuedBehindOtherSpeech() async {
+        let (output, speech, _) = make(settings: SpokenResultSettings(enabled: true, connection: "omlx", stillWorking: true))
+        output.finished(conversation: "pi:s0", handle: "cli", answer: "Playing.")
+        await settled()
+        speech.start()
+        output.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        speech.finish()
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["cli: Playing."])
+    }
+
+    @Test func noStillWorkingCueWhileARecordingHoldsSpeechOrIfOneStartsDuringTheFocusCheck() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(settings: SpokenResultSettings(enabled: true, connection: "omlx", stillWorking: true), silencer: silencer)
+        silencer.recordingStarted()
+        output.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        silencer.recordingEnded()
+        await settled()
+        #expect(speech.spoken.isEmpty)
+
+        let held = HeldFront()
+        let silencer2 = SpeechSilencer()
+        let (late, lateSpeech, _) = make(
+            settings: SpokenResultSettings(enabled: true, connection: "omlx", stillWorking: true), silencer: silencer2,
+            inFront: { _ in await held.ask() })
+        late.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        silencer2.recordingStarted()
+        held.answer(false)
+        await settled()
+        silencer2.recordingEnded()
+        await settled()
+        #expect(lateSpeech.spoken.isEmpty)
+    }
+
+    @Test func aStillWorkingCueCutOffByAnAnswerIsNotReadAgain() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(settings: SpokenResultSettings(enabled: true, connection: "omlx", stillWorking: true), silencer: silencer)
+        output.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        speech.start()
+        let answer = silencer.registered(FakeSpeech())
+        silencer.speak("An answer.", voice: nil, with: answer, resumingInterrupted: true)
+        answer.finish()
+        silencer.released(answer)
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api: \(SpokenResult.stillWorkingBody)"])
+    }
+
+    @Test func twoFailedSummariesMergedIntoOneNoticeStillLeaveTheNewestReplyToReadWhole() async {
+        let llm = FakeLLM()
+        llm.fails = true
+        let (output, speech, _) = make(llm: llm)
+        output.finished(conversation: "pi:s0", handle: "cli", answer: "Playing.")
+        await settled()
+        speech.start()
+        output.finished(conversation: "pi:s1", handle: "api", answer: Self.wordy + " First.")
+        output.finished(conversation: "pi:s2", handle: "docs", answer: Self.wordy + " Second.")
+        await settled()
+        speech.finish()
+        await settled()
+        speech.start()
+        speech.finish()
+        #expect(output.readWholeLast() == .repeating("docs"))
+        await settled()
+        #expect(speech.spoken.last?.text == "docs: \(SpokenResult.whole(Self.wordy + " Second."))")
+    }
+
+    @Test func noStillWorkingCueWhileTheConversationWaitsForAnApproval() async {
+        let (output, speech, _) = make(settings: SpokenResultSettings(enabled: true, connection: "omlx", stillWorking: true))
+        output.attention(conversation: "pi:s1", handle: "api", .approval)
+        await settled()
+        speech.start()
+        speech.finish()
+        output.stillWorking(conversation: "pi:s1", handle: "api", while: { true })
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api: \(SpokenResult.notice(.approval))"])
+    }
+
+    @Test func theWholeReplyIsTheLastReplyEvenAfterANoticeAndARepeatStillGivesTheSummary() async {
+        let (output, speech, llm) = make(settings: SpokenResultSettings(enabled: true, connection: "omlx", stillWorking: true))
+        let reply = Self.wordy + " Finally done."
+        output.finished(conversation: "pi:s1", handle: "api", answer: reply)
+        await settled()
+        speech.start()
+        speech.finish()
+        output.stillWorking(conversation: "pi:s2", handle: "docs", while: { true })
+        await settled()
+        speech.start()
+        speech.finish()
+        #expect(output.readWholeLast() == .repeating("api"))
+        await settled()
+        #expect(speech.spoken.last?.text == "api: \(SpokenResult.whole(reply))")
+        speech.start()
+        speech.finish()
+        #expect(output.repeatLast() == .repeating("docs"))
+        await settled()
+        #expect(speech.spoken.last?.text == "docs: \(SpokenResult.stillWorkingBody)")
+        #expect(llm.requests.count == 1)
+    }
+
+    @Test(arguments: [true, false])
+    func theWholeReplyIsThereWhenItsSummaryFailedOrNoServiceIsChosen(_ serviceFails: Bool) async {
+        let llm = FakeLLM()
+        llm.fails = serviceFails
+        let (output, speech, _) = make(
+            settings: SpokenResultSettings(enabled: true, connection: serviceFails ? "omlx" : ""), llm: llm)
+        let reply = Self.wordy + " Finally done."
+        output.finished(conversation: "pi:s1", handle: "api", answer: reply)
+        await settled()
+        speech.start()
+        speech.finish()
+        #expect(output.hasReplyToRead)
+        #expect(output.readWholeLast() == .repeating("api"))
+        await settled()
+        #expect(speech.spoken.last?.text == "api: \(SpokenResult.whole(reply))")
+    }
+
+    @Test func withNoReplyHeardThereIsNothingToReadWhole() {
+        let (output, _, _) = make()
+        #expect(output.readWholeLast() == .nothingHeard)
     }
 
     @Test func aRefusedDictationIsSpokenOnceEvenWithItsConversationInFrontAndIsNotRecordedAgain() async {

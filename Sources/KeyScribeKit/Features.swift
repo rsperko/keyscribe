@@ -18,12 +18,19 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     public let title: String
     public let summary: String
     private let requiresId: String?
+    private let namesAgents: Bool
 
-    init(id: String, title: String, summary: String, requires: Feature? = nil) {
+    init(id: String, title: String, summary: String, requires: Feature? = nil, namesAgents: Bool = false) {
         self.id = id
         self.title = title
         self.summary = summary
         self.requiresId = requires?.id
+        self.namesAgents = namesAgents
+    }
+
+    public func summary(agents: [String]) -> String {
+        guard namesAgents, !agents.isEmpty else { return summary }
+        return "\(summary) Works with \(ListFormatter.localizedString(byJoining: agents))."
     }
 
     public var requires: Feature? { Self.allCases.first { $0.id == requiresId } }
@@ -61,7 +68,8 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     public static let agents = Feature(
         id: "agents",
         title: "Talk to agents",
-        summary: "Send what you say to an agent conversation running in a terminal, such as Claude Code, Pi, omp or Codex, and hear when it finishes. Requires installing the agent connector."
+        summary: "Send what you say to an agent conversation and hear when it finishes. Requires installing the agent connector.",
+        namesAgents: true
     )
 
     public static let askAboutSelection = Feature(

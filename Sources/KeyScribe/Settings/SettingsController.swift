@@ -171,7 +171,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
             settings: settings, onChange: onChange, onReload: onReload,
             onResetHUDPosition: onResetHUDPosition, onPreviewSound: onPreviewSound,
             onEraseAllData: onEraseAllData,
-            voiceCommandNotices: VoiceCommandNotices(supportDir: repository.supportDir))
+            voiceCommandNotices: VoiceCommandNotices(supportDir: repository.supportDir),
+            agentNames: agentIntegrations.names)
         self.speechModels = speechModels
         modesDir = repository.modesDir
         dictionary = DictionarySettingsModel(repository: repository)
@@ -623,7 +624,7 @@ private struct AdvancedSettingsView: View {
         Toggle(isOn: model.binding(for: feature)) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(feature.title)
-                Text(feature.summary)
+                Text(feature.summary(agents: model.agentNames))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -739,6 +740,7 @@ final class SettingsModel: ObservableObject {
     @Published var featureStates: [String: Bool] { didSet { persist() } }
     @Published var confirmingVoiceCommands = false
     let voiceCommandNotices: VoiceCommandNotices
+    let agentNames: [String]
     @Published private(set) var diagnosticsStatus: String?
     @Published var configIssues: [ConfigFileIssue] = []
     private var diagnosticsStatusTask: Task<Void, Never>?
@@ -851,9 +853,11 @@ final class SettingsModel: ObservableObject {
         onReload: @escaping () -> Void, onResetHUDPosition: @escaping () -> Void,
         onPreviewSound: @escaping (Int) -> Void = { _ in },
         onEraseAllData: @escaping () -> Void = {},
-        voiceCommandNotices: VoiceCommandNotices? = nil
+        voiceCommandNotices: VoiceCommandNotices? = nil,
+        agentNames: [String] = []
     ) {
         self.settings = settings
+        self.agentNames = agentNames
         self.voiceCommandNotices = voiceCommandNotices ?? VoiceCommandNotices(supportDir: KeyScribePaths.supportDir)
         self.onChange = onChange
         self.onReload = onReload

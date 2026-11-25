@@ -385,8 +385,8 @@ failure) and never makes the conversation's place unknown. Terminal and Warp off
 Each place is described in its own words (“tmux window backend”, “Ghostty terminal Architect”). A
 conversation that runs in herdr inside a named terminal tab gets the herdr name first and the tab after
 it. A read that fails keeps the names the conversation had; a conversation that never had a place answers
-that it has none, so a failing read never holds dictation for a user who named nothing. A newly named
-terminal tab is picked up within about ten seconds; a renamed one within a few.
+that it has none, so a failing read never holds dictation for a user who named nothing. A newly named or
+renamed terminal tab is read again at the next press of an Agent shortcut, and every second while Settings is open.
 A name around several conversations, such as a tab holding a tmux client with several agents, is a shared
 label and asks. Two panes showing the same
 title or label, and two herdr agents whose names sound the same (on separate herdr servers, or differing
@@ -619,7 +619,15 @@ exactly as it was heard, ahead of any still waiting, and sends nothing. The repl
 rather than the queue, so a newer result for the same conversation does not replace it and an unavailable
 notice is never merged again with notices still waiting. It does not repeat the front check, since the user asked for it.
 The HUD names the conversation (“docs”), or says “There’s nothing to repeat yet.” or “Read Agent Replies Aloud is off.”;
-History records the command and adds no second copy of the line. Inside a longer take or after “tell” and a name it is
+History records the command and adds no second copy of the line. A take that is only “read the whole reply” or “read the
+full reply” (`VoiceCommandGrammar.readReply`) is the same kind of command and answers the same way, but reads the last
+reply in full instead of its summary, even when no summary could be made, in the spoken form a short reply is read in
+with each table row read as its cells (`SpokenResult.whole`): every sentence kept, a code block named as one, a link
+said as “a link”, a path as its file name, a number written with “#” left out, and a secret the redaction recognizes
+said as “a hidden value”. It reads the last reply, never a notice that came after it, and “repeat that” afterwards
+still gives what was heard before it. Nothing is sent to a service for it,
+it is never recorded as heard, and Stop, Escape or a new dictation stops it like any reply. In the Agent mode it is a
+command only while Read Agent Replies Aloud is on and a reply has been heard; otherwise it is sent to the agent. Inside a longer take or after “tell” and a name it is
 message text. A take that is only “rename this conversation to” or “rename this session to” a new name (“name this
 conversation …” and “call this session …” work too) renames the conversation in front when the take started,
 with the same check Settings' Rename uses (`AgentRename.parse`, then `AgentHub.rename`), and sends nothing; it
@@ -2267,13 +2275,18 @@ Its caption says what it does while off ("Get replies to messages you dictate or
 know when it needs you.") and, while on, the current voice in one line ("Read aloud with the Heart voice.
 Longer replies are summarized by {service}." or "Shown as text, not read aloud. …"). While the switch is on, the
 section shows **Summary service**, the **Summary instruction** (only while a service is chosen, as a mode's
-writing instruction shows only with its AI service), then **Voice** and the voice's files. The summary
+writing instruction shows only with its AI service), then **Voice** and the voice's files, then **Say when a long turn
+is still working** (off by default; its caption "After a minute, then every five minutes, unless the conversation is in
+front."): a turn a dictation started gets a "{name}: Still working." notice once it runs past a minute and again every
+five minutes until it ends, skipped while that conversation is in front, while it waits on a prompt, or when
+anything else is speaking, waiting to speak, or held back by a recording; it is never queued, and a dictation that
+cuts it off does not bring it back. The summary
 service is separate from the Agent mode's rewrite service, with a different name, so the service that
 rewrites what the user says is never mistaken for the one that summarizes replies; its row's caption is the data
 boundary in one line. **About reading replies aloud**, under the switch, opens a help dialog in three parts: **What
 you get** (the agent's reply to a dictated message, its reply to work the user asked to hear about, a short notice
-for an approval request, a question or a disconnection, and that a reply is skipped while its conversation is in
-front), **Read aloud or shown** (each reply and notice is shown and read aloud unless the voice is **Off — text
+for an approval request, a question or a disconnection, that a reply is skipped while its conversation is in
+front, the still-working notice, and "read the whole reply"), **Read aloud or shown** (each reply and notice is shown and read aloud unless the voice is **Off — text
 only**; speech is made on this Mac), and **Summaries and what is sent**, one short paragraph each for short
 replies, longer replies, waiting prompts, redaction, and History (replies are saved, notices are not). The dialog
 and every caption call what the feature gives a reply, a summary or a notice, never an update: the user receives an
@@ -2395,12 +2408,16 @@ a non-English summary is read by an English speaker or the macOS default voice.
 
 Every summary starts with the exact name of the conversation that produced it, even with only one open, and
 the default instruction asks for one or two short sentences, about 25 words in all, leading with anything that failed, is
-unverified, or waits on the developer, else the main result, and leaving out everything else. It keeps to what the reply
-says, and names a link, path, hash, ID, or address only by its kind ("the issue"), since a listener cannot use one
-read aloud, even spelled out. When the reply came
+unverified, or waits on the developer, wherever the reply states it, else the main result, and leaving out everything
+else. It keeps to what the reply says, and names a link, path, file, hash, ID, or address only by its kind ("the
+issue"), since a listener cannot use one read aloud, even spelled out; what is spoken also drops an issue or pull
+request number written with "#" and any word holding five or more digits in a row, whatever the summary says. A
+failure in a list near the end of a long reply, a request repeated back, and a number read out are measured with
+`KeyScribe --spoken-eval evals/spoken` (its README). When the reply came
 right after the user's own dictation and the user has moved on from it (a couple of minutes have passed, they dictated
-to another conversation since, or other replies are waiting), the summary is asked with that dictation and opens with
-two to five words naming it; a reply while they are still on that request needs no cue and is summarized alone, within the same length, while the order above still decides what follows; when it came after a message someone else sent, the name is joined by who, in a few words and
+to another conversation since, or other replies are waiting), the summary is asked with that dictation and, when the reply does what it asked, opens with
+two to five words naming that task; a dictation that only adds a note, such as something to ask for later, is not
+mentioned, and the request is never repeated back as part of the answer; a reply while they are still on that request needs no cue and is summarized alone, within the same length, while the order above still decides what follows; when it came after a message someone else sent, the name is joined by who, in a few words and
 no new sentence ("{name}, answering another agent:", "{name}, after a background task:", "{name}, after a scheduled
 prompt:", "{name}, answering someone else:"), even for a short reply read as it is. When the connector cannot say which
 message the reply answers, it names neither: a cue that names the wrong request is worse than none. It gives no example: a

@@ -168,6 +168,17 @@ struct CodexHostTests {
         #expect(CodexHost(enrolled: { ["/tmp/x"] }, installed: { true }).isEnabled)
     }
 
+    @Test func whetherCodexIsInstalledIsLookedUpAtMostOnceAMinute() {
+        final class Looks: @unchecked Sendable { var count = 0; var now = Date(timeIntervalSince1970: 1000) }
+        let looks = Looks()
+        let host = CodexHost(enrolled: { ["/tmp/x"] }, installed: { looks.count += 1; return true }, now: { looks.now })
+        for _ in 0..<5 { _ = host.isEnabled }
+        #expect(looks.count == 1)
+        looks.now += CodexHost.installedRecheck + 1
+        _ = host.isEnabled
+        #expect(looks.count == 2)
+    }
+
     @Test func anIdleThreadIsSentOneTurnCarryingOnlyTheTextAndItsOwnMessageId() async throws {
         let (host, daemon, script) = try rig()
         defer { daemon.stop() }

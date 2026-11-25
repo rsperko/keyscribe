@@ -59,9 +59,9 @@ struct AgentPhrasesTests {
         #expect(said.suffix(2).map { VoiceCommandGrammar.parse($0) } == [.goBack, .cancel])
         #expect(!said.contains(VoiceCommandGrammar.repeatSummary[0]))
         let reading = phrases(readsReplies: true)
-        #expect(reading.count == said.count + 2)
+        #expect(reading.count == said.count + 3)
         let replies = reading.filter { !said.contains($0) }
-        #expect(replies.map { VoiceCommandGrammar.parse($0) } == [.repeatSummary, .keepReply])
+        #expect(replies.map { VoiceCommandGrammar.parse($0) } == [.repeatSummary, .readReply, .keepReply])
     }
 
     @Test func withoutNamesTheExamplesUseTheConversationNumber() {

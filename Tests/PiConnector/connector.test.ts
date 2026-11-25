@@ -1,6 +1,9 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { connector, readAloudToolName, type Host, type Response } from "../../Sources/KeyScribe/Resources/PiConnector/index.ts"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { connector, nodeHost, readAloudToolName, type Host, type Response } from "../../Sources/KeyScribe/Resources/PiConnector/index.ts"
 
 type Request = {
   path: string
@@ -13,11 +16,16 @@ type Request = {
   refuse: () => void
 }
 
-type Options = { configPath?: string | null; loadedFrom?: string | null; builtVersion?: string | null; mode?: string; now?: number; api?: Record<string, unknown> }
+type Options = {
+  configPath?: string | null; loadedFrom?: string | null; builtVersion?: string | null; mode?: string; now?: number; api?: Record<string, unknown>
+  watches?: boolean
+}
 
 function harness(options: Options = {}) {
   const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>()
   const requests: Request[] = []
+  const watching: Array<{ folder: string; fn: () => void; broken: () => void; closed: boolean }> = []
+  let onWatch: (() => void) | null = null
   const sends: Array<{ text: string; options: any }> = []
   const statuses: Array<string | undefined> = []
   const execs: string[][] = []
@@ -78,6 +86,14 @@ function harness(options: Options = {}) {
       execs.push([command, ...args])
       return { code: execCode }
     },
+    ...(options.watches ? {
+      watch: (folder: string, fn: () => void, broken: () => void) => {
+        const watch = { folder, fn, broken, closed: false }
+        watching.push(watch)
+        onWatch?.()
+        return () => { watch.closed = true }
+      },
+    } : {}),
     post: (socketPath, path, body, token) => {
       let resolve: (r: Response) => void = () => {}
       let reject: (e: Error) => void = () => {}
@@ -236,7 +252,8 @@ function harness(options: Options = {}) {
   const turn = (n: number) => `${events().find((b) => b.op === "hello").instance}.${n}`
 
   return {
-    requests, sends, statuses, execs, env, files, images, live, timers, config, tools, commands, notes, runCommand,
+    requests, sends, statuses, execs, env, files, images, live, timers, config, tools, commands, notes, runCommand, watching,
+    set onWatch(fn: (() => void) | null) { onWatch = fn },
     set autoEvents(value: boolean) { autoEvents = value },
     get now() { return now },
     set now(value: number) { now = value },
@@ -576,7 +593,7 @@ test("a submission whose connection was lost is confirmed on the next connection
   const h = harness()
   await h.connect()
   await h.deliver([h.submit("r1", "continue")])
-  await h.advance(28_000)
+  await h.advance(310_000)
   const hellos = h.events().filter((b) => b.op === "hello")
   assert.equal(hellos.length, 2)
   await h.deliver([h.submit("r2", "continue")])
@@ -611,7 +628,7 @@ test("a confirmation the app already took is not sent again", async () => {
   await h.connect()
   await h.deliver([h.submit("r1", "run the tests")])
   await h.accepted()
-  await h.advance(28_000)
+  await h.advance(310_000)
   await h.answerEvents()
   assert.equal(h.replies().filter((b) => b.op === "submitted").length, 1)
 })
@@ -1243,7 +1260,7 @@ test("a hello sent while a dialog is open carries what it waits for", async () =
   await h.connect()
   h.emit("ui_prompt_start", { kind: "input", title: "Which database?" })
   await h.answerEvents()
-  await h.advance(28_000)
+  await h.advance(310_000)
   const hellos = h.events().filter((b) => b.op === "hello")
   assert.equal(hellos.length, 2)
   assert.equal(hellos[0].waiting, undefined)
@@ -1503,6 +1520,45 @@ test("without readiness nothing connects, and only a local check runs about ever
   assert.equal(h.requests.length, 0)
 })
 
+test("without readiness a connector that can watch the app's folder reads nothing until the folder changes", async () => {
+  const h = harness({ watches: true })
+  h.ready(undefined)
+  await h.start()
+  const before = h.readyChecks()
+  await h.advance(60_000)
+  assert.equal(h.readyChecks(), before)
+  assert.equal(h.requests.length, 0)
+  const open = h.watching.filter((w) => !w.closed)
+  assert.deepEqual(open.map((w) => w.folder), ["/tmp"])
+  h.ready("L1")
+  open[0].fn()
+  await h.settle()
+  assert.equal(h.open("/event")[0]?.body.op, "hello")
+})
+
+test("the app starting just as the watch is set up is seen by the read that follows it", async () => {
+  const h = harness({ watches: true })
+  h.ready(undefined)
+  h.onWatch = () => h.ready("L1")
+  await h.start()
+  await h.settle()
+  assert.equal(h.open("/event")[0]?.body.op, "hello")
+})
+
+test("a watch that breaks falls back to the ten-second check for good, without spinning", async () => {
+  const h = harness({ watches: true })
+  h.ready(undefined)
+  await h.start()
+  const before = h.readyChecks()
+  h.watching.filter((w) => !w.closed)[0].broken()
+  await h.settle()
+  const after = h.readyChecks()
+  assert.ok(after - before <= 2)
+  await h.advance(10_000)
+  assert.equal(h.readyChecks(), after + 1)
+  assert.equal(h.watching.filter((w) => !w.closed).length, 0)
+})
+
 test("a refused launch is never tried again until the bridge relaunches", async () => {
   const h = harness()
   await h.start()
@@ -1532,6 +1588,46 @@ test("a bridge that keeps hanging is retried with growing waits", async () => {
   assert.equal(h.requests.length, 2)
   await h.advance(30_000)
   assert.equal(h.requests.length, 3)
+})
+
+test("a cooldown that ends between the ten-second checks retries at once", async () => {
+  const random = Math.random
+  Math.random = () => 0.5
+  try {
+    const h = harness()
+    await h.start()
+    await h.advance(2_000)
+    assert.equal(h.requests.length, 1)
+    await h.advance(33_000)
+    assert.equal(h.requests.length, 1)
+    await h.advance(1_000)
+    assert.equal(h.requests.length, 2)
+    assert.equal(h.requests[1].body.op, "hello")
+  } finally {
+    Math.random = random
+  }
+})
+
+test("the real host still reports the app's ready file after the watched folder is removed and made again", async () => {
+  const folder = join(mkdtempSync(join(tmpdir(), "ks-watch-")), "app")
+  mkdirSync(folder)
+  let changes = 0
+  let broken = false
+  const unwatch = nodeHost({} as any).watch!(folder, () => { changes += 1 }, () => { broken = true })
+  try {
+    assert.ok(unwatch)
+    rmSync(folder, { recursive: true })
+    await new Promise((r) => setTimeout(r, 300))
+    mkdirSync(folder)
+    await new Promise((r) => setTimeout(r, 300))
+    const before = changes
+    writeFileSync(join(folder, "ready.json"), "{}")
+    for (let i = 0; i < 40 && changes === before && !broken; i++) await new Promise((r) => setTimeout(r, 50))
+    assert.ok(changes > before || broken, "neither a change nor a broken watch was reported")
+  } finally {
+    unwatch?.()
+    rmSync(dirname(folder), { recursive: true, force: true })
+  }
 })
 
 test("a relaunched bridge ends the wait", async () => {
@@ -1577,7 +1673,7 @@ test("a poll past its deadline reconnects, and the connection is said hello agai
   const h = harness()
   await h.connect()
   const poll = h.open("/poll")[0]
-  await h.advance(28_000)
+  await h.advance(310_000)
   assert.equal(poll.cancelled, true)
   const hellos = h.events().filter((b) => b.op === "hello")
   assert.equal(hellos.length, 2)

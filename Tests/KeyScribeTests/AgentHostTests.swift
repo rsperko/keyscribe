@@ -226,6 +226,24 @@ struct AgentHostTests {
             makeId: { "r1" }, accessibilityTrusted: accessibility)
     }
 
+    @Test func aHostWhoseConnectorHangsUpIsListedAgainSoItsEndedConversationsGo() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        #expect(hub.directory.conversations.map(\.id).contains(Self.id("t1")))
+        host.conversations = []
+        await hub.rescan()
+        #expect(hub.directory.conversations.map(\.id).contains(Self.id("t1")))
+
+        let scans = host.scans
+        await hub.hungUp(agents: ["claude"])
+        #expect(host.scans == scans)
+        await hub.hungUp(agents: [Self.kind.id])
+        #expect(host.scans == scans + 1)
+        #expect(!hub.directory.conversations.map(\.id).contains(Self.id("t1")))
+    }
+
     @Test func aHostedConversationNeverLeavesConversationNamesUnread() async {
         let host = FakeHost()
         host.conversations = [Self.thread("t1")]
@@ -532,6 +550,32 @@ struct AgentHostTests {
         return nil
     }
 
+    @Test func aDictatedTurnInAHostedConversationIsSaidToBeStillWorkingUntilItEnds() async throws {
+        let host = FakeHost()
+        host.route = .connector
+        let transport = FakeTransport()
+        let hub = await connected(host, transport, features: ["promptDigest", "readiness", "notify", "steer"])
+        hub.sleep = { _ in await Task.yield() }
+        hub.stillWorkingWanted = { true }
+        var cues: [String] = []
+        var ended: [String] = []
+        hub.onStillWorking = { conversation, _, _ in cues.append(conversation) }
+        hub.onStillWorkingEnded = { ended.append($0) }
+        let delivery = Task { await hub.deliver("fix the test", to: Self.id("t1"), request: "q1") }
+        let sent = try #require(await submitted(transport))
+        hub.handle(.submitted(request: sent.id, turn: "t-1"))
+        _ = await delivery.value
+        let prompt = AgentPromptDigest.of("fix the test")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "t-1", prompt: prompt))
+        for _ in 0..<100 where cues.count < 2 { await Task.yield() }
+        #expect(cues.count >= 2 && Set(cues) == [Self.id("t1")])
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Fixed.", after: AgentTurnInput(from: nil, prompt: prompt)))
+        let after = cues.count
+        for _ in 0..<100 { await Task.yield() }
+        #expect(cues.count == after)
+        #expect(ended == [Self.id("t1")])
+    }
+
     @Test func aHostWhoseConnectorDeliversSendsOverTheBridgeAndFollowsTheReply() async throws {
         let host = FakeHost()
         host.route = .connector
@@ -639,6 +683,25 @@ struct AgentHostTests {
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: AgentPromptDigest.of("fix the login and the logout too")))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Both fixed.", after: nil, turn: "turn-2"))
         #expect(origins == ["q2"])
+    }
+
+    @Test func aDictatedTurnTheHostSaysItTookIsSaidToBeStillWorkingUntilItEnds() async {
+        let (hub, _) = await accepting(FakeHost())
+        hub.sleep = { _ in await Task.yield() }
+        hub.stillWorkingWanted = { true }
+        var cues = 0
+        var ended: [String] = []
+        hub.onStillWorking = { _, _, _ in cues += 1 }
+        hub.onStillWorkingEnded = { ended.append($0) }
+        _ = await hub.deliver("reply with one", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: AgentPromptDigest.of("reply with one")))
+        for _ in 0..<100 where cues < 2 { await Task.yield() }
+        #expect(cues >= 2)
+        self.ended(hub, "Done.", took: ["reply with one"])
+        let after = cues
+        for _ in 0..<100 { await Task.yield() }
+        #expect(cues == after)
+        #expect(ended == [Self.id("t1")])
     }
 
     private func accepting(_ host: FakeHost, clock: AgentHubTests.Clock = AgentHubTests.Clock()) async -> (AgentHub, FakeTransport) {

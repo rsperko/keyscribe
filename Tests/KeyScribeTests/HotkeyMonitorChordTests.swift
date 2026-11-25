@@ -60,13 +60,13 @@ struct HotkeyMonitorChordTests {
         await withCheckedContinuation { c in DispatchQueue.main.async { c.resume() } }
     }
 
-    @Test func chordPressAndReleaseDriveTheGesture() async {
+    @Test func chordPressAndReleaseDriveTheGesture() async throws {
         let fake = FakeChordRegistrar()
         var starts = 0, commits = 0
         let m = HotkeyMonitor(
             bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e")])
-        #expect(fake.lastRegistrations.count == 1)
+        try #require(fake.lastRegistrations.count == 1)
 
         fake.lastRegistrations[0].onPressed()
         await drainMain()

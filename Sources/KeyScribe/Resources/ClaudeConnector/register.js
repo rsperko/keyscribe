@@ -3,7 +3,7 @@ const queueLimit = 64
 const queueBytesLimit = 16 * 1024
 const answerLimit = 8 * 1024
 const eventDeadline = 2000
-const pollDeadline = 28000
+const pollDeadline = 310000
 const discoveryInterval = 10000
 const admitLimit = 4096
 const backoff = [30000, 60000, 120000, 300000]
@@ -850,7 +850,7 @@ async function pollLoop($) {
       if (!(await greet($, target)) && session === target && helloSession !== target) await rest($)
       continue
     }
-    const { result, settled } = await exchange($, '/poll', JSON.stringify({ session: target, instance, connection }), pollDeadline)
+    const { result, settled } = await exchange($, '/poll', JSON.stringify({ session: target, instance, connection, wait: pollDeadline / 1000 }), pollDeadline)
     if (result === late) {
       if (current(target, gen)) lose($)
       await settled

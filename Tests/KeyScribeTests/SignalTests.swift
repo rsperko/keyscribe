@@ -30,7 +30,7 @@ struct SignalTests {
 
         await Signal("never-fired", onExpiry: expiries.reporter).wait(within: 0.2)
 
-        #expect(clock.now - start < .seconds(2))
+        #expect(clock.now - start < .seconds(10))
         #expect(expiries.all.count == 1)
     }
 

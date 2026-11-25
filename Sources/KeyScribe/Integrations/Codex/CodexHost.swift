@@ -54,6 +54,8 @@ final class CodexHost: AgentHost {
     private let confirmFor: TimeInterval
     private let now: () -> Date
     private var homes: [String: Home] = [:]
+    private var installedSeen: (at: Date, installed: Bool)?
+    static let installedRecheck: TimeInterval = 60
     private var ownPrompts: [String] = []
     private var changed: (@MainActor (AgentHostChange) -> Void)?
 
@@ -102,7 +104,14 @@ final class CodexHost: AgentHost {
         return enrolled().filter { seen.insert($0).inserted }
     }
 
-    var isEnabled: Bool { !folders.isEmpty && installed() }
+    var isEnabled: Bool { !folders.isEmpty && isInstalled }
+
+    private var isInstalled: Bool {
+        if let seen = installedSeen, now().timeIntervalSince(seen.at) < Self.installedRecheck { return seen.installed }
+        let found = installed()
+        installedSeen = (now(), found)
+        return found
+    }
 
     var takesImages: Bool { true }
 

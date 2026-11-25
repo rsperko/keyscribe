@@ -72,6 +72,10 @@ elapsed=$(( $(now) - start ))
 check "a hook with no bridge exits 0 and prints nothing" "$out" "status=0"
 check "a hook with no bridge returns at once" "$([ "$elapsed" -lt 500 ] && echo fast || echo "$elapsed ms")" fast
 
+oversized=$(head -c 400000 /dev/zero | tr '\0' 'a')
+trace=$(printf '{"hook_event_name":"Stop","last_assistant_message":"%s"}' "$oversized" | /bin/sh -x "$EXE" hook inst-1 2>&1 > /dev/null)
+check "an oversized hook with no bridge is dropped without being reshaped" "$(printf %s "$trace" | grep -c plutil)" 0
+
 : > "$SOCKET"
 out=$(printf '{}' | "$EXE" hook inst-1; echo "status=$?")
 check "a hook facing a file where the socket should be exits 0" "$out" "status=0"

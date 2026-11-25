@@ -119,6 +119,20 @@ struct AgentDirectoryPlaceTests {
         #expect(directory.sharedPlaceNames.values.map(\.names) == [["\(bare) claude", "\(bare) pi"]])
     }
 
+    @Test(arguments: [true, false])
+    func hundredsOfConversationsSharingOnePlaceNameAreEachListedOnceUnderIt(byAgentName: Bool) {
+        var directory = AgentDirectory()
+        let count = 300
+        directory.update(
+            entries: (0..<count).map { session("pi", "s\($0)", pid: 1000 + $0) }, live: [],
+            places: Dictionary(uniqueKeysWithValues: (0..<count).map {
+                ("pi:s\($0)", place(agentName: byAgentName ? "cos" : nil, paneId: "p\($0)"))
+            }))
+        #expect(directory.conversations.count == count)
+        #expect(Set(directory.conversations.map(\.handle)).count == count)
+        #expect(directory.sharedPlaceNames["cos"]?.names.count == count)
+    }
+
     @Test func eachOtherHerdrNameOfAConversationGetsItsKind() {
         var directory = AgentDirectory(chosen: ["claude:b": "builder"])
         directory.update(

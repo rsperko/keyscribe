@@ -39,6 +39,8 @@ public struct AgentIntegrations: Sendable {
 
     var agentAddresses: [AgentNativeAddress] { agents.compactMap(\.addresses) }
 
+    var names: [String] { agents.map(\.kind.displayName) + hosts.map(\.kind.displayName) }
+
     public func resolve() throws -> ResolvedSurfaces {
         try AgentSurfaces.checkKinds(agents.map(\.kind.id) + hosts.map(\.kind.id))
         return try surfaces.resolve()

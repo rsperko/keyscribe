@@ -602,7 +602,11 @@ private struct HUDView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let height = HUDState.agentListHeight(rows: agents.rows.count, screenHeight: model.screenHeight) {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical) { agentRows(agents) }
+                    ScrollView(.vertical) {
+                        LazyVStack(alignment: .leading, spacing: HUDState.agentRowStep - HUDState.agentRowHeight) {
+                            ForEach(agents.rows, id: \.id) { agentRow($0) }
+                        }
+                    }
                         .frame(height: height)
                         .onChange(of: model.recordingAdmission, initial: true) { _, _ in scrollToTarget(agents, proxy) }
                         .onChange(of: agents.rows.first(where: \.target)?.id) { _, _ in scrollToTarget(agents, proxy) }

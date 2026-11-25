@@ -20,12 +20,26 @@ struct AgentHubTests {
             if let instance { pinned[command.id] = instance }
         }
         var sessionsOf: (String) -> [String] = { _ in [] }
-        func isLive(instance: String) -> Bool { liveInstances.contains(instance) || sessionsOf(instance).contains(where: live.contains) }
+        var liveCalls = 0
+        func isLive(instance: String) -> Bool {
+            liveCalls += 1
+            return liveInstances.contains(instance) || sessionsOf(instance).contains(where: live.contains)
+        }
         func withdraw(_ id: String) -> Bool {
             withdrawn.append(id)
             return true
         }
-        func isLive(session: String) -> Bool { live.contains(session) }
+        func isLive(session: String) -> Bool {
+            liveCalls += 1
+            return live.contains(session)
+        }
+        var snapshots = 0
+        func liveness(sessions: Set<String>, instances: Set<String>) -> AgentLiveness {
+            snapshots += 1
+            return AgentLiveness(
+                sessions: sessions.intersection(live),
+                instances: instances.filter { liveInstances.contains($0) || sessionsOf($0).contains(where: live.contains) })
+        }
         var forgotten: [String] = []
         func forget(session: String) { forgotten.append(session) }
         var rehelloed: [String] = []
@@ -82,11 +96,6 @@ struct AgentHubTests {
         registry.set(session, status: status)
         transport.live.insert(AgentSessionID.make(agent: "claude", native: session))
         await hub.rescan()
-    }
-
-    @Test func theRescanIsQuickOnlyWhileSettingsIsOpen() {
-        #expect(AgentRuntime.rescanInterval(settingsOpen: true) == .seconds(1))
-        #expect(AgentRuntime.rescanInterval(settingsOpen: false) == .seconds(10))
     }
 
     @Test func anIdleConversationIsSentAndConfirmedByTheConnector() async {
@@ -580,6 +589,104 @@ struct AgentHubTests {
         hub.followSteer(of: "claude:s1", for: "r9", text: "use the other file")
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it."))
         #expect(origins == ["r9"])
+    }
+
+    final class Waits: @unchecked Sendable { var seen: [Duration] = [] }
+
+    @Test func aLongTurnADictationStartedIsSaidToBeStillWorkingUntilItEnds() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        let waits = Waits()
+        hub.sleep = { waits.seen.append($0); await Task.yield() }
+        hub.stillWorkingWanted = { true }
+        var cues: [String] = []
+        var ended: [String] = []
+        hub.onStillWorkingEnded = { ended.append($0) }
+        hub.onStillWorking = { _, handle, working in
+            #expect(working())
+            cues.append(handle)
+            if cues.count == 2 { hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done.")) }
+        }
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
+        hub.followSteer(of: "claude:s1", for: "r9", text: "use the other file")
+        for _ in 0..<500 { await Task.yield() }
+        #expect(cues == ["keyscribe", "keyscribe"])
+        #expect(ended == ["claude:s1"])
+        #expect(Array(waits.seen.filter { [AgentHub.stillWorkingFirst, AgentHub.stillWorkingAgain].contains($0) }.prefix(2))
+            == [AgentHub.stillWorkingFirst, AgentHub.stillWorkingAgain])
+    }
+
+    @Test func aTurnNoDictationStartedIsNeverSaidToBeStillWorking() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        hub.sleep = { _ in await Task.yield() }
+        hub.stillWorkingWanted = { true }
+        var cues = 0
+        hub.onStillWorking = { _, _, _ in cues += 1 }
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        for _ in 0..<200 { await Task.yield() }
+        #expect(cues == 0)
+    }
+
+    @Test func nothingWaitsForTheStillWorkingCueWhileItIsOffOrAfterTheHubStops() async {
+        for stops in [false, true] {
+            let (hub, transport, registry, _) = makeHub()
+            await connected(hub, transport, registry, status: "busy")
+            greet(hub, working())
+            let waits = Waits()
+            hub.sleep = { waits.seen.append($0); await Task.yield() }
+            hub.stillWorkingWanted = { stops }
+            var cues = 0
+            hub.onStillWorking = { _, _, _ in cues += 1 }
+            hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+            hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
+            hub.followSteer(of: "claude:s1", for: "r9", text: "use the other file")
+            if stops { hub.stop() }
+            for _ in 0..<200 { await Task.yield() }
+            #expect(cues == 0)
+            #expect(!waits.seen.contains(AgentHub.stillWorkingAgain))
+        }
+    }
+
+    @Test func noStillWorkingCueWhileTheTurnWaitsForAnApproval() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        final class Gate: @unchecked Sendable { var open = false }
+        let gate = Gate()
+        hub.sleep = { _ in while !gate.open { await Task.yield() } }
+        hub.stillWorkingWanted = { true }
+        var cues = 0
+        hub.onStillWorking = { _, _, _ in cues += 1 }
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
+        hub.followSteer(of: "claude:s1", for: "r9", text: "use the other file")
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        await hub.rescan()
+        gate.open = true
+        for _ in 0..<200 { await Task.yield() }
+        #expect(cues == 0)
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
+    }
+
+    @Test func noStillWorkingCueWhileTheTurnWaitsOnAPrompt() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        hub.sleep = { _ in await Task.yield() }
+        hub.stillWorkingWanted = { true }
+        var cues = 0
+        hub.onStillWorking = { _, _, _ in cues += 1 }
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "confirm", title: "Allow rm?")))
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
+        hub.followSteer(of: "claude:s1", for: "r9", text: "use the other file")
+        for _ in 0..<200 { await Task.yield() }
+        #expect(cues == 0)
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
     }
 
     enum SteerReport: String, CaseIterable, Sendable { case absorbedA, absorbedB, followA, followB }
@@ -2299,7 +2406,12 @@ struct AgentHubTests {
             if blocked { await withCheckedContinuation { waiting.append($0) } }
             return result
         }
-        func stillRunning(_ remembered: RememberedName) -> Bool { false }
+        var running = false
+        private(set) var runningChecks = 0
+        func stillRunning(_ remembered: RememberedName) -> Bool {
+            runningChecks += 1
+            return running
+        }
         func observe(_ event: AgentEvent) { observed.append(event) }
         func retire(sessions: Set<String>) {
             retired.append(sessions)
@@ -2463,6 +2575,130 @@ struct AgentHubTests {
 
     private static func fakeSession(_ id: String) -> AgentSession {
         AgentSession(agent: "fake", id: id, pid: 10, cwd: "/src/api", state: .idle)
+    }
+
+    @Test func aRefreshAndARescanAskTheBridgeAboutLivenessOnceWhateverTheRosterSize() async {
+        let (hub, transport, registry, _) = makeHub()
+        for i in 0..<50 {
+            registry.set("s\(i)", cwd: "/src/project\(i)", pid: 100 + i)
+            transport.live.insert("claude:s\(i)")
+            transport.liveInstances.insert("i\(i)")
+        }
+        await hub.rescan()
+        hub.handle((0..<50).map { i in
+            .hello(.init(protocolVersion: 3, agent: "claude", agentVersion: "", instance: "i\(i)", session: "claude:s\(i)", pid: 100 + i,
+                         features: ["label", "readiness"], connection: "i\(i)"))
+        })
+        await hub.rescan()
+        transport.liveCalls = 0
+        transport.snapshots = 0
+
+        hub.refresh()
+        #expect(transport.liveCalls == 0)
+        #expect(transport.snapshots == 1)
+        await hub.rescan()
+        #expect(transport.liveCalls == 0)
+        #expect(transport.snapshots == 2)
+    }
+
+    @Test func aBurstOfHellosHandledTogetherRebuildsTheRosterAndRescansOnce() async {
+        let fake = FakeDiscovery()
+        let transport = FakeTransport()
+        let hub = AgentHub(transport: transport, discovery: [fake])
+        let count = 300
+        fake.result = .found((0..<count).map { i in
+            AgentSession(agent: "fake", id: "f\(i)", pid: 1000 + i, cwd: "/src/project\(i)", state: .idle)
+        })
+        transport.live = Set((0..<count).map { "fake:f\($0)" })
+        await hub.rescan()
+        let scansBefore = fake.scans
+        var changes = 0
+        hub.onChange = { changes += 1 }
+
+        hub.handle((0..<count).flatMap { i -> [AgentEvent] in [
+            .hello(.init(protocolVersion: 3, agent: "fake", agentVersion: "", instance: "i\(i)", session: "fake:f\(i)", pid: 1000 + i, title: "task")),
+            .title(session: "fake:f\(i)", text: "task \(i)"),
+            .shown(session: "fake:f\(i)", on: false),
+        ] })
+        for _ in 0..<200 { await Task.yield() }
+
+        #expect(changes == 1)
+        #expect(fake.scans == scansBefore + 1)
+        #expect(hub.handle(of: "fake:f7") == "task seven")
+    }
+
+    @Test func aTitleThatRepeatsTheOneAlreadyKnownStartsNoRebuildOrRescan() async {
+        let fake = FakeDiscovery()
+        let transport = FakeTransport()
+        let hub = AgentHub(transport: transport, discovery: [fake])
+        fake.result = .found([Self.fakeSession("f1")])
+        transport.live = ["fake:f1"]
+        await hub.rescan()
+        hub.handle(.title(session: "fake:f1", text: "release notes"))
+        for _ in 0..<100 { await Task.yield() }
+        let rebuilds = hub.rosterRebuilds, scans = fake.scans
+        hub.handle(.title(session: "fake:f1", text: "release notes"))
+        for _ in 0..<100 { await Task.yield() }
+        #expect(hub.rosterRebuilds == rebuilds)
+        #expect(fake.scans == scans)
+        hub.handle(.title(session: "fake:f1", text: "docs"))
+        for _ in 0..<100 { await Task.yield() }
+        #expect(hub.handle(of: "fake:f1") == "docs")
+    }
+
+    @Test func aRefreshWithNothingNewLeavesTheRosterUnbuiltUntilSomethingChanges() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try AgentNameStore(directory: dir).save([:], remembered: [
+            "fake:gone": RememberedName(name: "old work", pid: 5, startedAt: 1, native: nil, agent: "fake"),
+        ])
+        let fake = FakeDiscovery()
+        fake.running = true
+        let transport = FakeTransport()
+        let hub = AgentHub(transport: transport, discovery: [fake], names: AgentNameStore(directory: dir))
+        fake.result = .found([Self.fakeSession("f1")])
+        transport.live = ["fake:f1"]
+        await hub.rescan()
+        let checks = fake.runningChecks
+        #expect(checks > 0)
+
+        let rebuilds = hub.rosterRebuilds
+        hub.refresh()
+        await hub.rescan()
+        #expect(hub.rosterRebuilds == rebuilds)
+        #expect(hub.directory.remembered["fake:gone"] != nil)
+
+        let checksBeforeRelease = fake.runningChecks
+        fake.running = false
+        await hub.rescan()
+        #expect(hub.rosterRebuilds == rebuilds + 1)
+        #expect(fake.runningChecks == checksBeforeRelease + 1)
+        #expect(hub.directory.remembered["fake:gone"] == nil)
+
+        var second = Self.fakeSession("f2")
+        second.pid = 11
+        fake.result = .found([Self.fakeSession("f1"), second])
+        await hub.rescan()
+        #expect(fake.runningChecks > checks)
+        #expect(hub.handle(of: "fake:f2") != nil)
+    }
+
+    @Test func aTitleRightAfterItsHelloIsSettledWithItInOneRebuild() async {
+        let fake = FakeDiscovery()
+        let transport = FakeTransport()
+        let hub = AgentHub(transport: transport, discovery: [fake])
+        fake.result = .found([Self.fakeSession("f1")])
+        transport.live = ["fake:f1"]
+        await hub.rescan()
+        var handles: [String?] = []
+        hub.onChange = { handles.append(hub.handle(of: "fake:f1")) }
+
+        hub.handle([
+            .hello(.init(protocolVersion: 3, agent: "fake", agentVersion: "", instance: "i1", session: "fake:f1", pid: 10, title: "docs")),
+            .title(session: "fake:f1", text: "release notes"),
+        ])
+
+        #expect(handles == ["release notes"])
     }
 
     @Test func anUnreadableSessionListKeepsTheLastRosterAndSaysSo() async {
@@ -3079,6 +3315,75 @@ struct AgentHubTests {
         try Data(#"{"type":"ai-title","aiTitle":"Much later","sessionId":"claude:s1"}"#.utf8).write(to: folder.appendingPathComponent("s1.jsonl"))
         await hub.rescan(rereadingTitles: false)
         #expect(hub.directory.conversations.first?.title == "Later")
+    }
+
+    @Test func theHubWantsAnotherLookOnlyWhileATurnsTitleMayStillArrive() async throws {
+        let clock = ClaudeTranscriptTitlesTests.Clock()
+        clock.now = Date()
+        let registry = Registry()
+        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, scanDeadline: .seconds(30), now: { clock.now })
+        registry.set("s1")
+        await hub.rescan()
+        #expect(hub.nextLook == nil)
+
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.nextLook == clock.now + ClaudeDiscovery.titleRecheck)
+
+        clock.now += ClaudeDiscovery.titleWatch
+        await hub.rescan(rereadingTitles: false)
+        #expect(hub.nextLook == nil)
+    }
+
+    @Test func theRuntimeWakesEverySecondWhileSettingsIsOpenAndOtherwiseOnlyForALookThatIsDue() {
+        let now = Date(timeIntervalSince1970: 1000)
+        #expect(AgentRuntime.pace(settingsOpen: true, nextLook: nil, now: now) == .seconds(1))
+        #expect(AgentRuntime.pace(settingsOpen: false, nextLook: nil, now: now) == nil)
+        #expect(AgentRuntime.pace(settingsOpen: false, nextLook: now + 4, now: now) == .seconds(4))
+        #expect(AgentRuntime.pace(settingsOpen: false, nextLook: now - 4, now: now) == .zero)
+    }
+
+    @Test func theProcessOfAConversationRememberedByNameIsWatchedUntilItsNameIsReleased() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try AgentNameStore(directory: dir).save([:], remembered: [
+            "fake:gone": RememberedName(name: "old work", pid: 77, startedAt: 1, native: nil, agent: "fake"),
+        ])
+        let fake = FakeDiscovery()
+        fake.running = true
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake], names: AgentNameStore(directory: dir))
+        var watched: [Set<Int>] = []
+        hub.onProcesses = { watched.append($0) }
+        fake.result = .found([Self.fakeSession("f1")])
+        await hub.rescan()
+        fake.running = false
+        await hub.rescan()
+        #expect(watched == [[10, 77], [10]])
+    }
+
+    @Test func eachRefreshTellsWhichProcessesTheListedConversationsRunIn() async {
+        let fake = FakeDiscovery()
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake])
+        var watched: [Set<Int>] = []
+        hub.onProcesses = { watched.append($0) }
+        var second = Self.fakeSession("f2")
+        second.pid = 11
+        fake.result = .found([Self.fakeSession("f1"), second])
+        await hub.rescan()
+        fake.result = .found([Self.fakeSession("f1")])
+        await hub.rescan()
+        await hub.rescan()
+        #expect(watched == [[10, 11], [10]])
+    }
+
+    @Test func aPressRescansEveryAgentEvenWithNoHostTurnedOn() async {
+        let fake = FakeDiscovery()
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake])
+        await hub.rescan()
+        let before = fake.scans
+        #expect(hub.startHostRefreshForPress() == nil)
+        for _ in 0..<50 where fake.scans == before { await Task.yield() }
+        #expect(fake.scans == before + 1)
     }
 
     @Test func anExplicitTranscriptNameIsAddressableBeforeTheConnectorStarts() async throws {

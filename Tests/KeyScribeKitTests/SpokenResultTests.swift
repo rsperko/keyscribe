@@ -59,9 +59,13 @@ struct SpokenResultTests {
         ("Open h t t p s colon slash slash example dot com.", "Open a link."),
         ("Saved to /Users/me/src/app/Sources/Config.swift and ~/notes/todo.md.", "Saved to Config.swift and todo.md."),
         ("Use and/or the 3.2 release, see e.g. the docs.", "Use and/or the 3.2 release, see e.g. the docs."),
+        ("Fixed importer/retry.rb and Sources/App/Parser.swift over TCP/IP at 1/2.5 speed.", "Fixed retry.rb and Parser.swift over TCP/IP at 1/2.5 speed."),
         ("You opened issue seven seven two one three and assigned it.", "You opened issue and assigned it."),
         ("Published 0 5 7 2 1 today.", "Published today."),
         ("Counted one, two, three and 1 2 3 of them.", "Counted one, two, three and 1 2 3 of them."),
+        ("Pull request #1234567 failed its checks.", "Pull request failed its checks."),
+        ("Fixed in #42, see the pull request (#1234567).", "Fixed in, see the pull request."),
+        ("It is C# 12 and item&#35; stays.", "It is C# 12 and item&#35; stays."),
     ])
     func theSpokenFormNeverReadsOutALinkOrAPath(text: String, spoken: String) {
         #expect(SpokenResult.spokenForm(text) == spoken)
@@ -79,6 +83,28 @@ struct SpokenResultTests {
         #expect(SpokenResult.spokenForm(reply) == spoken)
     }
 
+    @Test func aWholeReplyIsReadWithEveryPointButWithoutItsCodeLinksIdsOrSecrets() {
+        let reply = """
+        ## Done
+
+        - Fixed the parser in `Sources/App/Parser.swift`.
+        - CI fails on lint in #1234567, see https://ci.example.com/run/88.
+        - The key sk-abcdefghijklmnopqrstuvwxyz1234 was rotated.
+
+        ```swift
+        let x = 1
+        ```
+        Ask me before merging.
+        """
+        let read = SpokenResult.readable(reply)
+        #expect(read.contains("Fixed the parser in Parser.swift."))
+        #expect(read.contains("CI fails on lint in, see a link."))
+        #expect(read.contains("code block"))
+        #expect(read.contains("Ask me before merging."))
+        #expect(read.contains("The key a hidden value was rotated."))
+        #expect(!read.contains("#") && !read.contains("let x"))
+    }
+
     @Test func aReplyThatIsMostlyCodeIsSummarizedRatherThanReadAsAFewWords() {
         let code = (1...60).map { "let value\($0) = compute(\($0))" }.joined(separator: "\n")
         let reply = "Here is the change:\n```swift\n\(code)\n```"
@@ -87,6 +113,53 @@ struct SpokenResultTests {
 
     @Test func aShortReplyNeverSpeaksASecretTheRedactionRecognizes() {
         #expect(SpokenResult.plan(answer: "The key is sk-abcdefghijklmnopqrstuvwxyz1234 now.", configured: true) == .speak("The key is a hidden value now."))
+    }
+
+    @Test(arguments: [
+        ("The 20261122_drop_projects_creator migration failed in pull request 1234567.", "The migration failed in pull request."),
+        ("It updated 48,210 rows in 2026 across 1,204 tests.", "It updated 48,210 rows in 2026 across 1,204 tests."),
+    ])
+    func aSummaryNeverReadsOutAnIdentifierMadeOfManyDigits(summary: String, spoken: String) {
+        #expect(SpokenResult.spoken(summary: summary) == spoken)
+    }
+
+    @Test func aReplyReadAsWrittenKeepsItsLongNumbersButNotItsIssueNumbers() {
+        #expect(SpokenResult.plan(answer: "Processed 120000 rows for #1234567.", configured: true) == .speak("Processed 120000 rows for."))
+        #expect(SpokenResult.readable("Processed 120000 rows.") == "Processed 120000 rows.")
+    }
+
+    @Test func aWholeReplyReadsATablesRowsInsteadOfDroppingThem() {
+        let reply = """
+        Jobs:
+
+        | Job | Result |
+        |---|---|
+        | lint | failed |
+        | tests | passed |
+
+        Done.
+        """
+        #expect(SpokenResult.whole(reply) == "Jobs: Job, Result. lint, failed. tests, passed. Done.")
+    }
+
+    @Test func aTableWithWindowsLineEndingsAfterAOneLineFenceIsStillReadRowByRow() {
+        let reply = "```make test```\r\n\r\n| Job | Result |\r\n|---|---|\r\n| lint | failed |\r\n"
+        #expect(SpokenResult.whole(reply).hasSuffix("Job, Result. lint, failed."))
+    }
+
+    @Test func aPipeOutsideATableRowIsLeftAsWritten() {
+        let reply = """
+        Use `a || b` and pipe it: ls | grep x.
+
+        | Step | State |
+        |---|---|
+        | build | ok |
+
+        ```
+        | not | a table |
+        ```
+        """
+        #expect(SpokenResult.whole(reply) == "Use a || b and pipe it: ls | grep x. Step, State. build, ok. code block")
     }
 
     @Test func aReplyThatIsOnlyATableIsSummarizedNotDropped() {
@@ -221,16 +294,23 @@ struct SpokenResultTests {
         #expect(SpokenResult.request(answer: "Done.", asked: "Fix it.", prompt: standard, tokenizer: Tokenizer()).system == standard)
     }
 
-    @Test func theDefaultPromptOpensWithTheRequestAndKeepsTheSameLength() {
+    @Test func theDefaultPromptOpensWithTheTaskTheReplyDoesAndNeverRepeatsTheRequest() {
         let prompt = SpokenResultSettings.defaultPrompt
         #expect(prompt.contains("about 25 words in all"))
-        #expect(prompt.contains("under \"Request:\", open with two to five words naming"))
-        #expect(prompt.contains("comes first"))
+        #expect(prompt.contains("under \"Request:\" and the reply does what it asked, open with two to five words naming that task"))
+        #expect(prompt.contains("When the request only adds a note"))
+        #expect(prompt.contains("Never repeat the request or the agent's acknowledgment of it"))
+    }
+
+    @Test func theDefaultPromptLeadsWithAFailureWhereverTheReplyStatesIt() {
+        let prompt = SpokenResultSettings.defaultPrompt
+        #expect(prompt.contains("comes first, wherever the reply states it, even in a list near the end"))
+        #expect(prompt.contains("say plainly that it failed, is unverified, or waits on them"))
     }
 
     @Test func theDefaultPromptNamesWhatALinkOrIdentifierPointsToInsteadOfReadingIt() {
         let prompt = SpokenResultSettings.defaultPrompt
-        #expect(prompt.contains("Never say a link, file path, commit hash, ID, issue number, or address, in any form"))
+        #expect(prompt.contains("Never say a link, file name or path, commit hash, ID, issue number, or address, in any form, nor a name with digits in it"))
         #expect(prompt.contains("name only its kind"))
         #expect(prompt.contains("round large numbers"))
         #expect(prompt.contains("Use only what the reply states"))
@@ -281,6 +361,14 @@ struct SpokenResultEnablementTests {
         settings.agents.spokenResult = SpokenResultSettings(enabled: true, voice: "bf_emma", textOnly: true)
         let reread = try SettingsStore.decode(from: SettingsStore.encode(settings)).agents.spokenResult
         #expect(reread.textOnly && reread.voice == "bf_emma" && reread.enabled)
+    }
+
+    @Test func theStillWorkingCueIsOffUntilTurnedOnAndIsSaved() throws {
+        #expect(!SpokenResultSettings().stillWorking)
+        var settings = Settings.defaults
+        settings.agents.spokenResult = SpokenResultSettings(enabled: true, stillWorking: true)
+        #expect(try SettingsStore.decode(from: SettingsStore.encode(settings)).agents.spokenResult.stillWorking)
+        #expect(try SettingsStore.encode(settings).contains("still_working = true"))
     }
 
     @Test func readingAloudIsItsOwnSwitchAndNeedsAServiceToSpeak() {

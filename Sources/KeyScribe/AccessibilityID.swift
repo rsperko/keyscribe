@@ -374,6 +374,7 @@ enum AccessibilityID {
             static let defaultName = "mode.agents.defaultName"
             static let useDefaultName = "mode.agents.useDefaultName"
             static let spokenResultEnabled = "mode.agents.spokenResultEnabled"
+            static let spokenResultStillWorking = "mode.agents.spokenResultStillWorking"
             static let spokenResultService = "mode.agents.spokenResultService"
             static let spokenResultOpenAIServices = "mode.agents.spokenResultOpenAIServices"
             static let spokenResultPrompt = "mode.agents.spokenResultPrompt"

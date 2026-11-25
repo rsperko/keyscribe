@@ -78,6 +78,7 @@ struct CheatSheetPhraseTests {
             "open Slack general": .voice(.action(.sidebarItem(slackGeneral))),
             "go back": .voice(.action(.goBack)),
             "repeat that": .voice(.action(.repeatSummary)),
+            "read the whole reply": .voice(.action(.readReply)),
             "say that again": .voice(.action(.repeatSummary)),
             "that sounded wrong": .voice(.action(.keepReply)),
             "cancel": .voice(.cancelled),
@@ -111,6 +112,7 @@ struct CheatSheetPhraseTests {
             "call this conversation backend": .rename("backend"),
             "rename conversation to backend": .rename("backend"),
             "repeat that": .intent(.repeatSummary),
+            "read the whole reply": .intent(.readReply),
             "that sounded wrong": .intent(.keepReply),
             "go back": .intent(.goBack),
             "cancel": .intent(.cancel),
@@ -189,7 +191,7 @@ struct CheatSheetPhraseTests {
                 if case .check(let address?) = query { return "status:check:\(caseName(address))" }
                 return "status:\(String(describing: query))"
             }
-            if let intent = VoiceCommandGrammar.parse(said), [.repeatSummary, .keepReply, .cancel, .goBack].contains(intent) {
+            if let intent = VoiceCommandGrammar.parse(said), [.repeatSummary, .readReply, .keepReply, .cancel, .goBack].contains(intent) {
                 return "intent:\(intent)"
             }
             let address = AgentAddress.parse(said, names: ["backend"])

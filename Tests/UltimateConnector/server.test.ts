@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { registerHooks } from "node:module"
 import { test } from "node:test"
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs"
-import { join } from "node:path"
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 import { tmpdir } from "node:os"
 
 const hooks = registerHooks({
@@ -209,4 +209,36 @@ test("the extension registers onRelease and onClose where the host has them", as
   const hook = (named: string) => () => hooks.push(named)
   server.default({ home: "/nowhere", onOpen: hook("open"), onRelease: hook("release"), onClose: hook("close") } as any)
   assert.deepEqual(hooks, ["open", "release", "close"])
+})
+
+test("a task graph update that leaves every conversation's busy state as it was changes nothing", async () => {
+  const { busyChanged } = server
+  const busy = new Set<number>()
+  assert.equal(busyChanged(busy, { a: { conversationId: 1, background: false }, b: { conversationId: 2, background: true } }), true)
+  assert.deepEqual([...busy], [1])
+  assert.equal(busyChanged(busy, { c: { conversationId: 1, background: false } }), false)
+  assert.equal(busyChanged(busy, {}), true)
+  assert.deepEqual([...busy], [])
+})
+
+test("the host still reports the app's ready file after the watched folder is removed and made again", async () => {
+  const folder = join(mkdtempSync(join(tmpdir(), "ks-watch-")), "app")
+  mkdirSync(folder)
+  let changes = 0
+  let broken = false
+  const unwatch = server.watchFolder(folder, () => { changes += 1 }, () => { broken = true })
+  try {
+    assert.ok(unwatch)
+    rmSync(folder, { recursive: true })
+    await new Promise((r) => setTimeout(r, 300))
+    mkdirSync(folder)
+    await new Promise((r) => setTimeout(r, 300))
+    const before = changes
+    writeFileSync(join(folder, "ready.json"), "{}")
+    for (let i = 0; i < 40 && changes === before && !broken; i++) await new Promise((r) => setTimeout(r, 50))
+    assert.ok(changes > before || broken, "neither a change nor a broken watch was reported")
+  } finally {
+    unwatch?.()
+    rmSync(dirname(folder), { recursive: true, force: true })
+  }
 })

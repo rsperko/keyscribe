@@ -218,7 +218,7 @@ test('a poll past its deadline disconnects, and polling resumes only after it se
   await h.connect($)
   const stuck = h.open('/poll')[0]
 
-  await h.clock.advance(28000)
+  await h.clock.advance(310000)
   await h.settle()
   expect(h.ops()).toEqual(['hello', 'hello'])
   h.open('/event')[0].answer(200)

@@ -75,6 +75,9 @@ struct AgentDeliveryWiringTests {
         }
         func isLive(session: String) -> Bool { live && !unreachable.contains(session) }
         func isLive(instance: String) -> Bool { live }
+        func liveness(sessions: Set<String>, instances: Set<String>) -> AgentLiveness {
+            AgentLiveness(sessions: sessions.filter(isLive(session:)), instances: instances.filter(isLive(instance:)))
+        }
         func forget(session: String) {}
         func withdraw(_ id: String) -> Bool { false }
     }
@@ -1002,6 +1005,25 @@ struct AgentDeliveryWiringTests {
         #expect(rosters(rig).compactMap { $0?.rows.map(\.name) }.allSatisfy { $0 == ["keyscribe", "keyscribe blue"] })
     }
 
+    @Test func aPressTakesInBridgeEventsStillWaitingBeforeItReadsTheConversations() async {
+        let rig = await rig("run the tests.", focused: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        var drained = 0
+        var renamedWhenRead: String?
+        rig.hub.drainEvents = {
+            drained += 1
+            rig.hub.handle(.title(session: "claude:s1", text: "release notes"))
+        }
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        renamedWhenRead = rig.controller.agentSnapshot?.conversations.first { $0.id == "claude:s1" }?.handle
+        await rig.controller.captureBringUpTask?.value
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(drained >= 1)
+        #expect(renamedWhenRead == "release notes")
+    }
+
     private func herdrNamedRig(_ text: String, firstStatus: String = "idle", firstWaitingFor: String? = nil) async -> Rig {
         let reader = AgentPlaceTrackerTests.Reader()
         let rig = await rig(text, focused: "claude:s2", firstStatus: firstStatus, firstWaitingFor: firstWaitingFor, places: reader)
@@ -1896,7 +1918,7 @@ struct AgentDeliveryWiringTests {
         #expect(rig.texts == ["to run the tests."])
     }
 
-    @Test func cancellingWhileTheMessageIsBeingSentKeepsTheTruthfulReceipt() async {
+    @Test func cancellingWhileTheMessageIsBeingSentKeepsTheTruthfulReceipt() async throws {
         let rig = await rig("Run the tests.", focused: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.confirms = false
@@ -1905,10 +1927,10 @@ struct AgentDeliveryWiringTests {
         await rig.controller.captureBringUpTask?.value
         rig.controller.handleCommit()
         for _ in 0..<200 where rig.sent.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-        #expect(rig.sent.count == 1)
+        let sent = try #require(rig.sent.first)
 
         rig.controller.cancel()
-        rig.hub.handle(.submitted(request: rig.sent[0].0.id, turn: ""))
+        rig.hub.handle(.submitted(request: sent.0.id, turn: ""))
         await rig.controller.dictationTask?.value
         for _ in 0..<200 where rig.controller.isBusy { try? await Task.sleep(for: .milliseconds(5)) }
 

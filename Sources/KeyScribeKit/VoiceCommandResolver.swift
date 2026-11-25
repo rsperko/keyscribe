@@ -160,6 +160,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
     case sidebarItem(VoiceCommandCatalog.SidebarItem)
     case goBack
     case repeatSummary
+    case readReply
     case keepReply
 
     public func summary(appName: (String) -> String?) -> String {
@@ -170,6 +171,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .sidebarItem(let item): return appName(item.bundleId).map { "\(item.name) \u{00B7} \($0)" } ?? item.name
         case .goBack: return "Back"
         case .repeatSummary: return "Repeat"
+        case .readReply: return "Whole reply"
         case .keepReply: return "Kept"
         case .place(let place, .tab(let tab)):
             return appName(tab.browserBundleId).map { "\(place.name) · \($0)" } ?? place.name
@@ -190,6 +192,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
             return "Opens \u{201C}\(item.name)\u{201D} in the sidebar of \(appName(item.bundleId) ?? item.bundleId)."
         case .goBack: return "Returns to the window or app you were in before your last command."
         case .repeatSummary: return "Replays the last spoken reply."
+        case .readReply: return "Reads the last reply in full, without its code, links or ids."
         case .keepReply: return "Keeps the last spoken reply\u{2019}s audio, text and report with its History entry."
         case .place(_, .app(let bundleId)):
             return "Brings \(appName(bundleId) ?? bundleId) to the front\(opening)."
@@ -258,6 +261,7 @@ public enum VoiceCommandResolver {
         case needsVerb(SavedMatch)
         case goBack
         case repeatSummary
+        case readReply
         case keepReply
         case cancel
         case help
@@ -274,6 +278,7 @@ public enum VoiceCommandResolver {
             return bare.map(Route.needsVerb) ?? .notACommand
         case .goBack: return .goBack
         case .repeatSummary: return .repeatSummary
+        case .readReply: return .readReply
         case .keepReply: return .keepReply
         case .cancel: return .cancel
         case .help: return .help
@@ -292,6 +297,7 @@ public enum VoiceCommandResolver {
         case .needsVerb(let match): return needsVerb(match)
         case .goBack: return .action(.goBack)
         case .repeatSummary: return .action(.repeatSummary)
+        case .readReply: return .action(.readReply)
         case .keepReply: return .action(.keepReply)
         case .cancel: return .cancelled
         case .help: return .help

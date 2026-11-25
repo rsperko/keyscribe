@@ -183,4 +183,17 @@ struct InjectedIntegrationsTests {
         separator.hosts[0].kind = AgentKind(id: "ex:ample", displayName: "Example", connectorName: "")
         #expect(throws: AgentSurfaces.Conflict.kind("ex:ample")) { try separator.resolve() }
     }
+
+    @MainActor @Test func theTalkToAgentsDescriptionNamesEveryRegisteredAgentAndHost() {
+        var integrations = AgentIntegrations.builtIn
+        #expect(integrations.names == ["Claude Code", "Pi", "omp", "bb", "Codex", "Ultimate"])
+        integrations.hosts.append(AgentHostIntegration(kind: AgentHostTests.kind, make: { AgentHostTests.FakeHost() }))
+
+        let summary = Feature.agents.summary(agents: integrations.names)
+
+        for name in ["Claude Code", "Pi", "omp", "bb", "Codex", "Ultimate", "Example"] {
+            #expect(summary.contains(name))
+        }
+        #expect(!summary.contains("terminal"))
+    }
 }

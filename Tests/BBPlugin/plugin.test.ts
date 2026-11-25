@@ -493,6 +493,54 @@ test("every command a poll brings is acknowledged by the thread it was for, and 
   assert.equal(h.open("poll").length, 1)
 })
 
+test("names for many threads in one answer redraw the sidebar once", async () => {
+  const h = await connected()
+  h.open("poll")[0].answer(200, JSON.stringify({ commands: [
+    { op: "status", id: "c1", expectedSession: session("thr_a"), text: "one" },
+    { op: "status", id: "c2", expectedSession: session("thr_b"), text: "two" },
+  ], unknown: [] }))
+  await h.settle()
+  assert.deepEqual(h.plugin.labels(["thr_a", "thr_b"]), { thr_a: "one", thr_b: "two" })
+  assert.equal(h.labelChanges(), 1)
+})
+
+test("once the app says acknowledgments may ride on the next poll, they go there instead of as events of their own", async () => {
+  const h = harness()
+  const plugin = keyscribe(h.bb, h.host, ["/p/keyscribe.json"])
+  await h.settle()
+  for (const r of h.open("hello")) r.answer(200, '{"ok":true,"acks":true}')
+  await h.settle()
+  await h.answerEvents()
+  const poll = h.open("poll")[0]
+  const member = poll.body.members.find((m: any) => m.session === session("thr_b"))
+  poll.answer(200, JSON.stringify({ commands: [{ op: "status", id: "c1", expectedSession: session("thr_b"), text: "two" }], unknown: [] }))
+  await h.settle()
+  assert.deepEqual(h.sent("ack"), [])
+  assert.deepEqual(h.open("poll")[0].body.acks, [{ request: "c1", instance: member.instance }])
+  plugin.stop()
+})
+
+test("acknowledgments on a poll replaced before it is answered go on the next poll", async () => {
+  const h = harness()
+  const plugin = keyscribe(h.bb, h.host, ["/p/keyscribe.json"])
+  await h.settle()
+  for (const r of h.open("hello")) r.answer(200, '{"ok":true,"acks":true}')
+  await h.settle()
+  await h.answerEvents()
+  assert.equal(h.open("poll")[0].body.wait, 310)
+  h.open("poll")[0].answer(200, JSON.stringify({ commands: [{ op: "status", id: "c1", expectedSession: session("thr_b"), text: "two" }], unknown: [] }))
+  await h.settle()
+  const carrying = h.open("poll")[0]
+  assert.deepEqual(carrying.body.acks.map((a: any) => a.request), ["c1"])
+  await h.emit("thread.created", { thread: { id: "thr_c", status: "pending" } })
+  for (const r of h.open("hello")) r.answer(200, '{"ok":true,"acks":true}')
+  await h.settle()
+  const next = h.open("poll")[0]
+  assert.notEqual(next, carrying)
+  assert.deepEqual(next.body.acks.map((a: any) => a.request), ["c1"])
+  plugin.stop()
+})
+
 test("the name the app gives a thread is kept for that thread, acknowledged, and redrawn", async () => {
   const h = await connected()
   assert.deepEqual(h.plugin.labels(["thr_a", "thr_b"]), { thr_a: null, thr_b: null })

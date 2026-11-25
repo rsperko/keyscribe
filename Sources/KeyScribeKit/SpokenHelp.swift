@@ -59,14 +59,17 @@ public struct SpokenHelp: Equatable, Sendable {
         rows.map { matches($0) ? Row(said: $0.said, effect: $0.effect, note: note) : $0 }
     }
 
-    private static func notingRepeat(_ rows: [Row], canRepeat: Bool) -> [Row] {
-        canRepeat ? rows : noting(rows, nothingToRepeat) { $0.said == VoiceCommandGrammar.repeatSummary[0] }
+    private static func notingRepeat(_ rows: [Row], canRepeat: Bool, canRead: Bool) -> [Row] {
+        let unavailable = (canRepeat ? [] : [VoiceCommandGrammar.repeatSummary[0]]) + (canRead ? [] : [VoiceCommandGrammar.readReply[0]])
+        return noting(rows, nothingToRepeat) { unavailable.contains($0.said) }
     }
 
     public static func agent(
-        title: String, focused: String?, example: String?, readsReplies: Bool, canRepeat: Bool, stages: [any PipelineStage]
+        title: String, focused: String?, example: String?, readsReplies: Bool, canRepeat: Bool, canRead: Bool = false,
+        stages: [any PipelineStage]
     ) -> SpokenHelp {
-        var commands = notingRepeat(agentPhrases(name: focused ?? example, inFront: focused, readsReplies: readsReplies), canRepeat: canRepeat)
+        var commands = notingRepeat(
+            agentPhrases(name: focused ?? example, inFront: focused, readsReplies: readsReplies), canRepeat: canRepeat, canRead: canRead)
         if focused == nil {
             commands = noting(commands, openAConversation) { $0.said == sampleInstruction || $0.said == renameRow(inFront: nil).said }
         }
@@ -112,16 +115,18 @@ public struct SpokenHelp: Equatable, Sendable {
         guard readsReplies else { return [] }
         return [
             Row(said: VoiceCommandGrammar.repeatSummary[0], effect: "Gives the last reply or notice again."),
+            Row(said: VoiceCommandGrammar.readReply[0], effect: "Reads the last reply in full, without its code or links."),
             Row(said: VoiceCommandGrammar.keepReply[0], effect: "Keeps the last reply\u{2019}s audio and report in History."),
         ]
     }
 
     public static func voiceCommands(
         title: String, apps: [String], browser: String? = nil, places: [VoiceCommandPlace], scripts: [VoiceCommandScript],
-        findsInApps: Bool = false, readsReplies: Bool = false, canRepeat: Bool = false, stages: [any PipelineStage]
+        findsInApps: Bool = false, readsReplies: Bool = false, canRepeat: Bool = false, canRead: Bool = false, stages: [any PipelineStage]
     ) -> SpokenHelp {
         let commands = notingRepeat(
-            voiceCommandPhrases(apps: apps, browser: browser, findsInApps: findsInApps, readsReplies: readsReplies), canRepeat: canRepeat)
+            voiceCommandPhrases(apps: apps, browser: browser, findsInApps: findsInApps, readsReplies: readsReplies),
+            canRepeat: canRepeat, canRead: canRead)
         return SpokenHelp(title: title, groups: [
             Group(heading: Heading.commands, rows: commands),
             Group(heading: Heading.saved, rows: savedRows(places: places, scripts: scripts)),

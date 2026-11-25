@@ -365,6 +365,94 @@ struct AgentBridgeServerTests {
         return (commands, json["unknown"] as? [String] ?? [])
     }
 
+    @Test func aHelloIsToldThatAcknowledgmentsMayRideOnTheNextPoll() throws {
+        let (server, _, dir) = try makeServer()
+        defer { server.stop() }
+        let body = #"{"op":"hello","protocol":3,"agent":"bb","agentVersion":"1","instance":"c1/t1","session":"t1","pid":1,"connection":"c1","installation":"inst-1"}"#
+        let (status, answer) = try request(dir, path: "/event", body: body)
+        #expect(status == 200)
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(answer.utf8)) as? [String: Any])
+        #expect(json["acks"] as? Bool == true)
+    }
+
+    @Test func acknowledgmentsCarriedOnTheNextPollSettleTheCommandsTheyName() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 2)
+        defer { server.stop() }
+        for t in ["t1", "t2"] { try hello(dir, session: t, instance: "c1/\(t)", connection: "c1", agent: "bb") }
+        server.enqueue(.status(id: "r1", expectedSession: "bb:t1", text: "one"), for: "bb:t1")
+        server.enqueue(.status(id: "r2", expectedSession: "bb:t2", text: "two"), for: "bb:t2")
+        let (_, first) = try pollAll(dir, [("t1", "c1/t1"), ("t2", "c1/t2")])
+        #expect(Set(try answer(first).commands.map(\.id)) == ["r1", "r2"])
+        #expect(server.nextWake != nil)
+        let list = #"[{"session":"t1","instance":"c1/t1"},{"session":"t2","instance":"c1/t2"}]"#
+        let acks = #"[{"request":"r1","instance":"c1/t1"},{"request":"r2","instance":"c1/t2"}]"#
+        async let parked = Task.detached { try self.request(dir, path: "/poll", body: #"{"members":\#(list),"connection":"c1","acks":\#(acks)}"#) }.value
+        try await Task.sleep(for: .milliseconds(300))
+        let wake = try #require(server.nextWake)
+        #expect(wake.timeIntervalSinceNow > 1)
+        _ = try await parked
+    }
+
+    @Test(arguments: [(nil as Double?, 0.3...1.5), (0, 0.9...1.1), (2, 1.5...1.99), (900, 290...310)])
+    func aPollIsHeldJustUnderTheWaitItStatesAndForTheOldHoldWhenItStatesNone(wait: Double?, held: ClosedRange<Double>) async throws {
+        let (server, _, dir) = try makeServer(pollHold: 0.3)
+        defer { server.stop() }
+        try hello(dir)
+        let stated = wait.map { #","wait":\#($0)"# } ?? ""
+        let started = Date()
+        async let polled = Task.detached {
+            try self.request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1","connection":"i1"\#(stated)}"#)
+        }.value
+        try await Task.sleep(for: .milliseconds(200))
+        let wake = try #require(server.nextWake)
+        #expect(held.contains(wake.timeIntervalSince(started)))
+        if wait == 900 { server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "x"), for: "claude:s1") }
+        _ = try await polled
+    }
+
+    @Test(arguments: [false, true])
+    func aConnectorFromBeforeOrAfterTheLongerHoldStaysLiveAcrossTwoPollsAndGetsOneCommandOnce(stating: Bool) async throws {
+        let (server, _, dir) = try makeServer(pollHold: 0.6, activeWindow: 0.2)
+        defer { server.stop() }
+        try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
+        let wait = stating ? #","wait":2"# : ""
+        let members = #"[{"session":"t1","instance":"c1/t1"}]"#
+        async let first = Task.detached { try self.request(dir, path: "/poll", body: #"{"members":\#(members),"connection":"c1"\#(wait)}"#) }.value
+        try await Task.sleep(for: .milliseconds(200))
+        server.enqueue(.status(id: "r1", expectedSession: "bb:t1", text: "one"), for: "bb:t1")
+        #expect(try answer(try await first.1).commands.map(\.id) == ["r1"])
+        let acks = stating ? #","acks":[{"request":"r1","instance":"c1/t1"}]"# : ""
+        if !stating {
+            #expect(try request(dir, path: "/event", body: #"{"op":"ack","request":"r1","instance":"c1/t1","connection":"c1"}"#).0 == 200)
+        }
+        async let second = Task.detached {
+            try self.request(dir, path: "/poll", body: #"{"members":\#(members),"connection":"c1"\#(wait)\#(acks)}"#)
+        }.value
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(server.isLive(session: "bb:t1"))
+        #expect(try answer(try await second.1).commands.isEmpty)
+    }
+
+    @Test func theDefaultHoldIsTheOneConnectorsBefore0Point11WaitFor() {
+        #expect(AgentBridgeServer.defaultPollHold == 25)
+        #expect(AgentBridgeServer.longestPollHold == 300)
+    }
+
+    @Test func aCommandForOneConversationLooksOnlyAtItsOwnMemberOfASharedPoll() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 5)
+        defer { server.stop() }
+        let members = (0..<300).map { (session: "t\($0)", instance: "c1/t\($0)") }
+        for member in members { try hello(dir, session: member.session, instance: member.instance, connection: "c1", agent: "bb") }
+        async let polled = Task.detached { try self.pollAll(dir, members) }.value
+        try await Task.sleep(for: .milliseconds(300))
+        let before = server.flushedMembers
+        server.enqueue(.status(id: "r1", expectedSession: "bb:t150", text: "one"), for: "bb:t150")
+        let (status, body) = try await polled
+        #expect(status == 200)
+        #expect(try answer(body).commands.map(\.id) == ["r1"])
+        #expect(server.flushedMembers - before == 1)
+    }
+
     @Test func onePollServesEveryConversationOfAConnectionEachUnderItsOwnSession() throws {
         let (server, _, dir) = try makeServer()
         defer { server.stop() }
@@ -581,7 +669,7 @@ struct AgentBridgeServerTests {
         let (server, _, dir) = try makeServer(pollHold: 5, activeWindow: 0.5)
         defer { server.stop() }
         let seen = Seen()
-        server.onHangUp { seen.lock.withLock { seen.live.append(server.isLive(instance: "i1")) } }
+        server.onHangUp { _ in seen.lock.withLock { seen.live.append(server.isLive(instance: "i1")) } }
         try hello(dir)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         var addr = sockaddr_un()
@@ -600,6 +688,76 @@ struct AgentBridgeServerTests {
         close(fd)
         try await Task.sleep(for: .milliseconds(1200))
         #expect(seen.lock.withLock { seen.live } == [false])
+    }
+
+    private func parkThenHangUp(_ dir: URL, instance: String = "i1", session: String = "s1") async throws {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let socketPath = dir.appendingPathComponent("bridge.sock").path
+        withUnsafeMutableBytes(of: &addr.sun_path) { raw in socketPath.utf8CString.withUnsafeBytes { raw.copyMemory(from: $0) } }
+        _ = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        let body = #"{"session":"\#(session)","instance":"\#(instance)","connection":"\#(instance)"}"#
+        let raw = "POST /poll HTTP/1.1\r\nHost: ks\r\nAuthorization: Bearer secret\r\nContent-Length: \(body.utf8.count)\r\n\r\n\(body)"
+        _ = raw.withCString { write(fd, $0, strlen($0)) }
+        try await Task.sleep(for: .milliseconds(200))
+        close(fd)
+    }
+
+    @Test func aConnectorThatReplacesItsPollAtOnceIsNeverReportedAsHungUp() async throws {
+        final class Seen: @unchecked Sendable {
+            let lock = NSLock()
+            var calls: [Set<String>] = []
+        }
+        let (server, _, dir) = try makeServer(pollHold: 5, activeWindow: 0.5)
+        defer { server.stop() }
+        let seen = Seen()
+        server.onHangUp { agents in seen.lock.withLock { seen.calls.append(agents) } }
+        try hello(dir)
+        try await parkThenHangUp(dir)
+        async let replacement = Task.detached { try self.poll(dir) }.value
+        try await Task.sleep(for: .milliseconds(1200))
+        #expect(seen.lock.withLock { seen.calls }.isEmpty)
+        server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "x"), for: "claude:s1")
+        _ = try await replacement
+    }
+
+    @Test func hangUpsCloseTogetherAreReportedForTheConnectorsThatStayedGone() async throws {
+        final class Seen: @unchecked Sendable {
+            let lock = NSLock()
+            var calls: [Set<String>] = []
+        }
+        let (server, _, dir) = try makeServer(pollHold: 5, activeWindow: 0.5)
+        defer { server.stop() }
+        let seen = Seen()
+        server.onHangUp { agents in seen.lock.withLock { seen.calls.append(agents) } }
+        try hello(dir)
+        try hello(dir, session: "s2", instance: "i2")
+        try await parkThenHangUp(dir)
+        try await parkThenHangUp(dir, instance: "i2", session: "s2")
+        try await Task.sleep(for: .milliseconds(1200))
+        #expect(seen.lock.withLock { seen.calls }.allSatisfy { $0 == ["claude"] })
+        #expect(!seen.lock.withLock { seen.calls }.isEmpty)
+    }
+
+    @Test func aHangUpJustBeforeAnEarlierOnesCheckIsStillReportedWhenItsOwnWindowEnds() async throws {
+        final class Seen: @unchecked Sendable {
+            let lock = NSLock()
+            var calls: [Set<String>] = []
+        }
+        let (server, _, dir) = try makeServer(pollHold: 5, activeWindow: 0.5)
+        defer { server.stop() }
+        let seen = Seen()
+        server.onHangUp { agents in seen.lock.withLock { seen.calls.append(agents) } }
+        try hello(dir)
+        try hello(dir, session: "s2", instance: "i2", agent: "pi")
+        try await parkThenHangUp(dir)
+        try await Task.sleep(for: .milliseconds(250))
+        try await parkThenHangUp(dir, instance: "i2", session: "s2")
+        try await Task.sleep(for: .milliseconds(1500))
+        #expect(seen.lock.withLock { seen.calls }.reduce(into: Set<String>()) { $0.formUnion($1) } == ["claude", "pi"])
     }
 
     @Test func anUnacknowledgedCommandNeverReachesAnInstanceThatResumesAfterAGap() throws {

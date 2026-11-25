@@ -1,0 +1,91 @@
+{
+  "cases": [
+    {
+      "id": "ci-failure-in-a-late-bullet-after-an-instruction",
+      "asked": "note that the old setup had good testing instructions; ask for them if you need them",
+      "mentions": [
+        "\\bCI\\b|\\blint|required check",
+        "\\bfail|\\bred\\b|\\boffen[cs]es?\\b|\\berrors?\\b"
+      ],
+      "avoids": [
+        "ask (?:for|me|if)",
+        "if (?:you|I) (?:need|get stuck)",
+        "needs? (?:the )?(?:old )?(?:testing )?instructions",
+        "instructions (?:are|were) available",
+        "old setup"
+      ],
+      "reply": "Noted. I'll ask if I get stuck on the test setup.\n\nHere is where the change stands.\n\n## What changed\n\n- Moved the retry policy out of `SyncWorker` into `RetryPolicy`, so the worker and the importer share one implementation.\n- `RetryPolicy` now caps the backoff at 30 seconds and adds jitter of up to 20 percent, which matches what the importer already did by hand.\n- Removed the duplicate `sleepFor(attempt:)` helper from the importer.\n- Added `RetryPolicyTests` covering the cap, the jitter bounds, and the reset after a success.\n\n## Tests\n\n- `RetryPolicyTests` passes locally: 6 tests, all green.\n- `SyncWorkerIntegrationTests` could not run locally. It needs a Postgres instance on port 5433 with the fixtures loaded, and this machine has none running. I did not try to work around that.\n- I ran the importer's unit tests as well; they pass, including the two that exercised the old helper, after updating them to call `RetryPolicy`.\n\n## Branch state\n\n- The branch is rebased on main as of this morning, with no conflicts.\n- Commit `4f9e2a1` holds the refactor and commit `b07c3d9` the tests.\n- Required CI fails at this head: the lint job reports 14 offenses in `importer/retry.rb` and `sync/worker.rb`, mostly line length and an unused variable left from the removed helper. The other required checks pass.\n- The optional benchmark job was skipped by the pipeline, as it is on every branch.\n\n## Notes\n\n- The jitter now uses the shared random source, so the tests seed it; nothing else changed behavior.\n- `RetryPolicy` is internal to the package for now. If another service wants it, it can move to the shared library later.\n- I left the old configuration keys readable for one more release, with a deprecation warning in the log, so existing deploys keep working.\n\nLet me know if you want the lint offenses fixed in this branch or in a follow-up."
+    },
+    {
+      "id": "a-failed-job-in-a-status-report-full-of-pull-request-numbers",
+      "asked": "how did the analysis jobs go overnight",
+      "mentions": [
+        "\\bfail"
+      ],
+      "avoids": [
+        "how did"
+      ],
+      "reply": "Analysis jobs stopped. 9 finished, one failed and one was cancelled.\n\n## Finished (9)\n\n| Job | Pull request | Duration | Result |\n|---|---|---|---|\n| dependency-audit | #1234567 | 12m | clean |\n| license-scan | #1234567 | 4m | clean |\n| bundle-size | #1234571 | 9m | +2.1 KB, under budget |\n| type-coverage | #1234571 | 18m | 94.2%, up 0.3 |\n| flaky-test-report | #1234580 | 31m | 3 known flakes, no new ones |\n| api-diff | #1234580 | 6m | no breaking changes |\n| translation-keys | #1234588 | 3m | 2 unused keys |\n| image-weights | #1234588 | 5m | clean |\n| docs-links | #1234590 | 7m | clean |\n\n## Failed (1)\n\n- **perf-regression** on #1234590 failed after 47 minutes. The cold-start benchmark ran 18% slower than main (2.41 s against 2.04 s) across all five samples, past the 10% gate. The slowdown starts at commit `9a1c0e4`, which adds eager loading of the settings store at launch.\n\n## Cancelled (1)\n\n- **e2e-smoke** on #1234593 was cancelled by the scheduler at 06:00 when the nightly window closed. It had finished 41 of 60 scenarios, all passing. It will rerun tonight.\n\n## Notes\n\n- Queue time averaged 4 minutes, down from 11 last week after the runner pool grew.\n- The two unused translation keys are `settings.legacy_banner` and `onboarding.skip_tip`; both can go.\n- No job hit its memory limit."
+    },
+    {
+      "id": "a-decision-the-agent-waits-on-in-the-middle",
+      "asked": "migrate the remaining endpoints to the new client",
+      "mentions": [
+        "decid|decision|choos|choice|pick|which|want|option|wait|confirm|answer|approv|ask|\\?|your (?:input|call)",
+        "charge|refund|retr|idempoten|billing|three|last|remaining|endpoint"
+      ],
+      "avoids": [
+        "migrate the remaining"
+      ],
+      "reply": "I migrated eleven of the fourteen remaining endpoints to `ApiClient`.\n\n## Done\n\n- `GET /projects`, `GET /projects/:id`, `POST /projects`, `PATCH /projects/:id`\n- `GET /members`, `POST /members/invite`, `DELETE /members/:id`\n- `GET /billing/summary`, `GET /billing/invoices`\n- `GET /audit`, `GET /audit/export`\n\nEach one now goes through the shared retry and auth refresh, and the old `LegacyFetcher` calls are gone from those files. The existing tests for these endpoints pass unchanged, which is what I wanted: the responses are decoded into the same models.\n\n## Waiting on you\n\nThe last three, `POST /billing/charge`, `POST /billing/refund` and `POST /webhooks/replay`, are not idempotent. The new client retries a request automatically when the connection drops before a response arrives. For a charge or a refund that could bill or refund twice. I see two ways forward and need you to pick one before I touch them:\n\n1. Send an idempotency key with each of the three, generated per user action, so a retry is harmless. This needs the server to honor the header, which I believe it does for billing but have not confirmed for webhooks.\n2. Turn off automatic retries for these three calls only and surface the failure to the user instead.\n\nI have not changed them in the meantime; they still use `LegacyFetcher`.\n\n## Other notes\n\n- `LegacyFetcher` can be deleted once those three move.\n- The `ApiClient` timeout is 30 seconds against the old 60; nothing in the migrated set came close in the test runs.\n- I updated the endpoint inventory in the README."
+    },
+    {
+      "id": "a-failed-migration-among-many-successes",
+      "asked": "roll the schema changes out to staging",
+      "mentions": [
+        "migration|column|drop|schema|step",
+        "fail|lock|timed out|timeout|couldn.t|could not"
+      ],
+      "avoids": [
+        "roll the schema"
+      ],
+      "reply": "Staging rollout is mostly through. Here is each step in order.\n\n1. Took a snapshot of the staging database before starting; it is retained for seven days.\n2. Applied `20261121_add_owner_to_projects`: done in 2 s.\n3. Applied `20261121_backfill_project_owner`: done in 3 min, 48,210 rows updated.\n4. Applied `20261122_index_projects_owner`: done concurrently in 41 s.\n5. Applied `20261122_drop_projects_creator`: failed. It timed out waiting for an exclusive lock on `projects` after 60 s, because the nightly report job held a long read on the table. The migration rolled back cleanly and the column is still there.\n6. Deployed the application build that reads `owner_id`: done, all pods healthy.\n7. Ran the smoke suite against staging: 58 of 58 passed.\n8. Checked error rates for 15 minutes after the deploy: flat, no new error types.\n\nThe application no longer reads `creator_id`, so leaving the column for now is harmless. The drop can be retried after the report job finishes around 04:00, or with a longer lock timeout.\n\nNothing was rolled out to production."
+    },
+    {
+      "id": "work-that-could-not-be-verified",
+      "asked": "fix the crash when the window is resized",
+      "mentions": [
+        "unverified|not (?:been )?(?:tested|verified|confirmed|reproduced)|could ?n.t (?:be )?(?:test|run|reproduc|verif|confirm|check)|can ?n.t (?:be )?(?:test|reproduc|verif|confirm)|did ?n.t (?:test|reproduce|verify|confirm)|unable to|no way to"
+      ],
+      "avoids": [
+        "fix the crash when"
+      ],
+      "reply": "I found a likely cause and changed the code, but I could not reproduce the crash here, so the fix is unverified.\n\n## What I think happens\n\nThe crash report points at `LayoutCache.frame(for:)` with an index out of range. When the window shrinks below 600 points wide, the sidebar collapses and `columns` drops from three to two, but the cache still holds frames for three columns until the next full layout. A resize event that lands between those two moments asks for column index 2 and crashes.\n\n## What I changed\n\n- `LayoutCache` now invalidates itself when the column count changes, instead of waiting for the next full layout pass.\n- `frame(for:)` returns `nil` for an index past the end rather than trapping, and the caller skips that frame.\n- Added `LayoutCacheTests.shrinkingTheColumnCountDropsStaleFrames`, which builds the cache for three columns, drops to two and asks for the third. It failed before the change and passes now.\n\n## What I could not do\n\n- I could not reproduce the crash in the running app. Resizing by dragging the window edge, by the zoom button, and by moving between displays of different sizes never crashed on this machine, before or after the change. The reports all come from a specific external display arrangement I do not have.\n- So I cannot confirm that this is the crash in the reports, only that it is a crash with the same stack.\n\nThe full test suite passes: 1,204 tests."
+    },
+    {
+      "id": "a-request-repeated-back-instead-of-the-result",
+      "asked": "also check whether the docs mention the new flag, and tell me if they don't",
+      "mentions": [
+        "docs?|documentation",
+        "(?:do|does) ?n.t|not|no |missing|lack|without|absent|omit"
+      ],
+      "avoids": [
+        "tell me if"
+      ],
+      "reply": "The flag works, and the docs do not mention it.\n\n## The flag\n\n`--dry-run` is wired into all four commands (`sync`, `prune`, `import`, `export`). With it, each command prints what it would change and exits with status 0 without writing anything. I added a test per command that runs it with `--dry-run` against a temporary folder and checks the folder is untouched afterwards. All four pass.\n\n## The docs\n\n- `docs/cli.md` lists every other flag for these commands, but not `--dry-run`.\n- `README.md` has a quick-start that runs `prune`; it would be a natural place to suggest a dry run first, and it does not.\n- The `--help` text does include the flag, because it is generated from the argument parser.\n\nSo the only place a user would learn about it today is `--help`. I have not edited the docs, since you asked me to check rather than change them.\n\n## Everything else\n\n- The build is clean, with no new warnings.\n- The full suite passes, 312 tests."
+    },
+    {
+      "id": "nothing-failed",
+      "asked": "bump the logging library and make sure nothing breaks",
+      "mentions": [
+        "pass|green|nothing broke|no (?:failures|breaks|problems|issues)|works|clean|succe",
+        "logging|librar|4\\.5|update|upgrade|bump"
+      ],
+      "avoids": [
+        "(?<!nothing )(?<!no )(?<!not )(?<!or )(?<!without )(?<!zero )\\bfail(?:ed|s|ure|ures|ing)?\\b",
+        "make sure"
+      ],
+      "reply": "The logging library is updated from 4.2 to 4.5, and everything passes.\n\n## What changed\n\n- `Package.resolved` now pins 4.5.1.\n- 4.5 renamed `LogLevel.verbose` to `LogLevel.trace`. The old name still compiles with a deprecation warning; I replaced our six uses so the build has no new warnings.\n- 4.5 writes structured metadata as nested objects instead of flattened strings. Our log shipper config already accepts both, so nothing downstream needs to change.\n\n## Checks\n\n- Full test suite: 2,031 tests, all pass.\n- Ran the app for ten minutes with logging at trace: no dropped lines, file rotation still happens at 10 MB.\n- Compared a day's worth of production-shaped log output before and after with the parser the dashboards use: every field still parses.\n\n## Notes\n\n- 4.5 is about 3% faster at formatting in their benchmarks; I did not measure ours.\n- 5.0 is in beta and changes the configuration format, so I stayed on 4.x."
+    }
+  ]
+}

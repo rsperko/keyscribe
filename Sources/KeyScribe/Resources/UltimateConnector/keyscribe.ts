@@ -9,6 +9,7 @@ export type Host = {
   post: (socketPath: string, path: string, body: string, token: string) => Exchange
   random: () => string
   log: (message: string) => void
+  watch?: (folder: string, changed: () => void, broken: () => void) => (() => void) | null
 }
 export type Summary = { id: number; title?: string; named: boolean; cwd: string; busy: boolean }
 export type Image = { data: string; mimeType: string }
@@ -91,7 +92,7 @@ const features = ["readiness", "notify", "images", "check", "steer", "merge", "p
 const labelLimit = 200
 const answerLimit = 8 * 1024
 const eventDeadline = 2000
-const pollDeadline = 30000
+const pollDeadline = 310000
 const backoff = [10000, 30000, 60000]
 const greetingLimit = 8
 const deliveryLimit = 64
@@ -232,6 +233,11 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   let stopped = false
   let failures = 0
   let retry: (() => void) | null = null
+  let unwatch: (() => void) | null = null
+  let watchBroken = false
+  let recheck = false
+  let pollAcks = false
+  let acked: Array<{ request: string; instance: string }> = []
   let polling: { cancel: () => void } | null = null
   let focusings = 0
   let turns = 0
@@ -274,15 +280,30 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   }
 
   function wake() {
-    if (stopped || connected || connecting) return
+    if (stopped || connected) return
+    if (connecting) {
+      recheck = true
+      return
+    }
     retry?.()
     retry = null
     void connect()
   }
 
+  function watchReady(readyPath: string) {
+    if (unwatch || watchBroken || !host.watch) return
+    unwatch = host.watch(readyPath.slice(0, readyPath.lastIndexOf("/")), wake, () => {
+      unwatch = null
+      watchBroken = true
+      if (!connected && !connecting) schedule()
+    })
+    if (!unwatch) watchBroken = true
+  }
+
   function fail() {
     if (connected) host.log("lost the connection to the app; trying again later")
     connected = false
+    acked = []
     polling?.cancel()
     polling = null
     schedule()
@@ -292,11 +313,14 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     if (stopped) return
     if (reason) host.log(reason)
     stopped = true
+    acked = []
     connected = false
     polling?.cancel()
     polling = null
     retry?.()
     retry = null
+    unwatch?.()
+    unwatch = null
     sweeping?.()
     sweeping = null
     retelling?.()
@@ -310,12 +334,15 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   async function connect() {
     if (stopped || connecting || connected) return
     connecting = true
+    let proceeding = false
     try {
       if (!config) {
         config = await loadConfig()
         if (stopped) return
         if (!config) return stop("its settings file is missing; install it again from the app's settings")
       }
+      watchReady(config.readyPath)
+      recheck = false
       let ready: any
       try {
         ready = JSON.parse(await host.read(config.readyPath))
@@ -325,16 +352,27 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       if (stopped) return
       if (!ready || typeof ready.launch !== "string") {
         if (failures === 0) host.log("the app is not running; waiting for it")
+        if (unwatch) {
+          failures += 1
+          return
+        }
         return schedule()
       }
       if (ready.protocol !== config.protocol) return stop("the app speaks another protocol; update the extension from the app's settings")
       token = (await host.read(config.tokenPath)).trim()
       if (ready.launch !== launch) for (const m of members.values()) m.helloed = false
       launch = ready.launch
+      proceeding = true
     } catch {
       return schedule()
     } finally {
       connecting = false
+      if (recheck && !proceeding && !stopped) {
+        recheck = false
+        retry?.()
+        retry = null
+        void connect()
+      }
     }
     if (stopped) return
     connected = true
@@ -392,7 +430,9 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       return "failed"
     }
     try {
-      m.quiet = JSON.parse(response.text)?.quiet === true
+      const answer = JSON.parse(response.text)
+      m.quiet = answer?.quiet === true
+      pollAcks = answer?.acks === true
     } catch {
       m.quiet = false
     }
@@ -424,7 +464,9 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     const list = [...members.entries()].filter(([, m]) => m.helloed).map(([id]) => ({ session: sessionOf(id), instance: instanceOf(id) }))
     if (!list.length) return
     let cancelled = false
-    const exchange = host.post(config.socketPath, "/poll", JSON.stringify({ members: list, connection }), token)
+    const acks = acked.slice()
+    const exchange = host.post(
+      config.socketPath, "/poll", JSON.stringify({ members: list, connection, wait: pollDeadline / 1000, ...(acks.length ? { acks } : {}) }), token)
     const clear = host.after(pollDeadline, () => exchange.cancel())
     const current = { cancel: () => { cancelled = true; clear(); exchange.cancel() } }
     polling = current
@@ -432,6 +474,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       clear()
       if (cancelled || polling !== current) return
       polling = null
+      if (response) acked.splice(0, acks.length)
       void commanded(response)
     })
   }
@@ -452,8 +495,9 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     const commands: Command[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.commands) ? parsed.commands : []
     if (commands.some((c) => c && c.op === "retire")) return stop("the app retired this extension")
     const readmitted: number[] = []
+    const ids = new Map<unknown, number>([...members.keys()].map((id) => [sessionOf(id), id]))
     for (const command of commands) {
-      const id = memberOf(command?.expectedSession)
+      const id = ids.get(command?.expectedSession)
       if (id === undefined || typeof command.id !== "string") continue
       const m = members.get(id)!
       if (command.op === "quiet" || command.op === "admit") {
@@ -462,7 +506,8 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
         if (command.op === "admit" && m.unsaid) readmitted.push(id)
       }
       if (command.op === "status" && typeof command.text === "string") m.label = command.text.slice(0, labelLimit)
-      reply(id, { op: "ack", request: command.id })
+      if (pollAcks) acked.push({ request: command.id, instance: instanceOf(id) })
+      else reply(id, { op: "ack", request: command.id })
       if (command.op === "submit") void submit(id, command)
       else if (command.op === "start") void startFromPage(id, command)
       else if (command.op === "check") check(id, command)

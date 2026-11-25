@@ -293,7 +293,7 @@ struct VoiceCommandsSettingsModelTests {
         }
         #expect(said(false) == ["open Safari", "switch to Notes", "go back", "cancel"])
         #expect(said(true, readsReplies: true) == [
-            "open Safari", "switch to Notes", "open Safari \u{2026}", "repeat that", "that sounded wrong", "go back", "cancel",
+            "open Safari", "switch to Notes", "open Safari \u{2026}", "repeat that", "read the whole reply", "that sounded wrong", "go back", "cancel",
         ])
         #expect(said(false, places: [VoiceCommandPlace(name: "Reading list", target: .url("https://example.com"))]).last == "open reading list")
         let topic = VoiceCommandsEditorView.phrasesHelp(findsInApps: false)

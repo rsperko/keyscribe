@@ -127,6 +127,7 @@ final class AgentTake {
         guard let host, let agents = host.agents, host.agentsEnabled,
               host.eligibleModes?.contains(where: { $0.output == .agent }) == true
         else { return }
+        agents.drainEvents()
         agents.refresh()
         agents.readPlaces()
         let refresh = agents.startHostRefreshForPress()
@@ -270,6 +271,12 @@ final class AgentTake {
             await builtInFromAgent(
                 VoiceCommandGrammar.repeatSummary[0], heard: heard,
                 facts: AgentHistoryFacts.repeatSummary(focused: focused(), conversations: pressed.conversations))
+            return
+        case .readReply where host.spokenUpdates?.readsReplies == true && host.spokenUpdates?.hasReplyToRead == true:
+            host.agentFrontTask?.cancel()
+            await builtInFromAgent(
+                VoiceCommandGrammar.readReply[0], heard: heard,
+                facts: AgentHistoryFacts.readReply(focused: focused(), conversations: pressed.conversations))
             return
         case .keepReply where host.spokenUpdates?.readsReplies == true && host.lastHeardReply != nil:
             host.agentFrontTask?.cancel()

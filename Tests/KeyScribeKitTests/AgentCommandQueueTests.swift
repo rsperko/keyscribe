@@ -381,6 +381,48 @@ struct AgentCommandQueueTests {
         let r12 = queue.withdraw("r2")
         #expect(!r12)
     }
+
+    @Test func aHeldPollKeepsItsInstanceLiveUntilReleasedAndForOneWindowAfter() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.hold([AgentCommandQueue.Holder(instance: "i1", connection: "c1")], at: t0)
+        #expect(queue.isLive(session: "s1", at: at(60)))
+        #expect(queue.isLive(instance: "i1", at: at(60)))
+        #expect(queue.activeInstances(session: "s1", at: at(60)) == ["i1"])
+        queue.hold([], at: at(60))
+        #expect(queue.isLive(session: "s1", at: at(60 + AgentCommandQueue.activeWindow)))
+        #expect(!queue.isLive(session: "s1", at: at(60 + quiet)))
+    }
+
+    @Test func aPollHeldOnAConnectionTheInstanceNoLongerUsesKeepsNothingLive() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.hold([AgentCommandQueue.Holder(instance: "i1", connection: "c1")], at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "c2", at: at(1))
+        #expect(!queue.isLive(session: "s1", at: at(1 + quiet)))
+    }
+
+    @Test func theLiveSessionsAreReadInOneCallAndAgreeWithEachSessionsOwnAnswer() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.hello(session: "s2", instance: "i2", connection: "c2", at: t0)
+        queue.hello(session: "s3", instance: "i3", connection: "c3", at: at(30))
+        queue.hold([AgentCommandQueue.Holder(instance: "i2", connection: "c2")], at: t0)
+        let now = at(31)
+        #expect(queue.liveSessions(at: now) == ["s2", "s3"])
+        #expect(["s1", "s2", "s3"].filter { queue.isLive(session: $0, at: now) } == ["s2", "s3"])
+    }
+
+    @Test func onlySessionsWithACommandWaitingToBeCollectedAreWaiting() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.hello(session: "s2", instance: "i2", connection: "c2", at: t0)
+        #expect(queue.waitingSessions.isEmpty)
+        queue.enqueue(command("r1"), for: "s1", at: t0)
+        #expect(queue.waitingSessions == ["s1"])
+        _ = queue.poll(session: "s1", instance: "i1", connection: "c1", at: t0)
+        #expect(queue.waitingSessions.isEmpty)
+    }
 }
 
 struct AgentBridgeCodecTests {

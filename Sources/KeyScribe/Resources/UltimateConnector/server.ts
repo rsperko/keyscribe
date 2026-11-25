@@ -3,7 +3,7 @@ import { defineExtension, defineTool } from '@earendil-works/pi-durable'
 import type { CommitPublication, ConversationId, EntryRecord } from '@earendil-works/pi-durable'
 import { obj } from '@earendil-works/pi-schema'
 import { randomBytes } from 'node:crypto'
-import { appendFileSync, readFileSync, realpathSync } from 'node:fs'
+import { appendFileSync, readFileSync, realpathSync, watch } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { request } from 'node:http'
 import { basename, dirname, join } from 'node:path'
@@ -73,6 +73,19 @@ export function summarizeBridgeBody(path: string, body: string): Record<string, 
     return summarizeTraceRecord(parsed, { path })
   } catch {
     return { path }
+  }
+}
+
+export function watchFolder(folder: string, changed: () => void, broken: () => void): (() => void) | null {
+  try {
+    const watcher = watch(folder, { persistent: false }, () => changed())
+    watcher.on('error', () => {
+      watcher.close()
+      broken()
+    })
+    return () => watcher.close()
+  } catch {
+    return null
   }
 }
 
@@ -173,6 +186,14 @@ export function verifiesShown(host: Pick<Host, 'conversations'>, report: PageRep
     && !host.conversations().some(c => c.id === shown) && !fresh.some(c => c.id === shown)
 }
 
+export function busyChanged(busy: Set<number>, tasks: Record<string, { conversationId: number; background?: boolean }>): boolean {
+  const now = new Set(Object.values(tasks ?? {}).filter((task) => !task.background).map((task) => task.conversationId))
+  if (now.size === busy.size && [...now].every((id) => busy.has(id))) return false
+  busy.clear()
+  for (const id of now) busy.add(id)
+  return true
+}
+
 export async function pageConversation(host: Pick<Host, 'harness' | 'metadata'>, id: number): Promise<Conversation | undefined> {
   if (!Number.isSafeInteger(id) || id <= root) return undefined
   const harness = host.harness()
@@ -246,6 +267,7 @@ function start(host: Host, config: Config) {
       post,
       random: () => randomBytes(6).toString('hex'),
       log: (message) => console.log(`${name}: ${message}`),
+      watch: watchFolder,
     },
     async () => config,
   )
@@ -316,10 +338,7 @@ function start(host: Host, config: Config) {
     .observeTaskGraph(
       {
         advance: (call: any) => {
-          if (call.kind !== 'value') return
-          busy.clear()
-          for (const task of Object.values(call.value.tasks) as any[]) if (!task.background) busy.add(task.conversationId)
-          refresh()
+          if (call.kind === 'value' && busyChanged(busy, call.value.tasks)) refresh()
         },
         end: () => {},
       },
@@ -327,8 +346,7 @@ function start(host: Host, config: Config) {
     )
     .then((observation: any) => {
       graph = observation
-      busy.clear()
-      for (const task of Object.values(observation.value.tasks) as any[]) if (!task.background) busy.add(task.conversationId)
+      busyChanged(busy, observation.value.tasks)
       refresh()
     })
 

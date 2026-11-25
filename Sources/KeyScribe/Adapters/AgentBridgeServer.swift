@@ -5,6 +5,9 @@ import KeyScribeKit
 final class AgentBridgeServer: @unchecked Sendable {
     enum StartError: Error { case pathTooLong, socket(Int32) }
 
+    static let defaultPollHold: TimeInterval = 25
+    static let longestPollHold: TimeInterval = 300
+
     enum Report: Sendable {
         case events([AgentEvent])
         case refused
@@ -16,7 +19,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         var instance: String
     }
 
-    private struct Parked {
+    private struct Parked: Equatable {
         var fd: Int32
         var members: [Member]
         var connection: String
@@ -40,15 +43,26 @@ final class AgentBridgeServer: @unchecked Sendable {
     private let onReport: @Sendable (_ agent: String, _ installation: String, _ body: Data) -> Report
     private let queue = DispatchQueue(label: "com.keyscribe.agent-bridge")
     private let activeWindow: TimeInterval
-    private var parkedTouchedAt: Date?
-    private var hangUpObserver: (@Sendable () -> Void)?
+    private var hangUpObserver: (@Sendable (Set<String>) -> Void)?
+    private var hungUp: [String: Date] = [:]
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var timer: DispatchSourceTimer?
     private var wake: Date?
     private var readers: [Int32: DispatchSourceRead] = [:]
     private var buffers: [Int32: Data] = [:]
-    private var parked: [Parked] = []
+    private var parked: [Parked] = [] {
+        didSet {
+            commands.hold(Set(parked.flatMap { p in p.members.map { AgentCommandQueue.Holder(instance: $0.instance, connection: p.connection) } }), at: Date())
+            parkedBySession = [:]
+            for (index, p) in parked.enumerated() {
+                for (position, member) in p.members.enumerated() { parkedBySession[member.session, default: [:]][index, default: []].append(position) }
+            }
+        }
+    }
+    private var parkedBySession: [String: [Int: [Int]]] = [:]
+    private var membersVisited = 0
+    var flushedMembers: Int { queue.sync { membersVisited } }
     private var greeting: Set<Int32> = []
     private var agentByInstance: [String: String] = [:]
     private var installationByInstance: [String: String] = [:]
@@ -59,7 +73,7 @@ final class AgentBridgeServer: @unchecked Sendable {
 
     init(
         directory: URL, token: String, admits: @escaping @Sendable (_ agent: String, _ installation: String?) -> Bool,
-        excludes: @escaping @Sendable (_ session: String) -> Bool = { _ in false }, pollHold: TimeInterval = 25,
+        excludes: @escaping @Sendable (_ session: String) -> Bool = { _ in false }, pollHold: TimeInterval = AgentBridgeServer.defaultPollHold,
         activeWindow: TimeInterval = AgentCommandQueue.activeWindow,
         onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable (_ filedUnder: String?) -> Void) -> Void = { $1(nil) },
         onNotify: @escaping @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void = { $1(false) },
@@ -168,6 +182,7 @@ final class AgentBridgeServer: @unchecked Sendable {
             parked = []
             if listenFD >= 0 { close(listenFD) }
             listenFD = -1
+            hungUp = [:]
             unlink(socketURL.path)
         }
     }
@@ -203,7 +218,7 @@ final class AgentBridgeServer: @unchecked Sendable {
                 self.sessionByInstance[instance] = nil
             }
             let waiting = self.parked.filter { $0.members.contains { instances.contains($0.instance) } }
-            self.parked.removeAll { $0.members.contains { instances.contains($0.instance) } }
+            if !waiting.isEmpty { self.parked.removeAll { $0.members.contains { instances.contains($0.instance) } } }
             self.answerRetired(self.commands.retire(instances: instances), parked: waiting)
             self.reschedule()
         }
@@ -272,39 +287,28 @@ final class AgentBridgeServer: @unchecked Sendable {
         queue.async { self.commands.forget(session: session) }
     }
 
-    func onHangUp(_ observe: @escaping @Sendable () -> Void) {
+    func onHangUp(_ observe: @escaping @Sendable (_ agents: Set<String>) -> Void) {
         queue.sync { hangUpObserver = observe }
     }
 
     func isLive(session: String) -> Bool {
-        queue.sync {
-            let now = Date()
-            touchParkedForQuery(at: now)
-            return commands.isLive(session: session, at: now)
-        }
+        queue.sync { commands.isLive(session: session, at: Date()) }
     }
 
     func isLive(instance: String) -> Bool {
-        queue.sync {
-            let now = Date()
-            touchParkedForQuery(at: now)
-            return commands.isLive(instance: instance, at: now)
-        }
+        queue.sync { commands.isLive(instance: instance, at: Date()) }
     }
 
-    private func touchParkedForQuery(at now: Date) {
-        if let touched = parkedTouchedAt, now >= touched, now.timeIntervalSince(touched) < activeWindow / 20 { return }
-        touchParked(at: now)
+    func liveness(sessions: Set<String>, instances: Set<String>) -> AgentLiveness {
+        queue.sync {
+            let now = Date()
+            return AgentLiveness(
+                sessions: sessions.intersection(commands.liveSessions(at: now)),
+                instances: instances.filter { commands.isLive(instance: $0, at: now) })
+        }
     }
 
     var nextWake: Date? { queue.sync { wake } }
-
-    private func touchParked(at now: Date) {
-        parkedTouchedAt = now
-        for p in parked {
-            for member in p.members { commands.touch(instance: member.instance, connection: p.connection, at: min(now, p.deadline)) }
-        }
-    }
 
     private func reschedule() {
         guard let timer, let next = commands.isSettled ? parked.map(\.deadline).min() : Date().addingTimeInterval(0.1) else { return }
@@ -392,8 +396,12 @@ final class AgentBridgeServer: @unchecked Sendable {
             guard let native = json["session"] as? String, let instance = json["instance"] as? String else { return respond(fd, status: 400) }
             asked = [(native, instance)]
         }
+        for ack in json["acks"] as? [[String: Any]] ?? [] {
+            if let request = ack["request"] as? String, let instance = ack["instance"] as? String {
+                commands.ack(request, instance: instance, connection: connection)
+            }
+        }
         let now = Date()
-        touchParked(at: now)
         var members: [Member] = []
         var unknown: [String] = []
         var ready: [(Member, [AgentCommand])] = []
@@ -411,7 +419,8 @@ final class AgentBridgeServer: @unchecked Sendable {
             if !found.isEmpty { ready.append((member, found)) }
         }
         guard !members.isEmpty else { return respond(fd, status: 409) }
-        let p = Parked(fd: fd, members: members, connection: connection, deadline: now.addingTimeInterval(pollHold), shared: shared, unknown: unknown)
+        let hold = (json["wait"] as? Double).map { min(Self.longestPollHold, max(1, $0 - min(10, $0 / 10))) } ?? pollHold
+        let p = Parked(fd: fd, members: members, connection: connection, deadline: now.addingTimeInterval(max(0, hold)), shared: shared, unknown: unknown)
         if ready.isEmpty && unknown.isEmpty {
             parked.append(p)
             watchForHangUp(fd)
@@ -465,43 +474,42 @@ final class AgentBridgeServer: @unchecked Sendable {
     private func tick() {
         let now = Date()
         wake = nil
-        touchParked(at: now)
         commands.tick(at: now)
         for refusal in commands.undeliverable(at: now) {
             onEvent(.undelivered(request: refusal.command.id, reason: refusal.reason.rawValue, handedOff: refusal.handedOff))
         }
         let expired = parked.filter { $0.deadline <= now }
-        parked.removeAll { $0.deadline <= now }
+        if !expired.isEmpty { parked.removeAll { $0.deadline <= now } }
         for p in expired { answer(p, with: []) }
-        for session in Set(parked.flatMap { $0.members.map(\.session) }) { flush(session: session) }
+        for session in commands.waitingSessions { flush(session: session) }
         reschedule()
     }
 
     private func flush(session: String) {
+        guard let polls = parkedBySession[session] else { return }
         let now = Date()
-        touchParked(at: now)
-        var stillParked: [Parked] = []
-        for var p in parked {
-            guard p.members.contains(where: { $0.session == session }) else { stillParked.append(p); continue }
+        var answering: [(p: Parked, ready: [(Member, [AgentCommand])]?)] = []
+        for (index, positions) in polls {
+            var p = parked[index]
             var ready: [(Member, [AgentCommand])] = []
-            for member in p.members where member.session == session {
+            for position in positions {
+                membersVisited += 1
+                let member = p.members[position]
                 switch commands.poll(session: session, instance: member.instance, connection: p.connection, at: now) {
-                case nil:
-                    p.unknown.append(member.instance)
-                    p.members.removeAll { $0 == member }
+                case nil: p.unknown.append(member.instance)
                 case let found? where found.isEmpty: break
                 case let found?: ready.append((member, found))
                 }
             }
             if !p.shared, !p.unknown.isEmpty {
-                respond(p.fd, status: 409)
-            } else if ready.isEmpty && p.unknown.isEmpty {
-                stillParked.append(p)
-            } else {
-                answer(p, with: ready)
+                answering.append((p, nil))
+            } else if !ready.isEmpty || !p.unknown.isEmpty {
+                answering.append((p, ready))
             }
         }
-        parked = stillParked
+        for (p, ready) in answering {
+            if let ready { answer(p, with: ready) } else { respond(p.fd, status: 409) }
+        }
     }
 
     private func register(_ greeted: AgentEvent.Hello, filedUnder filed: String?, answering fd: Int32) {
@@ -527,15 +535,15 @@ final class AgentBridgeServer: @unchecked Sendable {
             onEvent(.undelivered(request: refusal.command.id, reason: refusal.reason.rawValue, handedOff: refusal.handedOff))
         }
         let earlier = parked.filter { $0.members.contains { $0.session == hello.session } }
-        parked.removeAll { $0.members.contains { $0.session == hello.session } }
+        if !earlier.isEmpty { parked.removeAll { $0.members.contains { $0.session == hello.session } } }
         for p in earlier { answer(p, with: []) }
         reschedule()
         if quiets(hello.session) {
             onEvent(.hello(hello.withoutContent))
-            respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))
+            respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true,"acks":true}"#.utf8))
         } else {
             onEvent(.hello(hello))
-            respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8))
+            respond(fd, status: 200, body: Data(#"{"ok":true,"acks":true}"#.utf8))
         }
     }
 
@@ -563,23 +571,42 @@ final class AgentBridgeServer: @unchecked Sendable {
     private func watchForHangUp(_ fd: Int32) {
         let watch = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         watch.setEventHandler { [weak self] in
-            guard let self, self.parked.contains(where: { $0.fd == fd }) else { return }
+            guard let self, let held = self.parked.first(where: { $0.fd == fd }) else { return }
             var byte: UInt8 = 0
             let n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
             if n < 0, errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR { return }
             self.finish(fd)
-            if let observe = self.hangUpObserver {
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + self.activeWindow + 0.1) { observe() }
-            }
+            self.noteHangUp(Set(held.members.map(\.instance)))
         }
         readers[fd] = watch
         watch.resume()
     }
 
+    private func noteHangUp(_ instances: Set<String>) {
+        guard hangUpObserver != nil, !instances.isEmpty else { return }
+        let armed = hungUp.values.min()
+        let due = Date().addingTimeInterval(activeWindow + 0.1)
+        for instance in instances { hungUp[instance] = due }
+        if armed == nil { checkHangUps(at: due) }
+    }
+
+    private func checkHangUps(at due: Date) {
+        queue.asyncAfter(wallDeadline: .now() + max(0, due.timeIntervalSinceNow)) { [weak self] in
+            guard let self, let observe = self.hangUpObserver else { return }
+            let now = Date()
+            let ready = self.hungUp.filter { $0.value <= now }
+            for instance in ready.keys { self.hungUp[instance] = nil }
+            let gone = ready.keys.filter { !self.commands.isLive(instance: $0, at: now) }
+            let agents = Set(gone.compactMap { self.agentByInstance[$0] })
+            if !agents.isEmpty { DispatchQueue.global(qos: .utility).async { observe(agents) } }
+            if let next = self.hungUp.values.min() { self.checkHangUps(at: next) }
+        }
+    }
+
     private func finish(_ fd: Int32) {
         readers.removeValue(forKey: fd)?.cancel()
         buffers[fd] = nil
-        parked.removeAll { $0.fd == fd }
+        if parked.contains(where: { $0.fd == fd }) { parked.removeAll { $0.fd == fd } }
         close(fd)
     }
 }

@@ -51,6 +51,10 @@ public enum AgentHistoryFacts {
         [fact(command: "Repeat that")] + inFront(focused, in: conversations)
     }
 
+    public static func readReply(focused: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        [fact(command: "Read the whole reply")] + inFront(focused, in: conversations)
+    }
+
     public static func keepReply(focused: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
         [fact(command: "That sounded wrong")] + inFront(focused, in: conversations)
     }

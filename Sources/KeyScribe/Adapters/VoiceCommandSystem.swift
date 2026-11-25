@@ -31,7 +31,7 @@ struct SessionReturns {
     var inFront: @MainActor () async -> FrontSession?
     var open: @MainActor (String, _ stillWanted: @escaping @MainActor @Sendable () -> Bool) async -> AgentFocusResult
     var handle: @MainActor (String) -> String?
-    var replay: @MainActor () -> SpokenResultOutput.Replay = { .nothingHeard }
+    var replay: @MainActor (_ whole: Bool) -> SpokenResultOutput.Replay = { _ in .nothingHeard }
     var keepReply: @MainActor () -> KeptReply = { .nothingHeard }
 
     enum KeptReply: Equatable { case kept(String), reportOnly(String), notSaved(String), nothingHeard, failed }
@@ -626,12 +626,13 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         var command = action.command(appName: system.appName(forBundleId:), reach: reach)
         let succeeded: Bool
         if case .goBack = action { return await goBack(to: origin, stillWanted: stillWanted) }
-        if case .repeatSummary = action { return replay(stillWanted: stillWanted) }
+        if case .repeatSummary = action { return replay(action, stillWanted: stillWanted) }
+        if case .readReply = action { return replay(action, stillWanted: stillWanted) }
         if case .keepReply = action { return keepReply(stillWanted: stillWanted) }
         let origin = if case .script = action { origin } else { await departure(from: origin) }
         guard stillWanted() else { return .abandoned }
         switch action {
-        case .goBack, .repeatSummary, .keepReply:
+        case .goBack, .repeatSummary, .readReply, .keepReply:
             return .abandoned
         case .window(let window):
             switch await system.focusWindow(window, stillWanted: stillWanted) {
@@ -792,11 +793,11 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         return origin.leaving(await sessions.inFront())
     }
 
-    private func replay(stillWanted: @MainActor () -> Bool) -> VoiceCommandOutcome {
-        let command = VoiceCommandAction.repeatSummary.detail(appName: { _ in nil })
+    private func replay(_ action: VoiceCommandAction, stillWanted: @MainActor () -> Bool) -> VoiceCommandOutcome {
+        let command = action.detail(appName: { _ in nil })
         guard let sessions else { return .failed(message: Self.nothingToRepeat, command: command) }
         guard stillWanted() else { return .abandoned }
-        switch sessions.replay() {
+        switch sessions.replay(action == .readReply) {
         case .repeating(let name): return .done(summary: name.isEmpty ? "Reply" : name, command: command)
         case .nothingHeard: return .failed(message: Self.nothingToRepeat, command: command)
         case .off: return .failed(message: "Read Agent Replies Aloud is off.", command: command)

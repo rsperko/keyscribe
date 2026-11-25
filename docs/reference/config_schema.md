@@ -337,7 +337,13 @@ a hello on any other protocol is refused with `426` and is never registered or s
   is not enrolled `403`. Events are filed under the installation's enrolled folder, never one the payload names,
   and only turn started, turn complete, waiting and `notify` are accepted, so a report never settles, refuses or
   confirms a request, opens a connection, or moves focus. The bridge keeps no state for it: a disconnected
-  conversation is answered `{"ok":true,"quiet":true}`, and `notify` `{"ok":true,"spoken":<bool>}`.
+  conversation is answered `{"ok":true,"quiet":true}`, and `notify` `{"ok":true,"spoken":<bool>}`. A hello's answer also
+  carries `"acks":true` from an app that takes acknowledgments on the next poll: a connector that serves many
+  conversations on one poll (bb, Ultimate) then lists the commands it handled as `acks` (`request` and `instance`) in its
+  next poll instead of posting an `ack` event for each, and posts them as events to an app whose answer lacks it. A
+  poll states how long its connector will wait for it (`wait`, in seconds), and while nothing is due the bridge holds
+  it just under that, at least a second and at most `AgentBridgeServer.longestPollHold`, or `AgentBridgeServer.defaultPollHold` when it states
+  none; a hung-up poll is seen at once, so a long hold costs no responsiveness.
 - **Updates keep setups as they are.** When KeyScribe starts, it updates the connector in each enrolled setup
   whose installed copy differs from the bundled one, and never in a setup that is not enrolled or whose
   connector the agent has turned off. Open conversations keep the connector they loaded, which keeps working,
@@ -346,8 +352,9 @@ a hello on any other protocol is refused with `426` and is never registered or s
 - **The connector connects only when KeyScribe is listening.** KeyScribe writes `agents/ready.json`
   (`launch`, a new random id each time the bridge starts, and `protocol`) after its socket is listening,
   and removes it when it quits, the feature is turned off, or the bridge fails to start. While the file
-  is missing the connector only rereads it, about every 10 seconds per session, and makes no connection
-  attempt. A launch whose socket refuses the connection is not tried again until `launch` changes. A
+  is missing the connector makes no connection attempt: one that can watch the folder (Pi, omp, bb, Ultimate) waits
+  for the folder to change and connects as soon as the file appears; Claude Code's plugin runtime offers no file watch,
+  so its connector rereads the file on its backoff. A launch whose socket refuses the connection is not tried again until `launch` changes. A
   bridge that stops answering is greeted once at once, then after growing waits (about 30, 60, 120,
   then 300 seconds, with jitter) while it stays unresponsive; a new `launch` ends the wait. A rejected
   hello, a `protocol` the connector does not speak, or missing connector settings make the connector go
@@ -1780,6 +1787,10 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 # text_only = true                               # Voice ▸ Off — text only: agent replies and Ask answers
                                                  #   are shown, never spoken; absent = false (spoken);
                                                  #   `voice` is kept
+# still_working = true                           # a short "Still working." notice when a turn a dictation
+                                                 #   started runs past AgentHub.stillWorkingFirst, again every
+                                                 #   AgentHub.stillWorkingAgain, unless its conversation is in
+                                                 #   front; absent = false
 ```
 
 > **`[agents.spoken_result]`** is read for replies only while the Agent feature is on. A reply of at most

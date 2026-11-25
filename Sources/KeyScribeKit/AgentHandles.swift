@@ -61,19 +61,29 @@ public enum AgentHandles {
         var taken = Set(assigned.values.map(matchKey)).union(reserved.map(matchKey))
         for conversation in conversations where assigned[conversation.id] == nil {
             let base = conversation.name.map(normalize) ?? base(forFolder: conversation.folder)
-            let candidate = ([base] + suffixes(avoiding: Set(base.split(separator: " ").map(String.init))).map { "\(base) \($0)" })
-                .first { !taken.contains(matchKey($0)) && !isReserved($0) } ?? "\(base) \(conversation.id)"
+            let free = { (name: String) in !taken.contains(matchKey(name)) && !isReserved(name) }
+            let candidate = free(base) ? base : firstSuffixed(base, where: free) ?? "\(base) \(conversation.id)"
             assigned[conversation.id] = candidate
             taken.insert(matchKey(candidate))
         }
         return assigned
     }
 
-    private static func suffixes(avoiding used: Set<String>) -> [String] {
+    private static func firstSuffixed(_ base: String, where free: (String) -> Bool) -> String? {
+        let used = Set(base.split(separator: " ").map(String.init))
         let words = distinguishingWords.filter { !used.contains($0) }
-        let pairs = words.flatMap { first in words.filter { $0 != first }.map { "\(first) \($0)" } }
-        let triples = pairs.flatMap { pair in words.filter { !pair.contains($0) }.map { "\(pair) \($0)" } }
-        return words + pairs + triples
+        for first in words where free("\(base) \(first)") { return "\(base) \(first)" }
+        for first in words {
+            for second in words where second != first && free("\(base) \(first) \(second)") { return "\(base) \(first) \(second)" }
+        }
+        for first in words {
+            for second in words where second != first {
+                for third in words where third != first && third != second && free("\(base) \(first) \(second) \(third)") {
+                    return "\(base) \(first) \(second) \(third)"
+                }
+            }
+        }
+        return nil
     }
 
     public static func rename(_ id: String, to raw: String, in current: [String: String]) throws -> [String: String] {

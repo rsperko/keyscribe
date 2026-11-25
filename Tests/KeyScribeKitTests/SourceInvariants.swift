@@ -53,6 +53,15 @@ enum SourceInvariants {
                 + "(docs/development/areas/hotkeys-and-permissions.md)."
         ),
         SourceRule(
+            pattern: #"\bSessionLockMonitor\.isSessionLocked\("#,
+            allowed: [
+                "Sources/KeyScribe/Adapters/SessionLockMonitor.swift": 1,
+                "Sources/KeyScribe/AppDelegate.swift": 2,
+            ],
+            reason: "Only the composition root reads the real screen lock; a component's default is unlocked, so a test decides "
+                + "the lock state and passes the same whether the screen is locked or not."
+        ),
+        SourceRule(
             pattern: #"\bhud\??\.render\("#,
             allowed: [
                 "Sources/KeyScribe/Take/HUDChannel.swift": 1,
@@ -102,7 +111,6 @@ enum SourceInvariants {
                 "Sources/KeyScribe/AgentIntegrations.swift": 1,
                 "Sources/KeyScribe/HUD/HUDPreview.swift": 1,
                 "Sources/KeyScribeKit/AIServiceCatalog.swift": 1,
-                "Sources/KeyScribeKit/Features.swift": 1,
             ],
             reason: "Everything one agent needs lives in that agent's own Integrations/<Agent>/ folder; shared "
                 + "code speaks AgentKind, AgentSession, AgentDiscovery and AgentConnector, so another agent is another "
@@ -146,12 +154,10 @@ enum SourceInvariants {
             pattern: #"(?i)codex"#,
             allowed: [
                 "Sources/KeyScribe/AgentIntegrations.swift": 1,
-                "Sources/KeyScribeKit/Features.swift": 1,
             ],
             reason: "Everything Codex needs lives in its own Integrations/Codex/ folder; shared code speaks AgentHost and "
                 + "AgentHostLocation, so another host is another adapter, never a branch "
-                + "(docs/development/areas/voice-commands.md). The composition root lists the hosts and the feature summary "
-                + "names the agents it works with.",
+                + "(docs/development/areas/voice-commands.md). The composition root lists the hosts.",
             own: SourceInvariants.integrationTool
         ),
         SourceRule(
@@ -173,22 +179,18 @@ enum SourceInvariants {
         ),
         SourceRule(
             pattern: #"(?<![.\w])Pi(?![a-z])"#,
-            allowed: [
-                "Sources/KeyScribeKit/Features.swift": 1,
-            ],
+            allowed: [:],
             reason: "Everything Pi needs lives in its own Integrations/Pi/ folder; shared code never names an agent "
-                + "(docs/development/areas/voice-commands.md). The feature summary names the agents it works with.",
+                + "(docs/development/areas/voice-commands.md).",
             own: SourceInvariants.integrationTool
         ),
         SourceRule(
             pattern: #"(?<![A-Za-z0-9_-])[Oo]mp(?![a-z])"#,
             allowed: [
                 "Sources/KeyScribe/AgentIntegrations.swift": 1,
-                "Sources/KeyScribeKit/Features.swift": 1,
             ],
             reason: "Everything omp needs lives in its own Integrations/Omp/ folder; shared code never names an agent "
-                + "(docs/development/areas/voice-commands.md). The composition root lists the agents, and the feature "
-                + "summary names the agents it works with.",
+                + "(docs/development/areas/voice-commands.md). The composition root lists the agents.",
             own: SourceInvariants.integrationTool
         ),
     ]
@@ -199,12 +201,12 @@ enum SourceInvariants {
         return String(parts[folder + 1])
     }
 
-    static func swiftFiles(under root: URL, in directory: String) throws -> [String: String] {
+    static func swiftFiles(under root: URL, in directory: String, extensions: Set<String> = ["swift"]) throws -> [String: String] {
         let base = root.appendingPathComponent(directory).resolvingSymlinksInPath()
         let enumerator = FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil)
         var files: [String: String] = [:]
         while let url = enumerator?.nextObject() as? URL {
-            guard url.pathExtension == "swift" else { continue }
+            guard extensions.contains(url.pathExtension) else { continue }
             let relative = String(url.resolvingSymlinksInPath().path.dropFirst(base.path.count + 1))
             files["\(directory)/\(relative)"] = try String(contentsOf: url, encoding: .utf8)
         }

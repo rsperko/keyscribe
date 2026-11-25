@@ -482,10 +482,20 @@ public struct AgentCommandQueue: Sendable {
         var lastSeen: Date
     }
 
+    public struct Holder: Hashable, Sendable {
+        public var instance: String
+        public var connection: String
+        public init(instance: String, connection: String) {
+            self.instance = instance
+            self.connection = connection
+        }
+    }
+
     private let window: TimeInterval
     private var pending: [Entry] = []
     private var inFlight: [InFlight] = []
     private var registrations: [String: Registration] = [:]
+    private var held: Set<Holder> = []
 
     public init(activeWindow: TimeInterval = Self.activeWindow) {
         window = activeWindow
@@ -543,6 +553,11 @@ public struct AgentCommandQueue: Sendable {
         return (issued + waiting).map { Refusal(command: $0.command, reason: .connectionGap, handedOff: $0.handedOff) }
     }
 
+    public mutating func hold(_ holders: Set<Holder>, at now: Date) {
+        for released in held.subtracting(holders) { touch(instance: released.instance, connection: released.connection, at: now) }
+        held = holders
+    }
+
     public mutating func touch(instance: String, connection: String, at now: Date) {
         guard isCurrent(instance: instance, connection: connection), let seen = registrations[instance]?.lastSeen else { return }
         registrations[instance]?.lastSeen = max(seen, now)
@@ -560,6 +575,7 @@ public struct AgentCommandQueue: Sendable {
     public mutating func poll(session: String, instance: String, connection: String, at now: Date) -> [AgentCommand]? {
         guard registrations[instance]?.session == session, isCurrent(instance: instance, connection: connection) else { return nil }
         touch(instance: instance, connection: connection, at: now)
+        guard pending.contains(where: { $0.session == session }) else { return [] }
         let active = activeInstances(session: session, at: now)
         let sole = active == [instance]
         let mine: (Entry) -> Bool = { entry in
@@ -618,19 +634,29 @@ public struct AgentCommandQueue: Sendable {
 
     public func activeInstances(session: String, at now: Date) -> [String] {
         registrations
-            .filter { $0.value.session == session && now.timeIntervalSince($0.value.lastSeen) <= window }
+            .filter { $0.value.session == session && live($0.key, $0.value, at: now) }
             .sorted { $0.value.since > $1.value.since }
             .map(\.key)
     }
 
     public var isSettled: Bool { pending.isEmpty && inFlight.isEmpty }
 
+    public var waitingSessions: Set<String> { Set(pending.map(\.session)) }
+
     public func isLive(session: String, at now: Date) -> Bool {
-        registrations.values.contains { $0.session == session && now.timeIntervalSince($0.lastSeen) <= window }
+        registrations.contains { $0.value.session == session && live($0.key, $0.value, at: now) }
     }
 
     public func isLive(instance: String, at now: Date) -> Bool {
-        registrations[instance].map { now.timeIntervalSince($0.lastSeen) <= window } ?? false
+        registrations[instance].map { live(instance, $0, at: now) } ?? false
+    }
+
+    public func liveSessions(at now: Date) -> Set<String> {
+        Set(registrations.filter { live($0.key, $0.value, at: now) }.map(\.value.session))
+    }
+
+    private func live(_ instance: String, _ registration: Registration, at now: Date) -> Bool {
+        held.contains(Holder(instance: instance, connection: registration.connection)) || now.timeIntervalSince(registration.lastSeen) <= window
     }
 
     private mutating func requeue(where shouldRequeue: (InFlight) -> Bool) {

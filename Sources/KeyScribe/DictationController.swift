@@ -160,9 +160,9 @@ final class DictationController {
                 guard let self, self.settings.features.isEnabled(.agents) else { return nil }
                 return hub?.handle(of: id)
             },
-            replay: { [weak self] in
+            replay: { [weak self] whole in
                 guard let self, self.settings.features.isEnabled(.agents), let spoken = self.spokenUpdates else { return .off }
-                return spoken.repeatLast()
+                return whole ? spoken.readWholeLast() : spoken.repeatLast()
             },
             keepReply: { [weak self] in
                 guard let self, self.settings.features.isEnabled(.agents) else { return .nothingHeard }
@@ -339,7 +339,7 @@ final class DictationController {
         activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
             InstalledEngineFilter.shouldRun(engineId: engine.id)
         },
-        isSessionLocked: @escaping @MainActor () -> Bool = { SessionLockMonitor.isSessionLocked() },
+        isSessionLocked: @escaping @MainActor () -> Bool = { false },
         llmClient: any LLMClient = HTTPLLMClient(),
         voiceCommands: VoiceCommandRunning? = nil,
         recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {
@@ -2586,13 +2586,13 @@ final class DictationController {
             return SpokenHelp.voiceCommands(
                 title: title, apps: runningAppNames(), browser: browser, places: commands.places, scripts: commands.scripts,
                 findsInApps: config.findsInAppsEnabled, readsReplies: spokenUpdates?.readsReplies == true,
-                canRepeat: spokenUpdates?.hasReplyToRepeat == true, stages: stages)
+                canRepeat: spokenUpdates?.hasReplyToRepeat == true, canRead: spokenUpdates?.hasReplyToRead == true, stages: stages)
         }
         if mode?.output == .agent {
             return SpokenHelp.agent(
                 title: title, focused: session?.agentFocus.flatMap { agents?.handle(of: $0.id) }, example: agents?.recordingOrder.first?.handle,
                 readsReplies: spokenUpdates?.readsReplies == true, canRepeat: spokenUpdates?.hasReplyToRepeat == true,
-                stages: stages)
+                canRead: spokenUpdates?.hasReplyToRead == true, stages: stages)
         }
         return SpokenHelp.dictation(
             title: title, stages: stages, current: mode?.id, eligible: session?.eligibleModes ?? [],

@@ -128,12 +128,38 @@ every rule above applies to it, with these sharpenings:
   poll's deadline or a command not yet settled, never on a fixed tick (`AgentBridgeServer.reschedule`). A parked
   poll keeps its connector live only while its connection is open: a connector whose process ends closes it, and
   the bridge drops the poll then rather than at its deadline (`AgentBridgeServer.watchForHangUp`), so a stopped bb
-  server stops counting as holding its threads within the active window. The
-  hub rescans quickly only while Settings is open, and otherwise on a change in a watched session folder
-  (`AgentDiscovery.watchedFolders`), on a connector's hello, turn start and turn end, once a connector that hung up no
-  longer reads live (`AgentBridgeServer.onHangUp`), plus a slow fallback (`AgentRuntime.rescanInterval`). A
+  server stops counting as holding its threads within the active window. A parked poll is live for as long as it is
+  open (`AgentCommandQueue.hold`, fed from the bridge's parked list), so nothing touches parked connectors on a timer,
+  and a poll that states its connector's wait is held for minutes (`AgentBridgeServer.longestPollHold`), since a
+  hang-up is seen at once; a connector
+  outside the app wakes its agent only for events too: no repeating timer (`SourceInvariantsTests`, which lists the
+  page heartbeats still allowed), and a ready-file folder watch rather than retries while the app is closed where the
+  agent's runtime offers one;
+  a tick or a poll does work only for sessions with a command waiting (`AgentCommandQueue.waitingSessions`), and the
+  hub reads every conversation's liveness in one call (`AgentTransport.liveness`). The
+  hub rescans every second only while Settings is open. Otherwise nothing wakes on a period: it rescans on a change in a
+  watched session folder (`AgentDiscovery.watchedFolders`), on a connector's hello, turn start and turn end, when a
+  process a listed or name-remembered conversation runs in exits (`ProcessExitWatcher`), at a press, and once a
+  connector that hung up still does not read live an active window after its own hang-up (`AgentBridgeServer.onHangUp`;
+  each hang-up keeps its own deadline, so a connector that replaced its poll, as Ultimate does when its members
+  change, is never reported, and one that hangs up just before another's check is still checked at its own), which also drops the cached listing of a host whose connector it was (`AgentHub.hungUp`), since
+  a host's conversations have no process of their own to watch;
+  and when a discovery asks for another look by a deadline
+  (`AgentDiscovery.nextLook`, such as a title Claude Code may still write after a turn ends; `AgentRuntime.pace`). A
+  candidate that no connector announces is therefore found at the next press or while Settings is open. A
   connected conversation is no reason to scan quickly: its connector reports its turns, and a rescan every second
-  while one was connected cost 12 to 15% CPU on a Mac running about 980 processes (2026-11-20). Each agent's processes
+  while one was connected cost 12 to 15% CPU on a Mac running about 980 processes (2026-11-20); a rescan every 10
+  seconds still cost about 0.14% of a core in a profile with about 430 listed conversations (2026-11-24).
+  Bridge events reach the hub in batches (`AgentEventInbox`): a hello opens a burst that waits up to
+  `AgentEventInbox.defaultHelloWait` for the rest of it, and title, waiting and shown events join an open burst; any
+  other event, and every event while no burst is open, delivers at once, in order, and a press takes in whatever is
+  waiting before it reads the conversations (`AgentHub.drainEvents`). Within a batch the hub settles hellos and titles together,
+  before any event that reads the roster (`AgentHub.readsRoster`), so a burst of hellos with their titles (an app
+  launch, a host restarting with hundreds of conversations) costs one roster rebuild, one place read and one rescan.
+  The roster is rebuilt only when its inputs, its names, or which name-remembered conversations still run changed
+  (`AgentHub.refresh`); a refresh and the filing before it read every liveness answer in one bridge call
+  (`AgentTransport.liveness`), and a rebuild indexes labels,
+  containers and names once rather than searching the roster per conversation (`AgentDirectory.update`). Each agent's processes
   are classified once per process listing (`AgentProcessTable.found`), however many scans ask within it. A press
   refreshes, reads places and freezes the roster only when an agent mode is eligible for it; the refresh
   stays, because a connector that resumes polling without a hello reports no event. Places are read when
@@ -654,8 +680,14 @@ every rule above applies to it, with these sharpenings:
   plugin in the `prepend` tier may continue an event past every personal plugin (`next.to`), and Claude Code then tells
   the model, in every session, that the personal hook was skipped; one did so for `classic.SessionStart`,
   `classic.UserPromptSubmit` and `prompt.attachment` (2.1.329, 2026-11-20), and for `session.append`
-  (2.1.330). The connector hooks only the events `managed-plugin.test.ts` lists, so adding one a managed plugin
-  could pass by is a deliberate choice. So the session is `$.session.id()` read when
+  (2.1.330). The notice is Claude Code's own and nothing a personal plugin does turns it off: as read from 2.1.331's
+  code (2026-11-24), any personal hook an outer plugin passes by is reported to the model once per session for each
+  event and plugin that passed it by. Only core and managed plugins are exempt, and a user setting that would seat the
+  connector innermost (`appendPlugins`) is ignored on a machine with managed settings. A hook that is passed by also
+  never runs, so the feature it serves stops there too. The connector therefore hooks only events no managed plugin
+  has been seen passing by, all listed in `managed-plugin.test.ts`, so adding one is a deliberate choice. Classic
+  hooks are the ones managed plugins pass by, so a fact is taken from a classic hook only when Claude Code reports it
+  nowhere else. So the session is `$.session.id()` read when
   the poll loop starts and after every `command.run`, since a `/clear`, `/resume` or `/branch` ends the old session and
   switches the id inside its own command (measured on 2.1.329: the id is still the old one after `session.end`'s
   `next`, and the new one after the command's); the next prompt reads it again for a switch that came another way. A
@@ -866,6 +898,24 @@ every rule above applies to it, with these sharpenings:
   `codeVersion`, which the installer writes into the connector's code (`builtVersion`), never the settings file's
   version, which an older connector reads again after an update; a hello without `codeVersion` is from before the
   field and so older, and a host's own connector is never compared.
+- **A connector already running keeps the code it loaded, so every bridge change works with either side older.** An
+  update reinstalls connectors, but an agent or host keeps the copy it loaded until it reloads, so each change to the
+  wire is negotiated rather than assumed:
+  - A poll states how long its connector waits for it (`wait`, in seconds), and the bridge holds it just under that
+    wait, at least a second and at most `AgentBridgeServer.longestPollHold`; a poll that states none is held `AgentBridgeServer.defaultPollHold`,
+    the hold connectors before `wait` were built for. A new connector polling an older app is answered at that app's
+    shorter hold and simply polls again.
+  - A hello's answer says `"acks":true` when the app takes acknowledgments on the next poll; only then do bb and
+    Ultimate list handled commands as `acks` in their next poll, kept until a poll carrying them is answered, so a
+    replaced or cancelled poll hands them to the next; against an app that does not say so they post an `ack` event
+    each, as before. A lost connection drops them, and the bridge sends an unacknowledged command again.
+  - Pi, omp and Ultimate watch the app's bridge folder while the app is closed: they set the watch before reading
+    `ready.json`, so a start between the two is never missed, and read again when the folder changed during a read;
+    a watch the runtime cannot set, or one that breaks, returns them to their timer. The folder removed and made
+    again while the app is closed still reports the app's next `ready.json`. The connector suites run under Node and
+    pin that there; omp runs its connector under Bun, where it was checked by hand (2026-11-25). Claude Code's plugin runtime
+    has no file watch, so its connector keeps its backoff.
+  `AgentBridgeServerTests` crosses the poll and acknowledgment changes with connectors from before and after them.
 - **Discovery failure is not an empty roster.** A scan that cannot read its source says so, the hub keeps
   the sessions last seen for that agent, and Settings shows the problem beside that agent's connector. A
   scan that read only part of its source keeps what it last saw from the unread part (`AgentScanExtras.carried`)
@@ -1073,7 +1123,8 @@ every rule above applies to it, with these sharpenings:
   `admit`. While its host is turned off the bridge answers it as it answers a disconnected conversation
   (`AgentBridgeServer.silence(agents:)`, set by the hub at start and after each scan), and every change of that
   sends it back to say hello again, so a host turned off means it sends only identity. It greets at most a few threads
-  at a time, so a large bb never overruns the bridge's listen backlog. A plugin bb reports failing, or running
+  at a time, and acknowledges commands on its next poll rather than one event each, so a large bb never overruns the
+  bridge's listen backlog when the app names every thread at once. A plugin bb reports failing, or running
   an earlier version after a failed reload (bb's status detail `reload failed:` on a running plugin), is
   installed but broken: Repair reinstalls it, launch maintenance tries once, and Uninstall stays offered. Inside
   bb it says hello once per thread as agent `bb` under the hosted conversation's own id, so it needs no filing, and

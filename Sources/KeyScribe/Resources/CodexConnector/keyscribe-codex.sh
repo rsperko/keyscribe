@@ -56,6 +56,7 @@ reply() {
 
 case "$1" in
 hook)
+  [ -S "$socket" ] || { cat > /dev/null; exit 0; }
   body=$(cat)
   if [ "$(printf %s "$body" | wc -c)" -gt "$limit" ]; then
     body=$(slim "$body") || exit 0

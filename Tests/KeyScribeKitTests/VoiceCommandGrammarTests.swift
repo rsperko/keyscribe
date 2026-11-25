@@ -45,6 +45,15 @@ struct VoiceCommandGrammarTests {
         #expect(VoiceCommandGrammar.parse(transcript) == .repeatSummary)
     }
 
+    @Test(arguments: ["read the whole reply", "Read the whole reply.", "read the full reply", "please read the whole reply"])
+    func parsesReadTheWholeReply(transcript: String) {
+        #expect(VoiceCommandGrammar.parse(transcript) == .readReply)
+    }
+
+    @Test func readTheWholeReplyInsideALongerTakeIsText() {
+        #expect(VoiceCommandGrammar.parse("read the whole reply and fix the typos") == nil)
+    }
+
     @Test(arguments: ["that sounded wrong", "That sounded wrong.", "that sounded garbled", "that sounded wrong please"])
     func parsesThatSoundedWrong(transcript: String) {
         #expect(VoiceCommandGrammar.parse(transcript) == .keepReply)

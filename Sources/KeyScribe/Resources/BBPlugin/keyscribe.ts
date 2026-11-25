@@ -60,7 +60,7 @@ const labelLimit = 200
 const busy = new Set(["active", "starting", "stopping"])
 const answerLimit = 8192
 const eventDeadline = 2000
-const pollDeadline = 30000
+const pollDeadline = 310000
 const backoff = [10000, 30000, 60000]
 const greetingLimit = 8
 const windowSilence = 15000
@@ -414,6 +414,8 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   let stopped = false
   let failures = 0
   let retry: (() => void) | null = null
+  let pollAcks = false
+  let acked: Array<{ request: string; instance: string }> = []
   let unwatch: (() => void) | null = null
   let polling: { cancel: () => void } | null = null
   const windows = new Map<string, { thread: string | null; draft: boolean; newThread: boolean; focused: boolean; focusedAt: number; seenAt: number }>()
@@ -481,6 +483,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   function fail() {
     if (connected) host.log("lost the connection to the app; trying again later")
     connected = false
+    acked = []
     polling?.cancel()
     polling = null
     schedule()
@@ -490,6 +493,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     if (stopped) return
     if (reason) host.log(reason)
     stopped = true
+    acked = []
     settled(config)
     connected = false
     forgetNames()
@@ -608,7 +612,9 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
       return "failed"
     }
     try {
-      m.quiet = JSON.parse(response.text)?.quiet === true
+      const answer = JSON.parse(response.text)
+      m.quiet = answer?.quiet === true
+      pollAcks = answer?.acks === true
     } catch {
       m.quiet = false
     }
@@ -626,7 +632,9 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     const list = [...members.entries()].filter(([, m]) => m.helloed).map(([thread]) => ({ session: sessionOf(thread), instance: instanceOf(thread) }))
     if (!list.length) return
     let cancelled = false
-    const exchange = host.post(config.socketPath, "/poll", JSON.stringify({ members: list, connection }), token)
+    const acks = acked.slice()
+    const exchange = host.post(
+      config.socketPath, "/poll", JSON.stringify({ members: list, connection, wait: pollDeadline / 1000, ...(acks.length ? { acks } : {}) }), token)
     const clear = host.after(pollDeadline, () => exchange.cancel())
     const current = { cancel: () => { cancelled = true; clear(); exchange.cancel() } }
     polling = current
@@ -634,6 +642,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
       clear()
       if (cancelled || polling !== current) return
       polling = null
+      if (response) acked.splice(0, acks.length)
       void answered(response)
     })
   }
@@ -654,8 +663,10 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     const commands: any[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.commands) ? parsed.commands : []
     const readmitted: string[] = []
     if (commands.some((c) => c && c.op === "retire")) return stop("the app retired this plugin")
+    const threads = new Map([...members.keys()].map((t) => [sessionOf(t), t]))
+    let renamed = false
     for (const command of commands) {
-      const thread = [...members.keys()].find((t) => sessionOf(t) === command?.expectedSession)
+      const thread = threads.get(command?.expectedSession)
       if (!thread || typeof command.id !== "string") continue
       const m = members.get(thread)!
       if (command.op === "quiet" || command.op === "admit") {
@@ -665,12 +676,14 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
       }
       if (command.op === "status" && typeof command.text === "string" && names.get(thread) !== command.text.slice(0, labelLimit)) {
         names.set(thread, command.text.slice(0, labelLimit))
-        host.labelled()
+        renamed = true
       }
-      void post("/event", { op: "ack", request: command.id, instance: instanceOf(thread), connection }, eventDeadline)
+      if (pollAcks) acked.push({ request: command.id, instance: instanceOf(thread) })
+      else void post("/event", { op: "ack", request: command.id, instance: instanceOf(thread), connection }, eventDeadline)
       if (command.op === "submit") void join(thread, command)
       if (command.op === "start") void start(thread, command)
     }
+    if (renamed) host.labelled()
     const unknown: string[] = Array.isArray(parsed?.unknown) ? parsed.unknown : []
     for (const [thread, m] of members) if (unknown.includes(instanceOf(thread)) || readmitted.includes(thread)) m.helloed = false
     if (unknown.length || readmitted.length) return greetAll()

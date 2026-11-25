@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
+import { watch } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { request as httpRequest } from "node:http"
 
@@ -18,6 +19,7 @@ export type Host = {
   after: (ms: number, fn: () => void) => () => void
   exec: (command: string, args: string[], timeoutMs: number) => Promise<{ code: number }>
   post: (socketPath: string, path: string, body: string, token: string) => Exchange
+  watch?: (folder: string, changed: () => void, broken: () => void) => (() => void) | null
 }
 export type Settings = { configPath: string | null; loadedFrom: string | null; builtVersion?: string | null }
 
@@ -73,7 +75,7 @@ type Command = {
 const queueLimit = 64
 const queueBytesLimit = 16 * 1024
 const eventDeadline = 2000
-const pollDeadline = 28000
+const pollDeadline = 310000
 const discoveryInterval = 10000
 const admitLimit = 4096
 const keystrokeQuiet = 3000
@@ -182,6 +184,8 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
   let looping = false
   let ownedStatus = false
   let dormant = false
+  let appAbsent = false
+  let watchBroken = false
   let launch: string | null = null
   let refusedLaunch: string | null = null
   let failures = 0
@@ -233,8 +237,10 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
     if (!config) return null
     try {
       const ready = JSON.parse(await host.read(config.readyPath))
-      return ready && typeof ready.launch === "string" && ready.launch ? (ready as Ready) : null
+      appAbsent = !(ready && typeof ready.launch === "string" && ready.launch)
+      return appAbsent ? null : (ready as Ready)
     } catch (err) {
+      appAbsent = true
       return null
     }
   }
@@ -250,13 +256,23 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
       let cancel: (() => void) | null = null
       const done = () => {
         if (nudge === done) nudge = null
-        if (cancel) cancel()
+        const stop = cancel
+        cancel = null
+        if (stop) stop()
         resolve()
       }
       nudge = done
       if (dormant) return
-      cancel = host.after(discoveryInterval, done)
       if (cooldown) cooldown.over.then(done)
+      const folder = appAbsent && config && !watchBroken ? config.readyPath.slice(0, config.readyPath.lastIndexOf("/")) : null
+      const unwatch = folder ? host.watch?.(folder, done, () => { watchBroken = true; done() }) ?? null : null
+      if (unwatch) {
+        cancel = unwatch
+        void readiness().then((ready) => { if (ready) done() })
+      } else {
+        if (folder) watchBroken = true
+        cancel = host.after(discoveryInterval, done)
+      }
     })
   }
 
@@ -942,7 +958,7 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
         if (!(await greet(target)) && session === target && helloSession !== target) await rest()
         continue
       }
-      polling = open("/poll", JSON.stringify({ session: target, instance, connection }))
+      polling = open("/poll", JSON.stringify({ session: target, instance, connection, wait: pollDeadline / 1000 }))
       const { result, settled } = await exchange(polling, pollDeadline)
       polling = null
       if (result === late) {
@@ -1444,6 +1460,18 @@ export function nodeHost(pi: ExtensionAPI): Host {
     exec: async (command, args, timeoutMs) => {
       const result = await pi.exec(command, args, { timeout: timeoutMs })
       return { code: result.code }
+    },
+    watch: (folder, changed, broken) => {
+      try {
+        const watcher = watch(folder, { persistent: false }, () => changed())
+        watcher.on("error", () => {
+          watcher.close()
+          broken()
+        })
+        return () => watcher.close()
+      } catch (err) {
+        return null
+      }
     },
     post: (socketPath, path, body, token) => {
       let cancel: () => void = () => {}

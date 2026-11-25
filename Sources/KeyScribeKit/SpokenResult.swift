@@ -6,32 +6,39 @@ public struct SpokenResultSettings: Codable, Equatable, Sendable {
     public var prompt: String?
     public var voice: String?
     public var textOnly: Bool
+    public var stillWorking: Bool
 
     public static let defaultPrompt = """
     The text below is an agent's reply to a developer. Your words are spoken aloud to the developer, who is not \
     looking at the reply. In one or two short sentences, about 25 words in all, tell them what they most need to \
-    know. Anything that failed, is unverified, or waits on their answer or decision comes first; otherwise the \
-    main result. Leave out everything else, even if that drops several points. When the developer's request is \
-    given under "Request:", open with two to five words naming what they asked; the order above still decides \
-    what follows. Use only what the reply states; add no advice or next steps of your own. Never say a link, file \
-    path, commit hash, ID, issue number, or address, in any form: name only its kind, such as "the issue" or \
-    "the log", and round large numbers. Speak plainly, as to a colleague, with no markup, symbols, or code, and \
-    output only what to say.
+    know. Read the whole reply first: anything that failed, is unverified, or waits on their answer or decision \
+    comes first, wherever the reply states it, even in a list near the end, and say plainly that it failed, is \
+    unverified, or waits on them. Otherwise say the main result. Leave out everything else, even if that drops \
+    several points. When the developer's request is given under "Request:" and the reply does what it asked, open \
+    with two to five words naming that task. When the request only adds a note, such as something to keep in mind \
+    or to ask for later, do not mention it. Never repeat the request or the agent's acknowledgment of it. Use only \
+    what the reply states; add no advice or next steps of your own. Never say a link, file name or path, commit \
+    hash, ID, issue number, or address, in any form, nor a name with digits in it: name only its kind, such as \
+    "the issue", "the migration" or "the log", and round large numbers. Speak plainly, as to a colleague, with no \
+    markup, symbols, or code, and output only what to say.
     """
 
     enum CodingKeys: String, CodingKey {
         case enabled, connection, prompt, voice
         case textOnly = "text_only"
+        case stillWorking = "still_working"
     }
 
     public init(
-        enabled: Bool = false, connection: String = "", prompt: String? = nil, voice: String? = nil, textOnly: Bool = false
+        enabled: Bool = false, connection: String = "", prompt: String? = nil, voice: String? = nil, textOnly: Bool = false,
+        stillWorking: Bool = false
     ) {
         self.enabled = enabled
         self.connection = connection
         self.prompt = prompt
         self.voice = voice
         self.textOnly = textOnly
+        self.stillWorking = stillWorking
     }
 
     public init(from decoder: Decoder) throws {
@@ -41,7 +48,8 @@ public struct SpokenResultSettings: Codable, Equatable, Sendable {
             connection: try c.decodeIfPresent(String.self, forKey: .connection) ?? "",
             prompt: try c.decodeIfPresent(String.self, forKey: .prompt),
             voice: try c.decodeIfPresent(String.self, forKey: .voice),
-            textOnly: try c.decodeIfPresent(Bool.self, forKey: .textOnly) ?? false)
+            textOnly: try c.decodeIfPresent(Bool.self, forKey: .textOnly) ?? false,
+            stillWorking: try c.decodeIfPresent(Bool.self, forKey: .stillWorking) ?? false)
     }
 
     public var isOn: Bool { enabled && !connection.isEmpty }
@@ -67,10 +75,27 @@ public enum SpokenResult {
 
     public static func plan(answer: String, configured: Bool) -> Plan {
         guard !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .nothing }
-        let spoken = spoken(summary: RedactionTokenizer.apply(answer, into: Tokenizer()))
+        let spoken = readable(answer)
         let words = answer.split(whereSeparator: { $0.isWhitespace }).count
         if words <= verbatimWordLimit && !spoken.isEmpty { return .speak(spoken) }
         return configured ? .summarize(answer) : .speak(repliedBody)
+    }
+
+    public static func readable(_ answer: String) -> String {
+        spokenText(RedactionTokenizer.apply(answer, into: Tokenizer()))
+    }
+
+    public static func whole(_ reply: String) -> String {
+        var fenced = false
+        let lines = reply.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n").compactMap { line -> String? in
+            let row = line.trimmingCharacters(in: .whitespaces)
+            if row.hasPrefix("```"), row == "```" || !row.dropFirst(3).contains("```") { fenced.toggle() }
+            guard !fenced, row.count > 1, row.hasPrefix("|"), row.hasSuffix("|") else { return line }
+            if row.allSatisfy({ "|:- ".contains($0) }) { return nil }
+            return row.dropFirst().dropLast().split(separator: "|", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", ") + "."
+        }
+        return readable(lines.joined(separator: "\n"))
     }
 
     public static let repliedBody = "Replied. Open the conversation for the result."
@@ -137,6 +162,8 @@ public enum SpokenResult {
         }
     }
 
+    public static let stillWorkingBody = "Still working."
+
     public static let unavailableBody = "No summary of the long reply. Open the conversation for the result."
 
     public static func notice(_ attention: AgentAttention) -> String {
@@ -169,8 +196,10 @@ public enum SpokenResult {
         out = replacing(out, #"(?i)\b(?:h ?t ?t ?p ?s?|https?) colon slash slash [\w-]+(?: (?:(?:dot|slash) [\w-]+|\d+))*"#, with: "a link")
         out = replacing(out, #"(?i)\b(?:www\.|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}/)[^\s]*[^\s.,;:!?)]"#, with: "a link")
         out = replacing(out, #"(?<![\w/])(?:~|\.{1,2})?(?:/[\w.@+-]+)+/([\w.@+-]+)"#, with: "$1")
+        out = replacing(out, #"(?<![\w/.])[\w.@+-]+(?:/[\w.@+-]+)*/([\w@+-]+\.[A-Za-z][A-Za-z0-9]*)\b"#, with: "$1")
         out = replacing(out, #"(?i)\s*\b(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)(?:[ -](?:zero|oh|one|two|three|four|five|six|seven|eight|nine)){3,}\b"#, with: "")
         out = replacing(out, #"\s*\b\d(?: \d){3,}\b"#, with: "")
+        out = replacing(out, #"\s*\(#\d+\)|\s*(?<![\w&#])#\d+\b"#, with: "")
         out = replacing(out, #"(?m)^\s*\|.*$"#, with: "")
         out = replacing(out, #"(?m)^(\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+).*[^\s.!?:;,…])[ \t]*$"#, with: "$1.")
         out = replacing(out, #"([^\s.!?:;,…])[ \t]*(?=\n[ \t]*\n)"#, with: "$1.")
@@ -236,7 +265,11 @@ public enum SpokenResult {
     }
 
     public static func spoken(summary: String) -> String {
-        spokenForm(replacing(summary, #"⟦SN:[^⟧]*⟧"#, with: hiddenValue))
+        replacing(spokenText(summary), #"\s*[\w-]*\d{5,}[\w-]*"#, with: "")
+    }
+
+    private static func spokenText(_ text: String) -> String {
+        spokenForm(replacing(text, #"⟦SN:[^⟧]*⟧"#, with: hiddenValue))
     }
 
     private static func replacing(_ text: String, _ pattern: String, with template: String) -> String {

@@ -43,6 +43,14 @@ struct SpokenResultSection: View {
                         sharedNote: "This choice also applies to Ask modes\u{2019} answers.")
                     SpokenVoiceFiles(voice: voice)
                 }
+                SettingRow(
+                    title: "Say when a long turn is still working",
+                    result: "After a minute, then every five minutes, unless the conversation is in front.")
+                {
+                    Toggle("", isOn: stillWorking)
+                        .labelsHidden().toggleStyle(.switch)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultStillWorking)
+                }
             }
         }
     }
@@ -96,6 +104,8 @@ struct SpokenResultSection: View {
                 "The agent\u{2019}s reply when a conversation finishes a message you dictated.",
                 "The agent\u{2019}s reply to work you typed, when you ask the agent to have \(app) read it to you, or run /\(KeyScribePaths.variant.connectorSlug) in the conversation.",
                 "A short notice when a conversation needs your approval or an answer, or disconnects before it finishes.",
+                "With \u{201C}Say when a long turn is still working\u{201D} on, a short notice naming the conversation when a turn your dictation started runs past a minute, and again every five minutes, unless that conversation is in front.",
+                "Say \u{201C}read the whole reply\u{201D} to hear the last reply in full. Its code is called a code block, a link is said as \u{201C}a link\u{201D}, a path as its file name, and issue numbers are left out.",
                 "A reply that came after a message someone else sent the agent, such as another agent or a background task, says so after the conversation\u{2019}s name, so you never take it for an answer to you.",
                 "A reply to a message you dictated is skipped while you\u{2019}re looking at that conversation. When \(app) can\u{2019}t tell whether the conversation is in front, it gives the reply.",
             ]),
@@ -118,6 +128,10 @@ struct SpokenResultSection: View {
 
     private var enabled: Binding<Bool> {
         Binding(get: { model.spokenResult.enabled }, set: { model.spokenResult.enabled = $0 })
+    }
+
+    private var stillWorking: Binding<Bool> {
+        Binding(get: { model.spokenResult.stillWorking }, set: { model.spokenResult.stillWorking = $0 })
     }
 
     private var service: Binding<String> {

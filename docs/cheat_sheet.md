@@ -72,8 +72,9 @@ Say one command per recording. A saved command's name works only after its verb.
 | `open [tab search] [title or site]`<br>Example: `open browser inbox` | Saved **Find a Browser Tab** | Finds the open tab that best matches. |
 | `open [app] [item]`<br>Example: `open Slack general` | **Find items in apps by voice** on | Finds what you name in that app: a browser tab, a window, or a sidebar item. |
 | `go back` | After a switch | Returns to the window or app you were in before. |
-| `repeat that` | Read Agent Replies Aloud on | Replays the last spoken reply. |
-| `that sounded wrong` | Read Agent Replies Aloud on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
+| `repeat that` | Replies read aloud | Replays the last spoken reply. |
+| `read the whole reply` | Replies read aloud | Reads the last reply in full. |
+| `that sounded wrong` | Replies read aloud | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
 | `cancel`<br>Also: `never mind` | Said alone | Runs nothing. |
 | `what can I say?` | Said alone | Shows your apps and saved commands with their verbs. |
 
@@ -100,15 +101,16 @@ the agent in Settings > Modes > Agent). [Name] is a conversation name shown ther
 | Say | Works in | What happens |
 | --- | --- | --- |
 | `[instruction]`<br>Example: `run the tests` | Conversation in front | Sends it to the conversation in front of you when you started speaking. With none in front, nothing is sent. The recording panel shows where a take goes. |
-| `tell [name] [instruction]`<br>Example: `tell backend run the tests` | Connected conversation | Sends only this instruction there, whatever is in front. The next one without a name goes to the conversation in front again. |
+| `tell [name] [instruction]`<br>Example: `tell backend run the tests` | Connected conversation | Sends only this instruction there, whatever is in front. |
 | `ask [name] [question]` | Connected conversation | Sends the question to the agent. |
 | `tell conversation two [instruction]` | While recording | Uses number 2 from the list on screen. Saying "session two" works too. |
 | `open [name]` | Known conversation | Brings its terminal forward. Sends nothing. While it stays in front, instructions without a name go there. |
 | `check on [name]` | Known conversation | Reports its status. Sends nothing. |
 | `check on all conversations` | Agent mode | Names the conversations waiting for you. Sends nothing. |
 | `rename this conversation to [name]` | Conversation in front | Renames it. Say only the rename. |
-| `repeat that` | Read Agent Replies Aloud on | Replays the last spoken reply and names its conversation. |
-| `that sounded wrong` | Read Agent Replies Aloud on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
+| `repeat that` | Replies read aloud | Replays the last spoken reply. |
+| `read the whole reply` | Replies read aloud | Reads the last reply in full. |
+| `that sounded wrong` | Replies read aloud | Keeps the reply you just heard in History, with its audio. |
 | `go back` | After `open` | Returns to the window or app you were in before. Sends nothing. |
 | `cancel`<br>Also: `never mind` | Said alone | Sends nothing. To send the word, say `tell [name] cancel`. |
 | `what can I say?` | Said alone | Shows these phrases with your conversation names. |
@@ -144,7 +146,7 @@ These work too. The phrases on the earlier pages are the ones worth remembering.
 | --- | --- | --- |
 | `launch [app]` | Any installed app | Same as `open`. |
 | `go to [app or window]`<br>Also: `focus [app or window]`, `focus on [app or window]` | Already open | Same as `switch to`. |
-| `say that again` | Read Agent Replies Aloud on | Same as `repeat that`. |
+| `say that again` | Replies read aloud | Same as `repeat that`. |
 | `number two`<br>Also: `second` | Numbered choice | Same as `two`. |
 | `please open Mail`<br>Also: `open Mail, please` | Any command | A "please" before or after a command changes nothing. |
 

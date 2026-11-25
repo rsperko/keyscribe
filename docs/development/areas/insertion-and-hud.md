@@ -62,3 +62,10 @@ Read before changing text insertion, pasteboard capture or restore, selection ca
   pasteboard and only when `changeCount` has not moved; anything else is a fresh capture. The take awaits
   its prefetch before anything can paste, a prefetch for a take that already ended does nothing, and every
   terminal discards the slot.
+- **A long agent roster lays out only the rows in view.** Once the roster needs a scroll view, its rows are a lazy
+  stack, so showing and updating the HUD costs about the same with hundreds of conversations as with a few. As
+  measured in a debug build on 2026-11-25, with 400 rows over five takes (show, three updates, transcribing,
+  hide): 19 to 40 ms a take, against 160 to 300 ms with every row laid out. The harness that measured it was not
+  kept: it only timed the takes, and a HUD that is never put on screen does not scroll, so it could not show
+  whether the row in front is scrolled into view. Check that in the running app, with a few hundred rows and the
+  conversation in front far down the list.
