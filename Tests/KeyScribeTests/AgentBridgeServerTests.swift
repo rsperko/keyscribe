@@ -42,6 +42,12 @@ struct AgentBridgeServerTests {
         return (server, events, dir)
     }
 
+    private func blocking<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            Thread { continuation.resume(with: Result { try work() }) }.start()
+        }
+    }
+
     private func request(_ dir: URL, path: String, body: String, token: String = "secret") throws -> (Int, String) {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         defer { close(fd) }
@@ -201,7 +207,7 @@ struct AgentBridgeServerTests {
         server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1")
         server.enqueue(.submit(id: "r2", expectedSession: "pi:s2", text: "y", expiresAt: .distantFuture), for: "pi:s2")
         #expect(try poll(dir, session: "s2", instance: "i2").1.contains("r2"))
-        async let polled = Task.detached { try self.poll(dir, session: "s2", instance: "i2") }.value
+        async let polled = blocking { try self.poll(dir, session: "s2", instance: "i2") }
         try await Task.sleep(for: .milliseconds(300))
         server.retire(installation: "inst-pi")
         let (status, body) = try await polled
@@ -386,7 +392,7 @@ struct AgentBridgeServerTests {
         #expect(server.nextWake != nil)
         let list = #"[{"session":"t1","instance":"c1/t1"},{"session":"t2","instance":"c1/t2"}]"#
         let acks = #"[{"request":"r1","instance":"c1/t1"},{"request":"r2","instance":"c1/t2"}]"#
-        async let parked = Task.detached { try self.request(dir, path: "/poll", body: #"{"members":\#(list),"connection":"c1","acks":\#(acks)}"#) }.value
+        async let parked = blocking { try self.request(dir, path: "/poll", body: #"{"members":\#(list),"connection":"c1","acks":\#(acks)}"#) }
         try await Task.sleep(for: .milliseconds(300))
         let wake = try #require(server.nextWake)
         #expect(wake.timeIntervalSinceNow > 1)
@@ -400,9 +406,9 @@ struct AgentBridgeServerTests {
         try hello(dir)
         let stated = wait.map { #","wait":\#($0)"# } ?? ""
         let started = Date()
-        async let polled = Task.detached {
+        async let polled = blocking {
             try self.request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1","connection":"i1"\#(stated)}"#)
-        }.value
+        }
         try await Task.sleep(for: .milliseconds(200))
         let wake = try #require(server.nextWake)
         #expect(held.contains(wake.timeIntervalSince(started)))
@@ -417,7 +423,7 @@ struct AgentBridgeServerTests {
         try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
         let wait = stating ? #","wait":2"# : ""
         let members = #"[{"session":"t1","instance":"c1/t1"}]"#
-        async let first = Task.detached { try self.request(dir, path: "/poll", body: #"{"members":\#(members),"connection":"c1"\#(wait)}"#) }.value
+        async let first = blocking { try self.request(dir, path: "/poll", body: #"{"members":\#(members),"connection":"c1"\#(wait)}"#) }
         try await Task.sleep(for: .milliseconds(200))
         server.enqueue(.status(id: "r1", expectedSession: "bb:t1", text: "one"), for: "bb:t1")
         #expect(try answer(try await first.1).commands.map(\.id) == ["r1"])
@@ -425,9 +431,9 @@ struct AgentBridgeServerTests {
         if !stating {
             #expect(try request(dir, path: "/event", body: #"{"op":"ack","request":"r1","instance":"c1/t1","connection":"c1"}"#).0 == 200)
         }
-        async let second = Task.detached {
+        async let second = blocking {
             try self.request(dir, path: "/poll", body: #"{"members":\#(members),"connection":"c1"\#(wait)\#(acks)}"#)
-        }.value
+        }
         try await Task.sleep(for: .milliseconds(450))
         #expect(server.isLive(session: "bb:t1"))
         #expect(try answer(try await second.1).commands.isEmpty)
@@ -443,7 +449,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         let members = (0..<300).map { (session: "t\($0)", instance: "c1/t\($0)") }
         for member in members { try hello(dir, session: member.session, instance: member.instance, connection: "c1", agent: "bb") }
-        async let polled = Task.detached { try self.pollAll(dir, members) }.value
+        async let polled = blocking { try self.pollAll(dir, members) }
         try await Task.sleep(for: .milliseconds(300))
         let before = server.flushedMembers
         server.enqueue(.status(id: "r1", expectedSession: "bb:t150", text: "one"), for: "bb:t150")
@@ -474,7 +480,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
         try hello(dir, session: "t2", instance: "c1/t2", connection: "c1", agent: "bb")
-        async let polled = Task.detached { try self.pollAll(dir, [("t1", "c1/t1"), ("t2", "c1/t2")]) }.value
+        async let polled = blocking { try self.pollAll(dir, [("t1", "c1/t1"), ("t2", "c1/t2")]) }
         try await Task.sleep(for: .milliseconds(1200))
         #expect(server.isLive(session: "bb:t1"))
         #expect(server.isLive(session: "bb:t2"))
@@ -502,7 +508,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
         try hello(dir, session: "t2", instance: "c1/t2", connection: "c1", agent: "bb")
-        async let polled = Task.detached { try self.pollAll(dir, [("t1", "c1/t1"), ("t2", "c1/t2")]) }.value
+        async let polled = blocking { try self.pollAll(dir, [("t1", "c1/t1"), ("t2", "c1/t2")]) }
         try await Task.sleep(for: .milliseconds(300))
         server.rehello(session: "bb:t2")
         let (status, body) = try await polled
@@ -515,7 +521,7 @@ struct AgentBridgeServerTests {
         let (server, _, dir) = try makeServer(pollHold: 5)
         defer { server.stop() }
         try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
-        async let polled = Task.detached { try self.pollAll(dir, [("t1", "c1/t1")]) }.value
+        async let polled = blocking { try self.pollAll(dir, [("t1", "c1/t1")]) }
         try await Task.sleep(for: .milliseconds(300))
         server.retire(installation: "inst-1")
         let (status, body) = try await polled
@@ -528,7 +534,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
         try hello(dir, session: "s1", instance: "i1")
-        async let polled = Task.detached { try self.pollAll(dir, [("t1", "c1/t1")]) }.value
+        async let polled = blocking { try self.pollAll(dir, [("t1", "c1/t1")]) }
         try await Task.sleep(for: .milliseconds(300))
         server.silence(agents: ["bb"])
         #expect(try answer(await polled.1).unknown == ["c1/t1"])
@@ -565,7 +571,7 @@ struct AgentBridgeServerTests {
         let (server, _, dir) = try makeServer()
         defer { server.stop() }
         try hello(dir)
-        async let polled = Task.detached { try self.poll(dir) }.value
+        async let polled = blocking { try self.poll(dir) }
         try await Task.sleep(for: .milliseconds(300))
         server.enqueue(.status(id: "r2", expectedSession: "claude:s1", text: "Dictating"), for: "claude:s1")
         let (status, body) = try await polled
@@ -604,7 +610,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         try hello(dir)
         let parkedAt = Date()
-        async let polled = Task.detached { try self.poll(dir) }.value
+        async let polled = blocking { try self.poll(dir) }
         try await Task.sleep(for: .milliseconds(300))
         let wake = try #require(server.nextWake)
         #expect(wake.timeIntervalSince(parkedAt) > 4)
@@ -612,15 +618,41 @@ struct AgentBridgeServerTests {
         _ = try await polled
     }
 
-    @Test func aCommandWaitingToBeCollectedKeepsTheBridgeTickingUntilItIsAcknowledged() throws {
+    @Test func aStateWaitingForAConnectorThatIsNotPollingWakesNothing() async throws {
         let (server, _, dir) = try makeServer()
         defer { server.stop() }
         try hello(dir)
         server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "Dictating"), for: "claude:s1")
-        let waiting = try #require(server.nextWake)
-        #expect(waiting.timeIntervalSinceNow < 0.5)
+        server.enqueue(.quiet(id: "r2", expectedSession: "claude:s9"), for: "claude:s9")
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(server.nextWake == nil)
+        #expect(server.ticks == 0)
+        let (_, body) = try poll(dir)
+        #expect(body.contains("Dictating"))
+    }
+
+    @Test func aCommandForAConnectorWhoseSessionIsForgottenIsRefusedAtOnce() async throws {
+        let (server, events, dir) = try makeServer(activeWindow: 2)
+        defer { server.stop() }
+        try hello(dir)
+        server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1", instance: "i1")
+        server.forget(session: "claude:s1")
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline, !events.all.contains(where: { if case .undelivered("r1", _, _) = $0 { true } else { false } }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(events.all.contains(.undelivered(request: "r1", reason: "instanceGone", handedOff: false)))
+    }
+
+    @Test func aCollectedCommandWakesTheBridgeAtItsAcknowledgmentDeadlineUntilItIsAcknowledged() throws {
+        let (server, _, dir) = try makeServer()
+        defer { server.stop() }
+        try hello(dir)
+        server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "Dictating"), for: "claude:s1")
+        let polledAt = Date()
         _ = try poll(dir)
-        #expect(server.nextWake != nil)
+        let wake = try #require(server.nextWake)
+        #expect(abs(wake.timeIntervalSince(polledAt) - AgentCommandQueue.ackTimeout) < 0.5)
         let ack = #"{"op":"ack","request":"r1","instance":"i1","connection":"i1"}"#
         #expect(try request(dir, path: "/event", body: ack).0 == 200)
         #expect(settles(server))
@@ -630,7 +662,7 @@ struct AgentBridgeServerTests {
         let (server, _, dir) = try makeServer(pollHold: 3, activeWindow: 0.5)
         defer { server.stop() }
         try hello(dir)
-        async let polled = Task.detached { try self.poll(dir) }.value
+        async let polled = blocking { try self.poll(dir) }
         try await Task.sleep(for: .milliseconds(1200))
         #expect(server.isLive(session: "claude:s1"))
         server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "Dictating"), for: "claude:s1")
@@ -717,7 +749,7 @@ struct AgentBridgeServerTests {
         server.onHangUp { agents in seen.lock.withLock { seen.calls.append(agents) } }
         try hello(dir)
         try await parkThenHangUp(dir)
-        async let replacement = Task.detached { try self.poll(dir) }.value
+        async let replacement = blocking { try self.poll(dir) }
         try await Task.sleep(for: .milliseconds(1200))
         #expect(seen.lock.withLock { seen.calls }.isEmpty)
         server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "x"), for: "claude:s1")
@@ -804,7 +836,7 @@ struct AgentBridgeServerTests {
         let gate = Gate()
         let (server, _, dir) = try makeServer(onHello: { _, done in gate.lock.withLock { gate.release = done } })
         defer { server.stop() }
-        async let answered = Task.detached { try self.readyHello(dir, gap: true) }.value
+        async let answered = blocking { try self.readyHello(dir, gap: true) }
         let deadline = Date().addingTimeInterval(3)
         while Date() < deadline, gate.lock.withLock({ gate.release == nil }) { try await Task.sleep(for: .milliseconds(10)) }
         try await Task.sleep(for: .milliseconds(200))
@@ -823,7 +855,7 @@ struct AgentBridgeServerTests {
         let installation = Installation()
         let (server, events, dir) = try makeServer(installation: installation, onHello: { _, done in gate.lock.withLock { gate.release = done } })
         defer { server.stop() }
-        async let answered = Task.detached { try self.readyHello(dir, gap: false) }.value
+        async let answered = blocking { try self.readyHello(dir, gap: false) }
         let deadline = Date().addingTimeInterval(3)
         while Date() < deadline, gate.lock.withLock({ gate.release == nil }) { try await Task.sleep(for: .milliseconds(10)) }
         installation.current = nil
@@ -839,7 +871,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         _ = try readyHello(dir, gap: false)
         let started = Date()
-        async let polled = Task.detached { try self.poll(dir) }.value
+        async let polled = blocking { try self.poll(dir) }
         try await Task.sleep(for: .milliseconds(300))
         _ = try readyHello(dir, connection: "c2", gap: true)
         let (status, body) = try await polled
@@ -867,11 +899,11 @@ struct AgentBridgeServerTests {
         box.hub = hub
         var notices: [AgentReceipt] = []
         hub.onNotice = { receipt, _, _ in notices.append(receipt) }
-        let send = { (body: String) in try await Task.detached { try self.request(dir, path: "/event", body: body) }.value }
+        let send = { (body: String) in try await blocking { try self.request(dir, path: "/event", body: body) } }
         let ready = #"{"op":"hello","protocol":3,"agent":"claude","instance":"i1","session":"s1","pid":1,"installation":"inst-1","features":["readiness"]"#
 
         _ = try await send(ready + #","idle":true,"gap":false,"connection":"c1"}"#)
-        _ = try await Task.detached { try self.poll(dir, connection: "c1") }.value
+        _ = try await blocking { try self.poll(dir, connection: "c1") }
         await hub.rescan()
         #expect(await hub.deliver("run the tests", to: "claude:s1") == .queued("keyscribe"))
 
@@ -881,7 +913,7 @@ struct AgentBridgeServerTests {
         for _ in 0..<20 { await Task.yield() }
         await hub.rescan()
 
-        let (_, body) = try await Task.detached { try self.poll(dir, connection: "c2") }.value
+        let (_, body) = try await blocking { try self.poll(dir, connection: "c2") }
         #expect(body == "[]")
         #expect(notices == [.kept("keyscribe", reason: .connectionGap)])
     }
@@ -1007,7 +1039,7 @@ struct AgentBridgeServerTests {
         try hello(dir)
         try hello(dir, session: "s2", instance: "i2")
         server.enqueue(.submit(id: "r2", expectedSession: "claude:s2", text: "x", expiresAt: .distantFuture), for: "claude:s2")
-        async let polled = Task.detached { try self.poll(dir) }.value
+        async let polled = blocking { try self.poll(dir) }
         try await Task.sleep(for: .milliseconds(300))
         server.retire()
         let (status, body) = try await polled

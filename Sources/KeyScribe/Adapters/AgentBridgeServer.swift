@@ -62,6 +62,8 @@ final class AgentBridgeServer: @unchecked Sendable {
     }
     private var parkedBySession: [String: [Int: [Int]]] = [:]
     private var membersVisited = 0
+    private var ticked = 0
+    var ticks: Int { queue.sync { ticked } }
     var flushedMembers: Int { queue.sync { membersVisited } }
     private var greeting: Set<Int32> = []
     private var agentByInstance: [String: String] = [:]
@@ -280,11 +282,17 @@ final class AgentBridgeServer: @unchecked Sendable {
     }
 
     func withdraw(_ id: String) -> Bool {
-        queue.sync { commands.withdraw(id) }
+        queue.sync {
+            defer { reschedule() }
+            return commands.withdraw(id)
+        }
     }
 
     func forget(session: String) {
-        queue.async { self.commands.forget(session: session) }
+        queue.async {
+            self.commands.forget(session: session)
+            self.reschedule()
+        }
     }
 
     func onHangUp(_ observe: @escaping @Sendable (_ agents: Set<String>) -> Void) {
@@ -311,10 +319,11 @@ final class AgentBridgeServer: @unchecked Sendable {
     var nextWake: Date? { queue.sync { wake } }
 
     private func reschedule() {
-        guard let timer, let next = commands.isSettled ? parked.map(\.deadline).min() : Date().addingTimeInterval(0.1) else { return }
-        if let wake, wake <= next { return }
+        guard let timer else { return }
+        let next = [commands.nextDue(at: Date()), parked.map(\.deadline).min()].compactMap { $0 }.min()
+        guard next != wake else { return }
         wake = next
-        timer.schedule(wallDeadline: .now() + max(0, next.timeIntervalSinceNow))
+        timer.schedule(wallDeadline: next.map { .now() + max(0, $0.timeIntervalSinceNow) } ?? .distantFuture)
     }
 
     private func acceptAll() {
@@ -474,6 +483,7 @@ final class AgentBridgeServer: @unchecked Sendable {
     private func tick() {
         let now = Date()
         wake = nil
+        ticked += 1
         commands.tick(at: now)
         for refusal in commands.undeliverable(at: now) {
             onEvent(.undelivered(request: refusal.command.id, reason: refusal.reason.rawValue, handedOff: refusal.handedOff))
@@ -606,7 +616,10 @@ final class AgentBridgeServer: @unchecked Sendable {
     private func finish(_ fd: Int32) {
         readers.removeValue(forKey: fd)?.cancel()
         buffers[fd] = nil
-        if parked.contains(where: { $0.fd == fd }) { parked.removeAll { $0.fd == fd } }
+        if parked.contains(where: { $0.fd == fd }) {
+            parked.removeAll { $0.fd == fd }
+            reschedule()
+        }
         close(fd)
     }
 }

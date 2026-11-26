@@ -565,11 +565,23 @@ public struct AgentCommandQueue: Sendable {
 
     public mutating func enqueue(_ command: AgentCommand, for session: String, instance: String? = nil, at now: Date) {
         let everyone = instance == nil && command.isState ? activeInstances(session: session, at: now) : []
+        let reaching = instance.map { Set([$0]) } ?? (everyone.count > 1 ? Set(everyone) : nil)
+        pending.removeAll { entry in
+            !entry.handedOff && entry.session == session && Self.replaces(command, entry.command)
+                && (reaching == nil || entry.instance.map { reaching?.contains($0) == true } ?? true)
+        }
         guard everyone.count > 1 else {
             pending.append(Entry(command: command, session: session, instance: instance, queuedAt: now))
             return
         }
         pending += everyone.map { Entry(command: command, session: session, instance: $0, queuedAt: now) }
+    }
+
+    private static func replaces(_ later: AgentCommand, _ earlier: AgentCommand) -> Bool {
+        switch (later, earlier) {
+        case (.status, .status), (.quiet, .quiet), (.quiet, .admit), (.admit, .quiet), (.admit, .admit): true
+        default: false
+        }
     }
 
     public mutating func poll(session: String, instance: String, connection: String, at now: Date) -> [AgentCommand]? {
@@ -600,7 +612,7 @@ public struct AgentCommandQueue: Sendable {
     }
 
     public mutating func tick(at now: Date) {
-        requeue { $0.deadline < now }
+        requeue { $0.deadline <= now }
     }
 
     public mutating func undeliverable(at now: Date) -> [Refusal] {
@@ -616,14 +628,31 @@ public struct AgentCommandQueue: Sendable {
     }
 
     private func refusalReason(for entry: Entry, at now: Date) -> Undeliverable? {
-        if Self.expired(entry, at: now) { return .expired }
+        assess(entry, at: now).refusal
+    }
+
+    private struct Assessment {
+        var refusal: Undeliverable?
+        var changesAt: Date? = nil
+    }
+
+    private func assess(_ entry: Entry, at now: Date) -> Assessment {
+        if Self.expired(entry, at: now) { return Assessment(refusal: .expired) }
         let active = activeInstances(session: entry.session, at: now)
-        if let holder = entry.holder, let pinned = entry.connection {
-            if !isCurrent(instance: holder, connection: pinned) { return .connectionGap }
-            return active.contains(holder) ? nil : .instanceGone
+        func waiting(_ times: Date?...) -> Assessment {
+            Assessment(refusal: nil, changesAt: ([entry.command.expiresAt] + times).compactMap { $0 }.min())
         }
-        if let target = entry.instance { return active.contains(target) ? nil : .instanceGone }
-        return active.count > 1 && now.timeIntervalSince(entry.queuedAt) > window * 2 ? .ambiguous : nil
+        if let holder = entry.holder, let pinned = entry.connection {
+            guard isCurrent(instance: holder, connection: pinned) else { return Assessment(refusal: .connectionGap) }
+            return active.contains(holder) ? waiting(goesQuiet(holder)) : Assessment(refusal: .instanceGone)
+        }
+        if let target = entry.instance {
+            return active.contains(target) ? waiting(goesQuiet(target)) : Assessment(refusal: .instanceGone)
+        }
+        guard active.count > 1 else { return waiting() }
+        let ambiguousAt = entry.queuedAt.addingTimeInterval(window * 2)
+        guard now <= ambiguousAt else { return Assessment(refusal: .ambiguous) }
+        return waiting(ambiguousAt.addingTimeInterval(Self.pastTheEdge), active.compactMap(goesQuiet).min())
     }
 
     public mutating func withdraw(_ id: String) -> Bool {
@@ -640,6 +669,22 @@ public struct AgentCommandQueue: Sendable {
     }
 
     public var isSettled: Bool { pending.isEmpty && inFlight.isEmpty }
+
+    public func nextDue(at now: Date) -> Date? {
+        let waiting = pending.compactMap { entry -> Date? in
+            let assessed = assess(entry, at: now)
+            return assessed.refusal == nil ? assessed.changesAt : now
+        }
+        return (inFlight.map(\.deadline) + waiting).min().map { max($0, now) }
+    }
+
+    private static let pastTheEdge: TimeInterval = 0.001
+
+    private func goesQuiet(_ instance: String) -> Date? {
+        guard let registration = registrations[instance] else { return nil }
+        guard !held.contains(Holder(instance: instance, connection: registration.connection)) else { return nil }
+        return registration.lastSeen.addingTimeInterval(window + Self.pastTheEdge)
+    }
 
     public var waitingSessions: Set<String> { Set(pending.map(\.session)) }
 

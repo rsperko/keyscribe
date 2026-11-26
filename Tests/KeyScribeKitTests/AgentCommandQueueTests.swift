@@ -423,6 +423,130 @@ struct AgentCommandQueueTests {
         _ = queue.poll(session: "s1", instance: "i1", connection: "c1", at: t0)
         #expect(queue.waitingSessions.isEmpty)
     }
+
+    enum Waiting: String, CaseIterable {
+        case stateWithNoConnector, stateWithOneQuietConnector, stateWithTwoConnectors, submitWithNoConnector
+        case stateForAnInstance, stateForAnUnknownInstance, stateForAnInstanceOfAnotherSession, collected, collectedThenRequeued
+        case collectedByAHeldPoll, nothing
+    }
+
+    private func waiting(_ shape: Waiting) -> (queue: AgentCommandQueue, due: Date?) {
+        var queue = AgentCommandQueue()
+        let label = AgentCommand.status(id: "c1", expectedSession: "s1", text: "docs")
+        let window = AgentCommandQueue.activeWindow
+        switch shape {
+        case .stateWithNoConnector:
+            queue.enqueue(label, for: "s1", at: t0)
+            return (queue, nil)
+        case .stateWithOneQuietConnector:
+            queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+            queue.enqueue(label, for: "s1", at: t0)
+            return (queue, nil)
+        case .stateWithTwoConnectors:
+            queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+            queue.hello(session: "s1", instance: "i2", connection: "c2", at: t0)
+            queue.hold([AgentCommandQueue.Holder(instance: "i1", connection: "c1"), AgentCommandQueue.Holder(instance: "i2", connection: "c2")], at: t0)
+            queue.enqueue(command("r1"), for: "s1", at: at(1))
+            return (queue, at(1 + window * 2))
+        case .submitWithNoConnector:
+            queue.enqueue(.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: at(8)), for: "s1", at: t0)
+            return (queue, at(8))
+        case .stateForAnInstance:
+            queue.hello(session: "s1", instance: "i1", connection: "c1", at: at(2))
+            queue.enqueue(label, for: "s1", instance: "i1", at: at(2))
+            return (queue, at(2 + window))
+        case .stateForAnUnknownInstance:
+            queue.enqueue(label, for: "s1", instance: "i9", at: at(2))
+            return (queue, at(2))
+        case .stateForAnInstanceOfAnotherSession:
+            queue.hello(session: "s2", instance: "i9", connection: "c9", at: at(2))
+            queue.hold([AgentCommandQueue.Holder(instance: "i9", connection: "c9")], at: at(2))
+            queue.enqueue(label, for: "s1", instance: "i9", at: at(2))
+            return (queue, at(2))
+        case .collected:
+            queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+            queue.enqueue(command("r1"), for: "s1", at: t0)
+            _ = queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(1))
+            return (queue, at(1 + AgentCommandQueue.ackTimeout))
+        case .collectedThenRequeued:
+            queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+            queue.enqueue(command("r1"), for: "s1", at: t0)
+            _ = queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(1))
+            queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
+            return (queue, at(1 + window))
+        case .collectedByAHeldPoll:
+            queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+            queue.enqueue(label, for: "s1", at: t0)
+            _ = queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(1))
+            queue.hold([AgentCommandQueue.Holder(instance: "i1", connection: "c1")], at: at(1))
+            queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
+            return (queue, nil)
+        case .nothing:
+            queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+            return (queue, nil)
+        }
+    }
+
+    private func changes(_ queue: AgentCommandQueue, at time: Date) -> Bool {
+        var copy = queue
+        copy.tick(at: time)
+        return !copy.undeliverable(at: time).isEmpty || copy.waitingSessions != queue.waitingSessions
+    }
+
+    @Test(arguments: Waiting.allCases)
+    func theQueueIsDueExactlyWhenWaitingWorkCanChange(_ shape: Waiting) {
+        let (queue, due) = waiting(shape)
+        let now = at(2 + AgentCommandQueue.ackTimeout)
+        let next = queue.nextDue(at: now)
+        if let due {
+            let found = try? #require(next)
+            #expect(abs((found ?? .distantPast).timeIntervalSince(max(due, now))) < 0.01, "\(shape)")
+            #expect(changes(queue, at: (found ?? now).addingTimeInterval(0.002)), "\(shape)")
+            if (found ?? now) > now { #expect(!changes(queue, at: (found ?? now).addingTimeInterval(-0.002)), "\(shape)") }
+        } else {
+            #expect(next == nil, "\(shape)")
+            #expect(!changes(queue, at: at(3_600)), "\(shape)")
+        }
+    }
+
+    @Test func aCommandWaitingOnTwoConnectorsIsDueWhenOneGoesQuietLeavingTheOther() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.hello(session: "s1", instance: "i2", connection: "c2", at: t0)
+        queue.hold([AgentCommandQueue.Holder(instance: "i1", connection: "c1")], at: t0)
+        queue.enqueue(command("r1"), for: "s1", at: at(1))
+        let due = queue.nextDue(at: at(1))
+        #expect(abs((due ?? .distantFuture).timeIntervalSince(at(AgentCommandQueue.activeWindow))) < 0.01)
+        var early = queue
+        #expect(early.poll(session: "s1", instance: "i1", connection: "c1", at: (due ?? t0).addingTimeInterval(-0.01)) == [])
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "c1", at: due ?? t0) == [command("r1")])
+    }
+
+    @Test(arguments: [
+        (AgentCommand.status(id: "c2", expectedSession: "s1", text: "new"), ["c2", "q1"]),
+        (.quiet(id: "c2", expectedSession: "s1"), ["c1", "c2"]),
+        (.admit(id: "c2", expectedSession: "s1"), ["c1", "c2"]),
+    ])
+    func aStateWaitingToBeCollectedIsReplacedByALaterOneOfItsKind(_ later: AgentCommand, _ collected: [String]) {
+        var queue = AgentCommandQueue()
+        queue.enqueue(.status(id: "c1", expectedSession: "s1", text: "old"), for: "s1", at: t0)
+        queue.enqueue(.admit(id: "q1", expectedSession: "s1"), for: "s1", at: t0)
+        queue.enqueue(later, for: "s1", at: at(1))
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: at(2))
+        let polled = queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(2)) ?? []
+        #expect(polled.map(\.id).sorted() == collected)
+    }
+
+    @Test func aStateAlreadyCollectedIsNotReplaced() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.enqueue(.status(id: "c1", expectedSession: "s1", text: "old"), for: "s1", at: t0)
+        _ = queue.poll(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.tick(at: at(1 + AgentCommandQueue.ackTimeout))
+        queue.enqueue(.status(id: "c2", expectedSession: "s1", text: "new"), for: "s1", at: at(6))
+        let polled = queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(6)) ?? []
+        #expect(polled.map(\.id) == ["c1", "c2"])
+    }
 }
 
 struct AgentBridgeCodecTests {
