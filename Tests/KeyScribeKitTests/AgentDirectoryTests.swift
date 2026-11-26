@@ -27,25 +27,71 @@ struct AgentDirectoryTests {
         #expect(directory.conversation(pid: 10)?.id == "claude:a")
     }
 
-    @Test func statesSetOnRowsMatchTheRowsAFullUpdateBuildsAndCountOnceAsAChange() {
-        func entries(_ a: AgentLiveState, _ b: AgentLiveState) -> [AgentSession] {
-            var both = [started(10, "a", at: 50).session, started(11, "b", at: 60, cwd: "/src/other").session]
-            both[0].state = a
-            both[1].state = b
-            return both
+    @Test(arguments: 0..<12)
+    func patchingRowsGivesWhatAFullUpdateWouldAndCountsOnceAsAChange(_ seed: Int) {
+        var random = UInt64(seed + 1) &* 6_364_136_223_846_793_005
+        func next(_ bound: Int) -> Int {
+            random = random &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Int((random >> 33) % UInt64(bound))
         }
+        let states: [AgentLiveState] = [.idle, .working, .waitingQuestion, .waitingApproval]
+        let location = AgentHostLocation(host: "example", instance: "/run/example.sock", native: "x")
+        var entries = (0..<24).map { k in started(30_000 + k, "c\(k)", at: k, cwd: "/src/p\(k % 5)", name: k % 3 == 0 ? "task \(k % 4)" : nil).session }
+        var live = Set(entries.indices.filter { _ in next(2) == 0 }.map { "claude:c\($0)" })
+        var titles = Dictionary(uniqueKeysWithValues: entries.indices.map { ("claude:c\($0)", "title \($0)") })
+        var unread: [String: Date] = [:]
+        let excluded: Set<String> = ["claude:c5", "claude:c11"]
         var patched = AgentDirectory()
-        patched.update(entries: entries(.idle, .idle), live: ["claude:b"], excluded: ["claude:a"])
+        patched.update(entries: entries, live: live, titles: titles, excluded: excluded)
         let revision = patched.revision
-        patched.setStates(["claude:a": .waitingApproval, "claude:b": .working, "claude:gone": .working])
-        #expect(patched.revision == revision + 1)
-        patched.setStates(["claude:a": .waitingApproval, "claude:b": .working])
-        #expect(patched.revision == revision + 1)
+
+        var rows: [String: AgentDirectory.Row] = [:]
+        for _ in 0..<(1 + next(6)) {
+            let index = next(entries.count)
+            let id = "claude:c\(index)"
+            entries[index].state = states[next(states.count)]
+            entries[index].setup = next(2) == 0 ? "setup \(next(3))" : nil
+            entries[index].host = next(3) == 0 ? location : nil
+            entries[index].innerAgent = next(3) == 0 ? "pi" : nil
+            if next(2) == 0 { live.insert(id) } else { live.remove(id) }
+            titles[id] = next(2) == 0 ? "renamed \(next(9))" : nil
+            unread[id] = next(2) == 0 ? Date(timeIntervalSince1970: Double(next(100))) : nil
+            rows[id] = AgentDirectory.Row(
+                state: entries[index].state, connectorLive: live.contains(id), title: titles[id], setup: entries[index].setup,
+                placeUnreadSince: unread[id], host: entries[index].host, innerAgent: entries[index].innerAgent)
+        }
+        rows["claude:gone"] = AgentDirectory.Row(state: .working, connectorLive: true)
+        patched.patch(rows)
 
         var rebuilt = AgentDirectory()
-        rebuilt.update(entries: entries(.waitingApproval, .working), live: ["claude:b"], excluded: ["claude:a"])
+        rebuilt.update(entries: entries, live: live, titles: titles, excluded: excluded, unreadSince: unread)
         #expect(patched.conversations == rebuilt.conversations)
         #expect(patched.disconnected == rebuilt.disconnected)
+        #expect(patched.remembered == rebuilt.remembered)
+        #expect(patched.revision - revision <= 1)
+        let settled = patched.revision
+        patched.patch(rows)
+        #expect(patched.revision == settled)
+    }
+
+    @Test func aPatchAfterARenameReordersTheRowsReachesTheRowItNames() throws {
+        var directory = AgentDirectory()
+        directory.update(entries: [started(10, "a", at: 50).session, started(11, "b", at: 60, cwd: "/src/other").session], live: [])
+        try directory.rename("claude:a", to: "zebra")
+        directory.patch(["claude:a": AgentDirectory.Row(state: .working, connectorLive: true)])
+        #expect(directory.conversation(id: "claude:a")?.state == .working)
+        #expect(directory.conversation(id: "claude:a")?.handle == "zebra")
+        #expect(directory.conversation(id: "claude:b")?.state == .idle)
+    }
+
+    @Test func aPatchThatChangesNothingIsNotAChange() {
+        var directory = AgentDirectory()
+        directory.update(entries: [started(10, "a", at: 50).session], live: ["claude:a"], titles: ["claude:a": "t"])
+        let revision = directory.revision
+        directory.patch(["claude:a": AgentDirectory.Row(state: .idle, connectorLive: true, title: "t")])
+        #expect(directory.revision == revision)
+        directory.patch(["claude:a": AgentDirectory.Row(state: .working, connectorLive: true, title: "t")])
+        #expect(directory.revision == revision + 1)
     }
 
     private func crowd(_ tag: String, _ count: Int) -> [AgentSession] {
@@ -94,7 +140,7 @@ struct AgentDirectoryTests {
         let entries = [started(10, "a", at: 50).session, started(11, "b", at: 60, cwd: "/src/other").session, started(7, "old", at: 70).session]
         let steps: [(String, (inout AgentDirectory) throws -> Void)] = [
             ("update", { $0.update(entries: entries, live: ["claude:a"]) }),
-            ("setStates", { $0.setStates(["claude:a": .working]) }),
+            ("patch", { $0.patch(["claude:a": AgentDirectory.Row(state: .working, connectorLive: true)]) }),
             ("rename", { try $0.rename("claude:a", to: "docs") }),
             ("carryChosenName", { _ = $0.carryChosenName(from: "claude:a", to: "claude:b", previous: ["older"]) }),
             ("useDefaultName", { $0.useDefaultName("claude:b") }),

@@ -37,6 +37,7 @@ enum AgentReceipt: Equatable {
     case kept(String, reason: KeptReason)
     case notSent(String?, reason: NotSentReason)
     case uncertain(String)
+    case waiting(String)
 }
 
 @MainActor
@@ -47,13 +48,19 @@ final class AgentHub {
         let attempt: Int
         let retry: Int
         var box = false
-        var timedOut = false
-        var check: String?
+        var phase = Phase.handing
+        var check: (id: String, lost: Bool)?
         var turnDuringHandOff: TurnDuringHandOff?
         var followsNextTurn = false
         var typedSince = false
 
+        var answered: Bool { phase != .handing }
+
         var wire: String { retry == 0 ? message.id : "\(message.id)~\(retry)" }
+    }
+
+    private enum Phase {
+        case handing, waiting, inDoubt
     }
 
     private enum TurnDuringHandOff {
@@ -166,6 +173,7 @@ final class AgentHub {
     private let hostDeadline: Duration
     private let hostOpenDeadline: Duration?
     var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    var handOffSleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     private let hostConfirmDelay: Duration
     private let heldLimit: Duration
     private(set) var retryWaiting: Set<String> = []
@@ -279,7 +287,7 @@ final class AgentHub {
         placeTracker?.onChange = { [weak self] in self?.refresh() }
         for discovery in discoveries {
             let agent = discovery.kind.id
-            discovery.follow { [weak self] in self?.requestScan(rereadingTitles: false, agents: [agent], reusingProcesses: true) }
+            discovery.follow { [weak self] native, title in self?.retitle(native, as: title, agent: agent) }
         }
         silenceHostsTurnedOff()
         for source in self.hosts { watch(source) }
@@ -910,7 +918,7 @@ final class AgentHub {
             retries[message.id] = nil
             report(.notSent(handle(of: id), reason: .disconnected), for: message.id, in: id)
         }
-        for (request, entry) in requests where entry.message.conversation == id && !entry.timedOut {
+        for (request, entry) in requests where entry.message.conversation == id && !entry.answered {
             if transport.withdraw(entry.wire) {
                 clearHandOff(request)
                 settle(request, .notSent(entry.handle, reason: .disconnected))
@@ -1112,20 +1120,23 @@ final class AgentHub {
     private func relist(_ sessions: Set<String>) -> Bool {
         var unlisted: Set<String> = []
         var changed = false
-        for session in sessions {
-            guard let (agent, native) = AgentSessionID.split(session),
-                  let discovery = discoveries.first(where: { $0.kind.id == agent })
-            else { continue }
-            guard let current = discovery.listed(native), var listed = lastScan[agent],
-                  let index = listed.firstIndex(where: { $0.id == native })
-            else {
+        for (agent, natives) in Dictionary(grouping: sessions.compactMap(AgentSessionID.split), by: \.agent) {
+            guard let discovery = discoveries.first(where: { $0.kind.id == agent }) else { continue }
+            guard var listed = lastScan[agent] else {
                 unlisted.insert(agent)
                 continue
             }
-            guard listed[index] != current else { continue }
-            listed[index] = current
+            let index = Dictionary(listed.indices.map { (listed[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
+            for (_, native) in natives {
+                guard let current = discovery.listed(native), let at = index[native] else {
+                    unlisted.insert(agent)
+                    continue
+                }
+                guard listed[at] != current else { continue }
+                listed[at] = current
+                changed = true
+            }
             lastScan[agent] = listed
-            changed = true
         }
         if !unlisted.isEmpty { requestScan(rereadingTitles: false, agents: unlisted, reusingProcesses: true) }
         return changed
@@ -1292,20 +1303,68 @@ final class AgentHub {
             .union(steersWaiting.keys).union(nextTyped.keys)
     }
 
-    private static func stateChanges(from old: RosterInputs, to new: RosterInputs) -> [String: AgentLiveState]? {
-        guard old.entries.count == new.entries.count else { return nil }
-        var aligned = new
-        var states: [String: AgentLiveState] = [:]
-        for index in new.entries.indices where new.entries[index].state != old.entries[index].state {
-            aligned.entries[index].state = old.entries[index].state
-            states[AgentSessionID.make(agent: new.entries[index].agent, native: new.entries[index].id)] = new.entries[index].state
+    private static func rowChanges(from old: RosterInputs, to new: RosterInputs) -> [String: AgentDirectory.Row]? {
+        guard old.entries.count == new.entries.count, old.nativeNames == new.nativeNames, old.excluded == new.excluded,
+              old.places == new.places, old.unplaced == new.unplaced, old.rememberedRunning == new.rememberedRunning
+        else { return nil }
+        var rows: [String: AgentDirectory.Row] = [:]
+        for index in new.entries.indices {
+            let (was, now) = (old.entries[index], new.entries[index])
+            guard sameNames(was, now) else { return nil }
+            let id = AgentSessionID.make(agent: now.agent, native: now.id)
+            let row = row(for: now, id: id, in: new)
+            if row != Self.row(for: was, id: id, in: old) { rows[id] = row }
         }
-        guard !states.isEmpty, aligned == old else { return nil }
-        return states
+        return rows
+    }
+
+    private static func sameNames(_ was: AgentSession, _ now: AgentSession) -> Bool {
+        var aligned = now
+        aligned.state = was.state
+        aligned.title = was.title
+        aligned.setup = was.setup
+        aligned.host = was.host
+        aligned.innerAgent = was.innerAgent
+        aligned.explicitName = was.explicitName
+        return aligned == was
+    }
+
+    private static func row(for entry: AgentSession, id: String, in inputs: RosterInputs) -> AgentDirectory.Row {
+        AgentDirectory.Row(
+            state: entry.state, connectorLive: inputs.live.contains(id), title: inputs.titles[id], setup: entry.setup,
+            placeUnreadSince: inputs.unreadSince[id], host: entry.host, innerAgent: entry.innerAgent)
     }
 
     func refresh(namesReportedFor: Set<String> = [], scannedAt: [String: Date] = [:]) {
         withLiveness { rebuild(namesReportedFor: namesReportedFor, scannedAt: scannedAt) }
+    }
+
+    private func retitle(_ native: String, as title: AgentTitle, agent: String) {
+        guard var listed = lastScan[agent], listed.contains(where: { $0.id == native }) else {
+            requestScan(rereadingTitles: false, agents: [agent], reusingProcesses: true)
+            return
+        }
+        guard listed.contains(where: { $0.id == native && $0.title != title }) else { return }
+        for index in listed.indices where listed[index].id == native { listed[index].title = title }
+        lastScan[agent] = listed
+        refresh()
+    }
+
+    private func listedFromMemory(_ sessions: Set<String>) -> Set<String> {
+        var found: Set<String> = []
+        for (agent, natives) in Dictionary(grouping: sessions.filter { filed[$0] == nil }.compactMap(AgentSessionID.split), by: \.agent) {
+            guard let discovery = discoveries.first(where: { $0.kind.id == agent }) else { continue }
+            let scanned = Set((lastScan[agent] ?? []).map(\.id))
+            for (_, native) in natives where scanned.contains(native) && discovery.listed(native) != nil {
+                found.insert(AgentSessionID.make(agent: agent, native: native))
+            }
+        }
+        return found
+    }
+
+    private func owns(_ pid: Int, _ session: String) -> Bool {
+        guard let (agent, native) = AgentSessionID.split(session) else { return knowsProcess(pid) }
+        return knowsProcess(pid) && !(lastScan[agent] ?? []).contains { $0.pid == pid && $0.id != native }
     }
 
     private func rebuild(namesReportedFor: Set<String>, scannedAt: [String: Date]) {
@@ -1361,8 +1420,8 @@ final class AgentHub {
             } ?? [], unreadSince: placeTracker?.failingSince ?? [:],
             rememberedRunning: Set(verdicts.filter(\.value.running).keys))
         if built?.inputs != inputs || built?.revision != directory.revision {
-            if let built, built.revision == directory.revision, let states = Self.stateChanges(from: built.inputs, to: inputs) {
-                directory.setStates(states)
+            if let built, built.revision == directory.revision, let rows = Self.rowChanges(from: built.inputs, to: inputs) {
+                directory.patch(rows)
             } else {
                 rosterRebuilds += 1
                 let running = Dictionary(verdicts.values.map { ($0.saved, $0.running) }, uniquingKeysWith: { first, _ in first })
@@ -1814,9 +1873,12 @@ final class AgentHub {
     }
 
     private func settle(_ named: Named) {
+        let unlisted = named.newProcess ? named.sessions : named.sessions.subtracting(listedFromMemory(named.sessions))
+        _ = relist(named.sessions.subtracting(unlisted))
         refresh(namesReportedFor: named.sessions)
-        let agents = agents(of: named.sessions)
-        requestScan(rereadingTitles: true, agents: agents, reusingProcesses: !named.newProcess)
+        if !unlisted.isEmpty {
+            requestScan(rereadingTitles: true, agents: agents(of: unlisted), reusingProcesses: !named.newProcess)
+        }
     }
 
     private func apply(_ event: AgentEvent, reconciling: Bool) -> Named? {
@@ -1866,7 +1928,7 @@ final class AgentHub {
             }
             connectorNamesAt[hello.session] = now()
             expectListing(hello)
-            named = Named(sessions: [hello.session], newProcess: processAgents.contains(hello.agent) && !knowsProcess(hello.pid))
+            named = Named(sessions: [hello.session], newProcess: processAgents.contains(hello.agent) && !owns(hello.pid, hello.session))
         case .title(let session, let text):
             let name: String? = text.isEmpty ? nil : text
             connectorNamesAt[session] = now()
@@ -1878,7 +1940,8 @@ final class AgentHub {
             let changed = waitingPrompts[session] != prompt
             waitingPrompts[session] = prompt
             let revision = directory.revision
-            if relist(Set([session] + [filed[session]?.session].compactMap { $0 })) { refresh() }
+            let sessions = Set([session] + [filed[session]?.session].compactMap { $0 })
+            if relist(sessions) { refresh() }
             if changed, directory.revision == revision { onChange?() }
         case .notify(let session, let turn, let on):
             _ = notify(session: session, turn: turn, on: on)
@@ -1913,7 +1976,7 @@ final class AgentHub {
         case .refused(let check, _, _) where promptBoxChecks[check] != nil, .undelivered(let check, _, _) where promptBoxChecks[check] != nil:
             promptBoxChecks.removeValue(forKey: check)?.resume(returning: false)
         case .checked(let request, let check, let report):
-            guard requests[request]?.check == check else { break }
+            guard requests[request]?.check?.id == check else { break }
             trace(request) {
                 $0.check = .answered(report.state)
                 if report.state != .seen { $0.absorb(report) }
@@ -1922,7 +1985,8 @@ final class AgentHub {
             case .seen: confirm(request, turn: report.turn, report: report)
             case .refused: refuse(request, reason: report.reason ?? "")
             default:
-                leaveUncertain(request, follows: false)
+                let lost = report.state == .unknown || requests[request]?.check?.lost == true
+                if lost { inDoubt(request, follows: false) } else { keepWaiting(request, follows: false) }
                 stopFollowing(request)
             }
         case .refused(let request, let reason, _) where focusWaiters[request] != nil:
@@ -1931,21 +1995,18 @@ final class AgentHub {
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
         case .refused(let request, let reason, _):
             refuse(request, reason: reason)
-        case .undelivered(let request, let reason, true):
-            doubt(request, askingConnector: reason != AgentCommandQueue.Undeliverable.retired.rawValue
-                && reason != AgentCommandQueue.Undeliverable.instanceGone.rawValue)
+        case .undelivered(let request, AgentCommandQueue.Undeliverable.instanceGone.rawValue, true):
+            doubt(request, askingConnector: false)
+        case .undelivered(let request, AgentCommandQueue.Undeliverable.connectionGap.rawValue, true):
+            doubt(request, lost: true)
+        case .undelivered(let request, _, true):
+            inDoubt(request, follows: true)
         case .undelivered(let request, "expired", false):
-            clearHandOff(request)
-            settle(request, .notSent(requests[request]?.handle, reason: .expired))
-            releaseHeld()
+            fail(request, .notSent(requests[request]?.handle, reason: .expired))
         case .undelivered(let request, "connectionGap", false):
-            clearHandOff(request)
-            settle(request, .kept(requests[request]?.handle ?? "", reason: .connectionGap))
-            releaseHeld()
+            fail(request, .kept(requests[request]?.handle ?? "", reason: .connectionGap))
         case .undelivered(let request, _, false):
-            clearHandOff(request)
-            settle(request, .notSent(requests[request]?.handle, reason: .connectorNotRunning))
-            releaseHeld()
+            fail(request, .notSent(requests[request]?.handle, reason: .connectorNotRunning))
         case .absorbed(let session, let turn, let prompt, let wire):
             let stamp = nextStamp()
             if let wire, let request = request(sentAs: wire, to: session) {
@@ -1993,7 +2054,8 @@ final class AgentHub {
             handingOff[session] = nil
             running[session] = now()
             turns[session] = turn
-            if relist(Set([session] + [filed[session]?.session].compactMap { $0 })) { refresh() }
+            let sessions = Set([session] + [filed[session]?.session].compactMap { $0 })
+            if relist(sessions) { refresh() }
         case .turnComplete(let session, let reason, let answer, let after, let turn):
             let hosted = hosts.contains { $0.kind.id == AgentSessionID.agent(of: session) }
             let ended = turn ?? (hosted ? turns[session] : nil)
@@ -2038,7 +2100,8 @@ final class AgentHub {
                 report(reason: reason, answer: answer, after: after, of: session, origin: origin, wasRequested: false)
             }
             if reason == "aborted" { outbox.noteInterrupted(conversation: session) }
-            _ = relist(Set([session] + [filed[session]?.session].compactMap { $0 }))
+            let sessions = Set([session] + [filed[session]?.session].compactMap { $0 })
+            _ = relist(sessions)
             refresh()
         }
         if named == nil, reconciling, attentionPasses == passes { reconcileAttention() }
@@ -2658,7 +2721,7 @@ final class AgentHub {
     }
 
     private func confirm(_ request: String, turn: String, report: AgentDeliveryReport) {
-        let late = requests[request]?.timedOut == true
+        let late = requests[request]?.answered == true
         trace(request) {
             $0.absorb(report)
             if $0.confirmed == nil { $0.confirmed = now() }
@@ -2672,7 +2735,7 @@ final class AgentHub {
             if steered.count > Self.steeredLimit, let oldest = steered.first { forgetSteered { $0.wire == oldest.wire } }
             followSteer(of: conversation, for: request, text: entry.message.text)
         }
-        if let conversation, !turn.isEmpty {
+        if let conversation, !turn.isEmpty, (turns[conversation] ?? turn) == turn {
             if awaitingResult[conversation] != turn { stopAwaiting(conversation) }
             follow(turn, of: conversation, for: request, stamp: Self.opening)
         }
@@ -2707,12 +2770,18 @@ final class AgentHub {
         trace(request) { $0.followedTurn = now() }
     }
 
-    private func doubt(_ request: String, askingConnector: Bool = true) {
-        guard let entry = requests[request], !entry.timedOut, entry.check == nil else { return }
+    private func doubt(_ request: String, askingConnector: Bool = true, lost: Bool = false) {
+        guard let entry = requests[request], !entry.answered, entry.check == nil else {
+            guard lost else { return }
+            if requests[request]?.answered == false { requests[request]?.check?.lost = true } else { inDoubt(request, follows: true) }
+            return
+        }
         let conversation = entry.message.conversation
-        guard askingConnector, features(of: conversation).contains("check") else { return leaveUncertain(request, follows: true) }
+        guard askingConnector, features(of: conversation).contains("check") else {
+            return lost ? inDoubt(request, follows: true) : keepWaiting(request, follows: true)
+        }
         let check = "check-\(request)-\(entry.attempt)"
-        requests[request]?.check = check
+        requests[request]?.check = (check, lost)
         trace(request) { $0.check = .asked }
         send(.check(id: check, expectedSession: conversation, request: entry.wire, expiresAt: deadline(after: checkWait)), to: conversation)
         let wait = checkWait
@@ -2723,9 +2792,9 @@ final class AgentHub {
     }
 
     private func checkUnanswered(_ request: String, check: String) {
-        guard let entry = requests[request], entry.check == check, !entry.timedOut else { return }
+        guard let entry = requests[request], let asked = entry.check, asked.id == check, !entry.answered else { return }
         trace(request) { $0.check = .unanswered }
-        leaveUncertain(request, follows: true)
+        if asked.lost { inDoubt(request, follows: true) } else { keepWaiting(request, follows: true) }
     }
 
     private func refuse(_ request: String, reason: String) {
@@ -2737,7 +2806,7 @@ final class AgentHub {
         stopFollowing(request)
         let handle = entry.handle
         switch reason {
-        case "working" where !entry.timedOut:
+        case "working" where !entry.answered:
             requests[request] = nil
             retries[request] = entry.retry + 1
             running[entry.message.conversation] = now()
@@ -2746,7 +2815,7 @@ final class AgentHub {
             return
         case "typedSince": settle(request, .kept(handle, reason: .typedSince))
         case "draft": settle(request, .kept(handle, reason: .composing))
-        case "dialog" where entry.box && !entry.timedOut:
+        case "dialog" where entry.box && !entry.answered:
             requests[request] = nil
             retries[request] = entry.retry + 1
             let held = outbox.send(
@@ -2945,33 +3014,64 @@ final class AgentHub {
         send(
             .submit(
                 id: entry.wire, expectedSession: message.conversation, text: message.text,
-                expectedPrompts: prompts[message.conversation], expiresAt: deadline(after: receiptTimeout),
+                expectedPrompts: prompts[message.conversation], expiresAt: deadline(after: handOffLimit),
                 images: takesImages(message.conversation) ? message.images : [], box: box, merge: merge),
             to: message.conversation)
-        let timeout = receiptTimeout
+        let (timeout, limit, sleep) = (receiptTimeout, handOffLimit, handOffSleep)
         Task { [weak self] in
-            try? await Task.sleep(for: timeout)
+            try? await sleep(timeout)
             guard self?.requests[message.id]?.attempt == attempt else { return }
             self?.doubt(message.id)
         }
+        Task { [weak self] in
+            try? await sleep(limit)
+            self?.expire(message.id, attempt: attempt)
+        }
     }
 
-    private func leaveUncertain(_ request: String, follows: Bool) {
-        guard let entry = requests[request], !entry.timedOut else { return }
-        requests[request]?.timedOut = true
+    private func keepWaiting(_ request: String, follows: Bool) {
+        guard let entry = requests[request], entry.phase == .handing else { return }
+        requests[request]?.phase = .waiting
+        noteUnconfirmed(request, entry, follows: follows)
+        report(.waiting(entry.handle), for: request, in: entry.message.conversation)
+    }
+
+    private func inDoubt(_ request: String, follows: Bool) {
+        guard let entry = requests[request], entry.phase != .inDoubt else { return }
+        requests[request]?.phase = .inDoubt
+        if entry.phase == .handing { noteUnconfirmed(request, entry, follows: follows) }
+        report(.uncertain(entry.handle), for: request, in: entry.message.conversation)
+    }
+
+    private func noteUnconfirmed(_ request: String, _ entry: Request, follows: Bool) {
         trace(request) { $0.doubted = now() }
         if let fact = deliveryFact(of: request) { Log.agents.notice("delivery not confirmed: \(fact.value, privacy: .public)") }
-        report(.uncertain(entry.handle), for: request, in: entry.message.conversation)
-        let conversation = entry.message.conversation
         let follows = follows && !entry.typedSince
         switch entry.turnDuringHandOff {
-        case .started(let turn)? where follows: follow(turn, of: conversation, for: request, stamp: Self.opening)
+        case .started(let turn)? where follows: follow(turn, of: entry.message.conversation, for: request, stamp: Self.opening)
         case nil where follows: requests[request]?.followsNextTurn = true
         default: break
         }
-        let limit = handOffLimit
+    }
+
+    private func fail(_ request: String, _ receipt: AgentReceipt) {
+        clearHandOff(request)
+        stopFollowing(request)
+        settle(request, receipt)
+        releaseHeld()
+    }
+
+    private func expire(_ request: String, attempt: Int) {
+        guard let entry = requests[request], entry.attempt == attempt else { return }
+        if entry.phase != .inDoubt, transport.withdraw(entry.wire) { return fail(request, .notSent(entry.handle, reason: .expired)) }
+        inDoubt(request, follows: false)
+        clearHandOff(request)
+        stopFollowing(request)
+        releaseHeld()
+        let (limit, sleep) = (handOffLimit, handOffSleep)
         Task { [weak self] in
-            try? await Task.sleep(for: limit)
+            try? await sleep(limit)
+            guard self?.requests[request]?.attempt == attempt else { return }
             self?.releaseHandOff(request)
         }
     }

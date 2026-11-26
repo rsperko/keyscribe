@@ -23,7 +23,7 @@ protocol AgentDiscovery: AnyObject {
     func stillRunning(_ remembered: RememberedName) -> Bool
     func observe(_ event: AgentEvent)
     func retire(sessions: Set<String>)
-    func follow(_ changed: @escaping () -> Void)
+    func follow(_ retitled: @escaping (_ native: String, _ title: AgentTitle) -> Void)
     func listed(_ native: String) -> AgentSession?
     func current(_ sessions: [AgentSession]) -> [AgentSession]
     func stop()
@@ -34,7 +34,7 @@ extension AgentDiscovery {
     var watchedFolders: [URL] { [] }
     func observe(_ event: AgentEvent) {}
     func retire(sessions: Set<String>) {}
-    func follow(_ changed: @escaping () -> Void) {}
+    func follow(_ retitled: @escaping (_ native: String, _ title: AgentTitle) -> Void) {}
     func listed(_ native: String) -> AgentSession? { nil }
     func current(_ sessions: [AgentSession]) -> [AgentSession] { sessions }
     func stop() {}

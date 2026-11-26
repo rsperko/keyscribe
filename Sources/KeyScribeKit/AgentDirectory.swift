@@ -236,19 +236,59 @@ public struct AgentDirectory: Sendable {
         retired = retired.filter { $0.value.update >= oldestKept }
     }
 
-    public mutating func setStates(_ states: [String: AgentLiveState]) {
+    public struct Row: Equatable, Sendable {
+        public var state: AgentLiveState
+        public var connectorLive: Bool
+        public var title: String?
+        public var setup: String?
+        public var placeUnreadSince: Date?
+        public var host: AgentHostLocation?
+        public var innerAgent: String?
+
+        public init(
+            state: AgentLiveState, connectorLive: Bool, title: String? = nil, setup: String? = nil, placeUnreadSince: Date? = nil,
+            host: AgentHostLocation? = nil, innerAgent: String? = nil
+        ) {
+            self.state = state
+            self.connectorLive = connectorLive
+            self.title = title
+            self.setup = setup
+            self.placeUnreadSince = placeUnreadSince
+            self.host = host
+            self.innerAgent = innerAgent
+        }
+    }
+
+    public mutating func patch(_ rows: [String: Row]) {
+        guard !rows.isEmpty else { return }
         var changed = false
         for index in conversations.indices {
-            guard let state = states[conversations[index].id], conversations[index].state != state else { continue }
-            conversations[index].state = state
-            changed = true
+            guard let row = rows[conversations[index].id] else { continue }
+            changed = Self.apply(row, to: &conversations[index]) || changed
         }
         for index in disconnected.indices {
-            guard let state = states[disconnected[index].id], disconnected[index].state != state else { continue }
-            disconnected[index].state = state
-            changed = true
+            guard let row = rows[disconnected[index].id] else { continue }
+            changed = Self.apply(row, to: &disconnected[index]) || changed
         }
         if changed { revision += 1 }
+    }
+
+    private static func apply(_ row: Row, to conversation: inout AgentConversation) -> Bool {
+        var patched = conversation
+        patched.state = row.state
+        patched.connectorLive = row.connectorLive
+        patched.title = row.title
+        patched.setup = row.setup
+        patched.placeUnreadSince = row.placeUnreadSince
+        patched.host = row.host
+        patched.innerAgent = row.innerAgent
+        guard patched != conversation else { return false }
+        conversation = patched
+        return true
+    }
+
+    public func conversation(id: String) -> AgentConversation? {
+        conversations.first { $0.id == id } ?? disconnected.first { $0.id == id }
     }
 
     public mutating func update(

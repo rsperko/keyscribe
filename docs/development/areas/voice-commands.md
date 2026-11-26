@@ -125,7 +125,11 @@ every rule above applies to it, with these sharpenings:
   synchronous `appendFileSync` inside Ultimate's server process, logs only allowlisted protocol
   metadata without user/reply/problem text, and is never set in normal operation).
 - **Idle means asleep.** Background work runs only while something needs it. The bridge wakes for a parked
-  poll's deadline or a command not yet settled, never on a fixed tick (`AgentBridgeServer.reschedule`). A parked
+  poll's deadline or for the moment a waiting command can next change: its acknowledgment deadline, its expiry, or
+  the connector it waits for going quiet (`AgentCommandQueue.nextDue`), never on a fixed tick
+  (`AgentBridgeServer.reschedule`). A command waiting for a connector that is not polling wakes nothing until that
+  connector polls, and a later label or quiet/admit for a conversation replaces the one still waiting, so what waits
+  stays bounded. A parked
   poll keeps its connector live only while its connection is open: a connector whose process ends closes it, and
   the bridge drops the poll then rather than at its deadline (`AgentBridgeServer.watchForHangUp`), so a stopped bb
   server stops counting as holding its threads within the active window. A parked poll is live for as long as it is
@@ -144,10 +148,12 @@ every rule above applies to it, with these sharpenings:
   built, so on opening the rows appear first and their terminal names follow; that is the accepted cost of a closed
   Settings doing no work. Otherwise nothing wakes on a period, and a rescan asks only the
   sources the event could have changed (`AgentHub.rescan(agents:)`): a change in a watched session folder asks the
-  sources that watch one (`AgentDiscovery.watchedFolders`), a connector's hello or title asks the source of that
-  conversation and of the agent filed under it, and a process exit asks the sources whose conversations have processes
-  (`ProcessExitWatcher`). A turn start, turn end or prompt in one conversation takes that conversation from its source's
-  memory (`AgentDiscovery.listed`) and rescans nothing; a source that cannot answer from memory is rescanned alone:
+  sources that watch one (`AgentDiscovery.watchedFolders`), a connector's hello or title for a conversation its source
+  cannot answer for from memory, or from a new process, asks the source of that conversation and of the agent filed
+  under it, and a process exit asks the sources whose conversations have processes
+  (`ProcessExitWatcher`). A hello, title, turn start, turn end or prompt in one conversation takes that conversation from
+  its source's memory (`AgentDiscovery.listed`), rescans nothing, and reads and changes only that conversation's row
+  (`AgentHub.refresh(rows:)`) unless what changed feeds names; a source that cannot answer from memory is rescanned alone:
   Claude Code, whose state is its session registry, and a host whose cached listing is older than its interval, so a
   host's titles still refresh on turn events as they did. A scan's results are reconciled with their source's memory in
   one pass when committed (`AgentDiscovery.current`), so a scan that started before an event never puts back the state
@@ -159,8 +165,9 @@ every rule above applies to it, with these sharpenings:
   each hang-up keeps its own deadline, so a connector that replaced its poll, as Ultimate does when its members
   change, is never reported, and one that hangs up just before another's check is still checked at its own), which also drops the cached listing of a host whose connector it was (`AgentHub.hungUp`), since
   a host's conversations have no process of their own to watch;
-  and when a discovery reports that what it lists changed (`AgentDiscovery.follow`, such as a title Claude Code wrote
-  after a turn ended). A
+  and a title a source reads after the event (`AgentDiscovery.follow`, such as a title Claude Code wrote after a turn
+  ended) changes that conversation's row without a rescan; a scan that started earlier takes the title the source
+  knows when it is committed (`ClaudeDiscovery.current`). A
   candidate that no connector announces is therefore found at the next press or while Settings is open. A
   connected conversation is no reason to scan quickly: its connector reports its turns, and a rescan every second
   while one was connected cost 12 to 15% CPU on a Mac running about 980 processes (2026-11-20); a rescan every 10
@@ -178,8 +185,9 @@ every rule above applies to it, with these sharpenings:
   reads live (`AgentTransport`), not only once its conversation is listed live, so a prompt reported in a hello,
   or before the conversation's first scan, still holds the next dictation.
   The roster is rebuilt only when its inputs, its names, or which name-remembered conversations still run changed
-  (`AgentHub.refresh`), and inputs that differ only in conversations' states change those rows
-  (`AgentDirectory.setStates`) without reassigning names. In a release build with 430 listed conversations, as
+  (`AgentHub.refresh`), and inputs that differ only in what a row shows and no name depends on (state, generated
+  title, setup, connection, host) change those rows (`AgentDirectory.patch`) without reassigning names. A name change
+  still reassigns every name, since one conversation's new name can change another's. In a release build with 430 listed conversations, as
   measured 2026-11-25: keeping the names a directory remembers as it changes, rather than working them out at each
   read (`AgentDirectory.remembered`), took a turn event that changed one state from about 1.27 ms to 0.50 ms; an
   event that also changed a name took about 4.4 ms, 3.2 ms once folder names stopped going through a file URL
@@ -825,15 +833,30 @@ every rule above applies to it, with these sharpenings:
   entry as its Delivery fact and logged at notice level when a receipt is missing or late; it holds times
   and fixed wording, never content.
 - **A receipt timeout is "unknown", not "failed" or "gone".** A request that may still be delivered
-  stays tracked until the connector settles it or it expires. It holds later dictation for that
-  conversation, so nothing overtakes it, but only for a bounded time (`AgentHub`'s hand-off limit); after
-  that the queue moves on and the request is forgotten everywhere that tracks it (`AgentHub.onForget`), so
-  tracking never grows with session age. What a connector reported for a session (its features,
+  stays tracked until the connector settles it or it expires. Each hand-off is in one phase (`AgentHub.Request.phase`):
+  handing, waiting, or in doubt. Silence is not evidence: a connector that has not answered, has not acknowledged,
+  or holds the message leaves it waiting ("docs is busy; still waiting"); a connector that went away, restarted
+  while holding it, or does not know the message puts it in doubt ("May not have reached docs"), from handing or
+  from waiting, and History records that last step. It holds later dictation for that
+  conversation, so nothing overtakes it, but only for a bounded time (`AgentHub`'s hand-off limit), which is also
+  the submit's deadline. At that limit the hub withdraws the message from the bridge: when no connector had
+  collected it, nothing can arrive later, so it is not sent ("Nothing sent.", with Paste last dictation, which
+  then pastes that take's words, kept apart from History so it works with History off; `AgentOutput.showNotice`);
+  when a connector had collected it, the app cannot know, so it is in doubt. Whichever way a take reached doubt and
+  whatever reported it first, the queue moves on at the limit and the take stops following a turn, and the request
+  alone stays tracked for one more limit, where a late receipt still settles it through the ordinary confirmation.
+  Any confirmation follows the turn it names only while no other turn has started in that conversation since
+  (`AgentHub.confirm`), so reply-following never moves back to an older turn. That rests on what every connector's
+  receipt names: the turn the message entered, or none for a steer, never a turn queued behind a running one; a
+  connector that assigned a turn up front while another runs would have its reply left unfollowed. Then it is forgotten everywhere
+  that tracks it (`AgentHub.onForget`), so tracking never grows with session age. Evidence of loss that arrives
+  while a check is out waits for the check's answer.
+  A connector refuses a submit past its deadline at the last moment before the agent takes it (Ultimate checks
+  again after its own conversation lookup, `stillWanted`). What a connector reported for a session (its features,
   environment, title, prompt count, and label) is dropped once the session is neither listed nor
   connected, and its bridge registration goes with it, so the connector's next poll is refused and its
   hello reports everything again; metadata never outlives the registration that would let a connector
-  skip that hello. The submit's own deadline ends at the receipt timeout, so a
-  connector never starts a submission the hub has already reported as uncertain. A receipt
+  skip that hello. A receipt
   within the hold settles the earlier take alone; a refusal after the hold keeps its text for review rather
   than queueing it behind newer takes.
 - **Act on the turn or session captured at decision time.** Stop, open, and deliver recheck that

@@ -359,6 +359,7 @@ final class ScriptedTakeRunner {
         case .kept: "kept"
         case .notSent: "notSent"
         case .uncertain: "uncertain"
+        case .waiting: "waiting"
         }
     }
 
@@ -378,7 +379,7 @@ final class ScriptedTakeRunner {
     private static func sent(_ receipt: AgentReceipt) -> Bool {
         switch receipt {
         case .sent, .sentWithDraft: true
-        case .queued, .kept, .notSent, .uncertain: false
+        case .queued, .kept, .notSent, .uncertain, .waiting: false
         }
     }
 }

@@ -18,7 +18,7 @@ export type Ultimate = {
   home: string
   list: () => Summary[]
   unavailable?: (id: number) => string
-  submit: (id: number, text: string, images: Image[], requestId: string) => Promise<number>
+  submit: (id: number, text: string, images: Image[], requestId: string, stillWanted: () => boolean) => Promise<number | null>
 }
 export type Waiting = { kind?: string; title?: string; detail?: string }
 export type ReadAloud = boolean | "quiet" | null
@@ -639,12 +639,16 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     delivery.steer = members.get(id)!.busy
     delivery.state = "handed"
     delivery.handedAt = host.now()
-    let submission: number
+    let submission: number | null
     try {
-      submission = await ultimate.submit(id, send, images, delivery.id)
+      submission = await ultimate.submit(id, send, images, delivery.id, () => held(id, command) === null)
     } catch (error) {
       finishJoin(delivery.id, false)
       return refuse(id, delivery, failure(error))
+    }
+    if (submission === null) {
+      finishJoin(delivery.id, false)
+      return refuse(id, delivery, held(id, command) ?? "expired")
     }
     if (joining) finishJoin(delivery.id, true)
     delivery.submission = submission

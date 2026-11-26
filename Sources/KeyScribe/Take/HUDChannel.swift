@@ -77,7 +77,7 @@ final class HUDChannel {
 
     static func choiceWaiting(after state: HUDState?) -> VoiceCommandChoiceStatus {
         switch state {
-        case .error(let message, let action, _): .waiting(note: message, action: action)
+        case .error(let message, let action, _, _): .waiting(note: message, action: action)
         case .advisory(let message): .waiting(note: message)
         case .complete(.noSpeech, _, _, _): .waiting(note: "No speech detected")
         case .choice(_, .waiting(let note, let heard, let action), _): .waiting(note: note, heard: heard, action: action)

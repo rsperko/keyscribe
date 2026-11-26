@@ -184,6 +184,18 @@ struct PiDiscoveryTests {
         #expect(extras.setups == ["/u/pi-work"])
     }
 
+    @Test func aReconnectingHelloKeepsTheSetupItsProcessGaveUntilTheNextScan() async {
+        let processes = Processes()
+        processes.found = AgentProcesses.Found(candidates: [candidate(10, started: 1_700_000_000, setup: "/u/pi-work")])
+        let discovery = make(processes)
+        discovery.observe(hello("s1", pid: 10))
+        _ = await discovery.scan(rereadingTitles: false)
+        discovery.observe(hello("s1", pid: 10))
+        #expect(discovery.listed("s1")?.setup == "/u/pi-work")
+        discovery.observe(hello("s1", pid: 11))
+        #expect(discovery.listed("s1")?.setup == nil)
+    }
+
     @Test func aReusedProcessIdWithAnotherStartIsNotTheSameConversation() async {
         let processes = Processes()
         processes.found = AgentProcesses.Found(candidates: [candidate(10, started: 1_700_009_000)])

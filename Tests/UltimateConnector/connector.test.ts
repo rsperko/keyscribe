@@ -12,7 +12,7 @@ const session = (id: number) => `${id}@${home}`
 
 function harness(options: {
   conversations?: Summary[]; ready?: boolean; holdShown?: boolean; watches?: boolean; acks?: boolean; holdReadyRead?: boolean
-  submit?: (id: number, text: string, images: Image[], requestId: string) => Promise<number>
+  submit?: (id: number, text: string, images: Image[], requestId: string, stillWanted: () => boolean) => Promise<number | null>
 } = {}) {
   const requests: Request[] = []
   const watching: Array<{ folder: string; fn: () => void; broken: () => void }> = []
@@ -431,6 +431,32 @@ test("a dictation for a working conversation is confirmed when queued and report
   assert.equal(absorbed.prompt, promptDigest("also check the docs"))
   assert.equal(absorbed.request, "req-3")
   assert.equal(h.events("submitted").length, 1)
+})
+
+test("a dictation that stalls inside Ultimate past its expiry is refused as expired, never submitted", async () => {
+  let resume: () => void = () => {}
+  const stalled = new Promise<void>((resolve) => { resume = resolve })
+  let entered: () => void = () => {}
+  const inside = new Promise<void>((resolve) => { entered = resolve })
+  let wanted: boolean | null = null
+  const h = harness({
+    submit: async (_id, _text, _images, _request, stillWanted) => {
+      entered()
+      await stalled
+      wanted = stillWanted()
+      return wanted ? 1 : null
+    },
+  })
+  await h.connect()
+  const sending = h.command({ op: "submit", id: "req-9", expectedSession: session(61), text: "hello", expiresAt: h.now + 1_000 })
+  await inside
+  await h.advance(2_000)
+  resume()
+  await sending
+  await h.flush()
+  assert.equal(wanted, false)
+  assert.equal(h.events("refused")[0]?.reason, "expired")
+  assert.equal(h.events("submitted").length, 0)
 })
 
 test("an expired, disconnected or refused dictation is refused and never submitted twice", async () => {

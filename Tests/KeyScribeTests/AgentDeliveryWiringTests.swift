@@ -79,7 +79,8 @@ struct AgentDeliveryWiringTests {
             AgentLiveness(sessions: sessions.filter(isLive(session:)), instances: instances.filter(isLive(instance:)))
         }
         func forget(session: String) {}
-        func withdraw(_ id: String) -> Bool { false }
+        var withdrawable = false
+        func withdraw(_ id: String) -> Bool { withdrawable }
     }
 
     private final class HUDSpy: HUDPresenting {
@@ -265,7 +266,7 @@ struct AgentDeliveryWiringTests {
         connection: Connection? = nil, llm: (any LLMClient)? = nil, voiceCommands: VoiceCommandRunning? = nil,
         namesFile: String? = nil, focus: AgentTerminalFocusing? = nil, firstStatus: String = "idle", firstWaitingFor: String? = nil,
         firstPid: Int = 10,
-        historyEnabled: Bool = true, receiptTimeout: Duration = .seconds(8),
+        historyEnabled: Bool = true, receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(60),
         front: FrontWindow? = nil, sessionInFront: Front = Front(),
         glance: (any AgentFronting)? = nil, engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1),
         maxRecordingSeconds: Double = RecordingLimit.backstopSeconds, places: (any AgentPlaceReading)? = nil,
@@ -307,7 +308,7 @@ struct AgentDeliveryWiringTests {
         let hub = AgentHub(
             transport: transport, discovery: [ClaudeDiscovery(scan: { entries() }), Unconnected(candidates: unconnected)],
             names: AgentNameStore(directory: agentsDir), focus: focus, front: sessionInFront, glance: glance,
-            receiptTimeout: receiptTimeout, scanDeadline: .seconds(30), places: places,
+            receiptTimeout: receiptTimeout, handOffLimit: handOffLimit, scanDeadline: .seconds(30), places: places,
             hosts: hosts, addresses: addresses, hostAllowed: { _ in true }, accessibilityTrusted: { true })
         transport.hub = hub
         await hub.rescan()
@@ -732,22 +733,22 @@ struct AgentDeliveryWiringTests {
 
     @Test func aHostsRefusalShowsTheHostsReason() {
         #expect(AgentOutput.receiptState(.notSent("docs", reason: .hostRefused("Work bb isn\u{2019}t open.")), mode: "Agent", heard: "")
-            == .error(message: "docs didn\u{2019}t take the message: Work bb isn\u{2019}t open. Nothing sent.", action: nil, heard: HeardExcerpt(heard: "")))
+            == .error(message: "docs didn\u{2019}t take the message: Work bb isn\u{2019}t open. Nothing sent.", action: nil, heard: HeardExcerpt(heard: ""), pastesLast: true))
         #expect(AgentOutput.spokenRefusal(.notSent("docs", reason: .hostRefused("Work bb isn\u{2019}t open.")))
             == "docs didn\u{2019}t take that: Work bb isn\u{2019}t open")
     }
 
     @Test func aHostsReasonKeepsTheCaseOfTheCopyNameItStartsWith() {
         #expect(AgentOutput.receiptState(.notSent("docs", reason: .hostRefused("bb (Work) isn\u{2019}t open.")), mode: "Agent", heard: "")
-            == .error(message: "docs didn\u{2019}t take the message: bb (Work) isn\u{2019}t open. Nothing sent.", action: nil, heard: HeardExcerpt(heard: "")))
+            == .error(message: "docs didn\u{2019}t take the message: bb (Work) isn\u{2019}t open. Nothing sent.", action: nil, heard: HeardExcerpt(heard: ""), pastesLast: true))
         #expect(AgentOutput.receiptState(.notSent("docs", reason: .hostRefused("bb no longer lists this thread")), mode: "Agent", heard: "")
-            == .error(message: "docs didn\u{2019}t take the message: bb no longer lists this thread. Nothing sent.", action: nil, heard: HeardExcerpt(heard: "")))
+            == .error(message: "docs didn\u{2019}t take the message: bb no longer lists this thread. Nothing sent.", action: nil, heard: HeardExcerpt(heard: ""), pastesLast: true))
     }
 
     @Test func aStoppedConversationSaysWhatHappenedAndHowToGetPastIt() {
         #expect(AgentOutput.receiptState(.notSent("docs", reason: .stopped), mode: "Agent", heard: "")
             == .error(message: "docs\u{2019}s last turn was interrupted, so it takes only a message you type. Nothing sent. Type one there, then dictate again.",
-                      action: nil, heard: HeardExcerpt(heard: "")))
+                      action: nil, heard: HeardExcerpt(heard: ""), pastesLast: true))
         #expect(AgentOutput.receiptState(.kept("docs", reason: .inPromptBox(.afterStop)), mode: "Agent", heard: "")
             == .advisory(message: "Not sent to docs: its last turn was interrupted, so the message is waiting in its prompt box. Press Return there to send it"))
     }
@@ -1079,7 +1080,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error(let message, _, _) = $0 {
+            if case .error(let message, _, _, _) = $0 {
                 message == "\u{201C}chief\u{201D} is the herdr workspace label of \u{201C}marvin\u{201D}. Nothing sent. Try \u{201C}ask marvin, \u{2026}\u{201D}. Your words are kept for Paste last dictation."
             } else { false }
         })
@@ -1110,7 +1111,7 @@ struct AgentDeliveryWiringTests {
         await rig.controller.dictationTask?.value
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error(let message, _, _) = $0 {
+            if case .error(let message, _, _, _) = $0 {
                 message == "No conversation named \u{201C}zeta green\u{201D}. Nothing sent. Try \u{201C}tell zeta, \u{2026}\u{201D}. Your words are kept for Paste last dictation."
             } else { false }
         })
@@ -1413,7 +1414,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(focus.sessions.isEmpty)
-        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == "No conversation named \u{201C}two\u{201D}" } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, _, _, _) = $0 { message == "No conversation named \u{201C}two\u{201D}" } else { false } })
     }
 
     @Test func sessionBeforeANameAddressesThatConversation() async {
@@ -1450,7 +1451,7 @@ struct AgentDeliveryWiringTests {
 
     private func saidNothingFocused(_ rig: Rig) -> Bool {
         rig.hud.states.contains { state in
-            guard case .error(let shown, _, _) = state else { return false }
+            guard case .error(let shown, _, _, _) = state else { return false }
             return shown.hasPrefix("\(AgentRecipient.nothingFocused). \(AgentOutput.nothingSent) \(AgentRecipient.nothingFocusedAdvice)")
         }
     }
@@ -1594,7 +1595,7 @@ struct AgentDeliveryWiringTests {
         #expect(rig.sent.isEmpty)
         #expect(!saidNothingFocused(rig))
         #expect(rig.hud.states.contains {
-            if case .error(let shown, .openAccessibilitySettings?, _) = $0 { shown.hasPrefix(AgentTake.unconfirmedLine) } else { false }
+            if case .error(let shown, .openAccessibilitySettings?, _, _) = $0 { shown.hasPrefix(AgentTake.unconfirmedLine) } else { false }
         })
     }
 
@@ -1638,7 +1639,7 @@ struct AgentDeliveryWiringTests {
         await take(rig, readingTheFront: true)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains { state in
-            guard case .error(let shown, _, _) = state else { return false }
+            guard case .error(let shown, _, _, _) = state else { return false }
             return shown.hasPrefix("No conversation focused. The focused pane runs dashboard. Nothing sent. Open one, or name a conversation in your instruction.")
         })
         #expect(fact(await lastHistoryEntry(rig), "Conversation in front") == "The focused pane runs dashboard.")
@@ -1659,7 +1660,7 @@ struct AgentDeliveryWiringTests {
         rig.hub.disconnect("claude:s2")
         await take(rig)
         #expect(rig.texts.isEmpty)
-        #expect(rig.hud.states.contains { if case .error(let shown, _, _) = $0 { shown.hasPrefix("keyscribe blue is disconnected.") } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let shown, _, _, _) = $0 { shown.hasPrefix("keyscribe blue is disconnected.") } else { false } })
     }
 
     @Test(arguments: ["Select keyscribe blue.", "Choose keyscribe blue."])
@@ -1700,7 +1701,7 @@ struct AgentDeliveryWiringTests {
         rig.hub.disconnect("claude:s1")
         await take(rig, readingTheFront: true)
         #expect(rig.texts.isEmpty)
-        #expect(rig.hud.states.contains { if case .error(let shown, _, _) = $0 { shown.hasPrefix("The conversation in front is disconnected.") } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let shown, _, _, _) = $0 { shown.hasPrefix("The conversation in front is disconnected.") } else { false } })
     }
 
     @Test func aSpokenNameWinsOverTheConversationInFront() async {
@@ -2022,7 +2023,7 @@ struct AgentDeliveryWiringTests {
         rig.controller.setNextModeOverride(id: Mode.agentModeId)
         rig.controller.handleStart()
         await rig.controller.captureBringUpTask?.value
-        let stopped = { rig.hud.states.contains { if case .error(let message, _, _) = $0 { message.hasPrefix("Stopped at the ") } else { false } } }
+        let stopped = { rig.hud.states.contains { if case .error(let message, _, _, _) = $0 { message.hasPrefix("Stopped at the ") } else { false } } }
         for _ in 0..<400 where !stopped() {
             try? await Task.sleep(for: .milliseconds(5))
         }
@@ -2389,7 +2390,7 @@ struct AgentDeliveryWiringTests {
         await take(rig, readingTheFront: true)
         #expect(host.scanGate.closed)
         let line = "Example Work hasn\u{2019}t shown \(Branding.appName) a conversation. Nothing sent."
-        #expect(rig.hud.states.contains { if case .error(let message, nil, _) = $0 { message.hasPrefix(line) } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, nil, _, _) = $0 { message.hasPrefix(line) } else { false } })
     }
 
     @Test func stoppingTheHubWhileAPressWaitsForItsPageEndsTheWaitInsteadOfRereadingTheFront() async {
@@ -2499,7 +2500,7 @@ struct AgentDeliveryWiringTests {
             #expect(submitted.map(\.1) == ["Plan the release."])
         default:
             #expect(submitted.isEmpty)
-            #expect(rig.hud.states.contains { if case .error(let message, nil, _) = $0 { message.contains("Ultimate for app") } else { false } })
+            #expect(rig.hud.states.contains { if case .error(let message, nil, _, _) = $0 { message.contains("Ultimate for app") } else { false } })
         }
     }
 
@@ -2564,7 +2565,7 @@ struct AgentDeliveryWiringTests {
             agent: "example", native: AgentHostLocation(host: "example", instance: "/Users/a/.work", native: "new conversation").conversationKey))
         await take(rig, readingTheFront: true)
         #expect(starts(rig).isEmpty)
-        #expect(rig.hud.states.contains { if case .error(let message, .openAgents?, _) = $0 { message.hasPrefix(line) } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, .openAgents?, _, _) = $0 { message.hasPrefix(line) } else { false } })
     }
 
     @Test(arguments: [
@@ -2603,7 +2604,7 @@ struct AgentDeliveryWiringTests {
         await take(rig, readingTheFront: true)
         #expect(starts(rig).isEmpty)
         let line = "Example Work hasn\u{2019}t shown \(Branding.appName) a conversation. Nothing sent."
-        #expect(rig.hud.states.contains { if case .error(let message, nil, _) = $0 { message.hasPrefix(line) } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, nil, _, _) = $0 { message.hasPrefix(line) } else { false } })
     }
 
     @Test func dictationWithACopyInFrontWhoseDataFolderIsNotSetUpNamesItWithoutSendingTheUserToSettings() async {
@@ -2614,7 +2615,7 @@ struct AgentDeliveryWiringTests {
         await take(rig, readingTheFront: true)
         #expect(starts(rig).isEmpty)
         let line = "Example Work\u{2019}s data folder isn\u{2019}t set up yet. Nothing sent. Reopen Example Work to set it up."
-        #expect(rig.hud.states.contains { if case .error(let message, nil, _) = $0 { message.hasPrefix(line) } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, nil, _, _) = $0 { message.hasPrefix(line) } else { false } })
     }
 
     @Test func aNewConversationPageThatLeftTheFrontBeforeSendingIsNeverSentTo() async {
@@ -2628,7 +2629,7 @@ struct AgentDeliveryWiringTests {
         rig.controller.handleCommit()
         await rig.controller.dictationTask?.value
         #expect(starts(rig).isEmpty)
-        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message.hasPrefix("Example\u{2019}s page for a new conversation is no longer in front. Nothing sent.") } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, _, _, _) = $0 { message.hasPrefix("Example\u{2019}s page for a new conversation is no longer in front. Nothing sent.") } else { false } })
     }
 
     @Test func aKeyPressBeforeTheReadLandedKeepsTheNewConversationPageFromCounting() async {
@@ -2645,7 +2646,7 @@ struct AgentDeliveryWiringTests {
         rig.controller.handleCommit()
         await rig.controller.dictationTask?.value
         #expect(starts(rig).isEmpty)
-        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message.hasPrefix(AgentRecipient.nothingFocused) } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, _, _, _) = $0 { message.hasPrefix(AgentRecipient.nothingFocused) } else { false } })
     }
 
     @Test func aNamedConversationStillGoesToThatConversationFromTheNewConversationPage() async {
@@ -2832,7 +2833,7 @@ struct AgentDeliveryWiringTests {
         let entry = await lastHistoryEntry(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
-        #expect(rig.hud.states.contains { if case .error(let shown, _, _) = $0 { shown == message } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let shown, _, _, _) = $0 { shown == message } else { false } })
         #expect(entry?.outcome == .failed)
         #expect(fact(entry, "Command") == "Rename")
     }
@@ -2861,7 +2862,7 @@ struct AgentDeliveryWiringTests {
         let entry = await lastHistoryEntry(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
-        #expect(rig.hud.states.contains { if case .error(let shown, _, _) = $0 { shown == message } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let shown, _, _, _) = $0 { shown == message } else { false } })
         #expect(entry?.outcome == .failed)
         #expect(fact(entry, "Command") == "Rename")
     }
@@ -2931,7 +2932,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         let entry = await lastHistoryEntry(rig)
         #expect(rig.sent.isEmpty)
-        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == "Nothing to go back to." } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, _, _, _) = $0 { message == "Nothing to go back to." } else { false } })
         #expect(entry?.outcome == .failed)
         #expect(entry?.failureReason == "Nothing to go back to.")
     }
@@ -2993,7 +2994,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains { state in
-            if case .error(let message, _, _) = state { return message.hasSuffix(AgentOutput.keptHint) }
+            if case .error(let message, _, _, _) = state { return message.hasSuffix(AgentOutput.keptHint) }
             return false
         })
         #expect(rig.controller.lastResult == "to run the tests")
@@ -3031,7 +3032,7 @@ struct AgentDeliveryWiringTests {
         #expect(rig.sent.isEmpty)
         #expect(rig.captured.insertedText == nil)
         #expect(rig.hud.states.contains { state in
-            if case .error(let message, _, _) = state {
+            if case .error(let message, _, _, _) = state {
                 return message == "Only a name was heard: \u{201C}keyscribe blue\u{201D}. Nothing sent. Say your instruction after \u{201C}keyscribe blue\u{201D}, or \u{201C}open keyscribe blue\u{201D} to bring it forward."
             }
             return false
@@ -3215,7 +3216,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         let expected = "keyscribe isn\u{2019}t connected to \(Branding.appName). Nothing sent."
         #expect(rig.hud.states.contains {
-            if case .error(expected, .openAgents?, HeardExcerpt(heard: "Run the tests.")) = $0 { true } else { false }
+            if case .error(expected, .openAgents?, HeardExcerpt(heard: "Run the tests."), _) = $0 { true } else { false }
         })
         #expect(await lastHistoryEntry(rig)?.failureReason == expected)
     }
@@ -3288,7 +3289,7 @@ struct AgentDeliveryWiringTests {
         let entry = await lastHistoryEntry(rig)
         #expect(rig.sent.isEmpty)
         #expect(focus.sessions.isEmpty)
-        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == line } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, _, _, _) = $0 { message == line } else { false } })
         #expect(entry?.summary == recorded)
     }
 
@@ -3299,7 +3300,7 @@ struct AgentDeliveryWiringTests {
         let entry = await lastHistoryEntry(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error(let message, .openAgents?, _) = $0 {
+            if case .error(let message, .openAgents?, _, _) = $0 {
                 message == "No conversation named \u{201C}keyscribe green\u{201D}. Nothing sent. Try \u{201C}tell keyscribe, \u{2026}\u{201D}. Your words are kept for Paste last dictation."
             } else { false }
         })
@@ -3329,14 +3330,13 @@ struct AgentDeliveryWiringTests {
         #expect(fact(entries.first, "Delivery")?.contains("; confirmed +") == true)
     }
 
-    @Test func anUncertainDeliveryThatLaterSettlesKeepsTheEarlierUncertainty() async {
+    @Test func aDeliveryLeftWaitingThatLaterSettlesKeepsTheEarlierStep() async {
         let rig = await rig("Run the tests.", focused: "claude:s1", receiptTimeout: .milliseconds(20))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.confirms = false
         await take(rig)
-        let uncertain = await lastHistoryEntry(rig)
-        #expect(uncertain?.summary == "May not have reached keyscribe: check its terminal")
-        #expect(uncertain?.outcome == .failed)
+        let waiting = await lastHistoryEntry(rig)
+        #expect(waiting?.summary == "keyscribe is busy; still waiting")
 
         guard case .submit(let request, _, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.submitted(request: request, turn: ""))
@@ -3348,7 +3348,91 @@ struct AgentDeliveryWiringTests {
         #expect(settled?.summary == "Sent to keyscribe")
         #expect(settled?.outcome == .inserted)
         #expect(settled?.failureReason == nil)
-        #expect(settled?.steps?.map(\.text) == ["May not have reached keyscribe: check its terminal", "Sent to keyscribe"])
+        #expect(settled?.steps?.map(\.text) == ["keyscribe is busy; still waiting", "Sent to keyscribe"])
+    }
+
+    private func gatedTake(_ rig: Rig) async -> AgentHubTests.Sleeps {
+        let sleeps = AgentHubTests.Sleeps()
+        rig.hub.handOffSleep = { await sleeps.sleep($0) }
+        rig.transport.confirms = false
+        let taking = Task { await take(rig) }
+        await release(sleeps, .seconds(8))
+        await taking.value
+        return sleeps
+    }
+
+    private func release(_ sleeps: AgentHubTests.Sleeps, _ length: Duration) async {
+        let until = Date().addingTimeInterval(20)
+        while !sleeps.pending.contains(length), Date() < until { try? await Task.sleep(for: .milliseconds(2)) }
+        #expect(sleeps.pending.contains(length))
+        sleeps.release { $0 == length }
+    }
+
+    private func eventually(_ done: @MainActor () -> Bool) async {
+        let until = Date().addingTimeInterval(20)
+        while !done(), Date() < until {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    @Test func aHostThatNeverCollectsATakeShowsWaitingThenNothingSentWithItsWordsReadyToPasteWhenShown() async {
+        let rig = await rig("Run the tests.", focused: "claude:s1", receiptTimeout: .seconds(8), handOffLimit: .seconds(60))
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.withdrawable = true
+        let sleeps = await gatedTake(rig)
+        #expect(rig.hud.states.contains(AgentOutput.receiptState(.waiting("keyscribe"), mode: "Agent", heard: "")))
+        rig.controller.rememberResult("a dictation made since")
+        await release(sleeps, .seconds(60))
+        let notSent = AgentOutput.receiptState(.notSent("keyscribe", reason: .expired), mode: "Agent", heard: "", pastesLast: true)
+        await eventually { rig.hud.states.contains(notSent) }
+        #expect(rig.hud.states.last == notSent)
+        #expect(notSent.offersPasteLast)
+        #expect(rig.controller.lastResult == "Run the tests.")
+        #expect(rig.sent.filter { if case .submit = $0.0 { true } else { false } }.count == 1)
+    }
+
+    @Test func theUnsentWordsAreReadyToPasteWithHistoryOff() async {
+        let rig = await rig("Run the tests.", focused: "claude:s1", historyEnabled: false, receiptTimeout: .seconds(8), handOffLimit: .seconds(60))
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.withdrawable = true
+        let sleeps = await gatedTake(rig)
+        rig.controller.rememberResult("a dictation made since")
+        await release(sleeps, .seconds(60))
+        let notSent = AgentOutput.receiptState(.notSent("keyscribe", reason: .expired), mode: "Agent", heard: "", pastesLast: true)
+        await eventually { rig.hud.states.contains(notSent) }
+        #expect(rig.hud.states.last == notSent)
+        #expect(rig.controller.lastResult == "Run the tests.")
+    }
+
+    @Test func aTakeConfirmedSentHoldsNoWordsAfterwards() async {
+        let rig = await rig("Run the tests.", focused: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        guard case .submit(let request, _, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        rig.controller.rememberResult("a dictation made since")
+        rig.controller.showAgentNotice(.notSent("keyscribe", reason: .expired), request: request)
+        let unsent = AgentOutput.receiptState(.notSent("keyscribe", reason: .expired), mode: "Agent", heard: "", pastesLast: false)
+        await eventually { rig.hud.states.contains(unsent) }
+        #expect(rig.hud.states.last == unsent)
+        #expect(rig.controller.lastResult == "a dictation made since")
+    }
+
+    @Test func aHostThatCollectedATakeAndNeverAnsweredEndsInDoubtNotNothingSent() async {
+        let rig = await rig("Run the tests.", focused: "claude:s1", receiptTimeout: .seconds(8), handOffLimit: .seconds(60))
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let sleeps = await gatedTake(rig)
+        await release(sleeps, .seconds(60))
+        let inDoubt = AgentOutput.receiptState(.uncertain("keyscribe"), mode: "Agent", heard: "")
+        await eventually { rig.hud.states.contains(inDoubt) }
+        #expect(rig.hud.states.last == inDoubt)
+        #expect(!rig.hud.states.contains { if case .error = $0 { true } else { false } })
+        await eventually {
+            rig.controller.waitForHistoryWrites()
+            return rig.history.entries().first?.summary == "May not have reached keyscribe: check its terminal"
+        }
+        #expect(rig.history.entries().first?.steps?.map(\.text) == [
+            "keyscribe is busy; still waiting", "May not have reached keyscribe: check its terminal",
+        ])
     }
 
     @Test func aReceiptForADeliveryTheHubForgotNoLongerChangesItsEntry() async {
@@ -3362,7 +3446,7 @@ struct AgentDeliveryWiringTests {
         try? await Task.sleep(for: .milliseconds(50))
         rig.controller.waitForHistoryWrites()
         let entry = rig.history.entries().first
-        #expect(entry?.summary == "May not have reached keyscribe: check its terminal")
+        #expect(entry?.summary == "keyscribe is busy; still waiting")
         #expect(entry?.steps == nil)
     }
 
@@ -3651,7 +3735,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        guard case .error(let message, _, _) = rig.hud.states.last else { Issue.record("no error"); return }
+        guard case .error(let message, _, _, _) = rig.hud.states.last else { Issue.record("no error"); return }
         #expect(message.hasPrefix("No conversation named \u{201C}zebra\u{201D}. Nothing sent."))
         #expect(!message.contains("not connected"))
         #expect(!message.contains("reviews"))
@@ -3666,7 +3750,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        guard case .error(let message, let action, _) = rig.hud.states.last else { Issue.record("no error"); return }
+        guard case .error(let message, let action, _, _) = rig.hud.states.last else { Issue.record("no error"); return }
         #expect(message == "Pi in reviews isn\u{2019}t connected yet. Nothing sent. Your words are kept for Paste last dictation.")
         #expect(action == .openAgents(Mode.agentModeId, reveal: [pi.rowId]))
     }
@@ -3679,7 +3763,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        guard case .error(let message, let action, _) = rig.hud.states.last else { Issue.record("no error"); return }
+        guard case .error(let message, let action, _, _) = rig.hud.states.last else { Issue.record("no error"); return }
         #expect(message == "2 Pi conversations in reviews aren\u{2019}t connected yet. Nothing sent. Your words are kept for Paste last dictation.")
         #expect(action == .openAgents(Mode.agentModeId, reveal: [pi.rowId, other.rowId]))
     }
@@ -3701,7 +3785,7 @@ struct AgentDeliveryWiringTests {
         let rig = await rig("Tell session 7, run the tests.", focused: "claude:s1", unconnected: [pi])
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        guard case .error(let message, _, _) = rig.hud.states.last else { Issue.record("no error"); return }
+        guard case .error(let message, _, _, _) = rig.hud.states.last else { Issue.record("no error"); return }
         #expect(!message.contains("not connected"))
     }
 
@@ -3937,7 +4021,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error("No conversation focused. Nothing sent. Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.", _, _) = $0 { true } else { false }
+            if case .error("No conversation focused. Nothing sent. Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.", _, _, _) = $0 { true } else { false }
         })
     }
 
@@ -3948,7 +4032,7 @@ struct AgentDeliveryWiringTests {
         await take(rig, readingTheFront: true)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error(AgentTake.unconfirmedCheckLine, .openAccessibilitySettings?, _) = $0 { true } else { false }
+            if case .error(AgentTake.unconfirmedCheckLine, .openAccessibilitySettings?, _, _) = $0 { true } else { false }
         })
     }
 
@@ -3959,7 +4043,7 @@ struct AgentDeliveryWiringTests {
         await take(rig, readingTheFront: true)
         #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
         #expect(rig.hud.states.contains {
-            if case .error(AgentTake.unconfirmedRenameLine, .openAccessibilitySettings?, _) = $0 { true } else { false }
+            if case .error(AgentTake.unconfirmedRenameLine, .openAccessibilitySettings?, _, _) = $0 { true } else { false }
         })
     }
 
@@ -3988,7 +4072,7 @@ struct AgentDeliveryWiringTests {
         rig.hub.refresh()
         await take(rig)
         #expect(rig.hud.states.contains {
-            if case .error(let message, .openAgents?, _) = $0 {
+            if case .error(let message, .openAgents?, _, _) = $0 {
                 message == "No conversation named \u{201C}keyscribe green\u{201D}. Nothing sent. Your words are kept for Paste last dictation."
             } else { false }
         })
@@ -4001,7 +4085,7 @@ struct AgentDeliveryWiringTests {
         rig.hub.refresh()
         await take(rig)
         #expect(rig.hud.states.contains {
-            if case .error("No conversation named \u{201C}frontend\u{201D}. Nothing sent. Your words are kept for Paste last dictation.", .openAgents?, _) = $0 { true } else { false }
+            if case .error("No conversation named \u{201C}frontend\u{201D}. Nothing sent. Your words are kept for Paste last dictation.", .openAgents?, _, _) = $0 { true } else { false }
         })
     }
 
@@ -4012,7 +4096,7 @@ struct AgentDeliveryWiringTests {
         rig.hub.refresh()
         await take(rig)
         #expect(rig.hud.states.contains {
-            if case .error("No conversation named \u{201C}keyscribe review\u{201D}. Try \u{201C}open keyscribe\u{201D}", .openAgents?, _) = $0 { true } else { false }
+            if case .error("No conversation named \u{201C}keyscribe review\u{201D}. Try \u{201C}open keyscribe\u{201D}", .openAgents?, _, _) = $0 { true } else { false }
         })
     }
 
@@ -4022,7 +4106,7 @@ struct AgentDeliveryWiringTests {
         rig.hub.disconnect("claude:s1")
         await take(rig)
         #expect(rig.hud.states.contains {
-            if case .error(let message, _, _) = $0 {
+            if case .error(let message, _, _, _) = $0 {
                 message == "No conversation named \u{201C}keyscribe green\u{201D}. Nothing sent. Your words are kept for Paste last dictation."
             } else { false }
         })
@@ -4035,7 +4119,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.texts.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error("keyscribe blue is disconnected. Nothing sent.", .openAgents?, _) = $0 { true } else { false }
+            if case .error("keyscribe blue is disconnected. Nothing sent.", .openAgents?, _, _) = $0 { true } else { false }
         })
     }
 
@@ -4049,7 +4133,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error(let message, _, _) = $0 { message.hasPrefix(problem) && message.hasSuffix(AgentOutput.keptHint) } else { false }
+            if case .error(let message, _, _, _) = $0 { message.hasPrefix(problem) && message.hasSuffix(AgentOutput.keptHint) } else { false }
         })
         #expect(rig.controller.lastResult == text)
         #expect(await lastHistoryEntry(rig)?.outcome == .failed)
@@ -4061,7 +4145,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error(let message, _, _) = $0 {
+            if case .error(let message, _, _, _) = $0 {
                 message.hasPrefix("Couldn\u{2019}t check conversation names yet. Nothing sent.") && message.hasSuffix(AgentOutput.keptHint)
             } else { false }
         })
@@ -4074,7 +4158,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error(let message, _, _) = $0 { message.hasPrefix("Did you mean \u{201C}keyscribe blue\u{201D}?") } else { false }
+            if case .error(let message, _, _, _) = $0 { message.hasPrefix("Did you mean \u{201C}keyscribe blue\u{201D}?") } else { false }
         })
         let row = await self.rig("Tell the session two run the tests", focused: "claude:s1")
         defer { try? FileManager.default.removeItem(at: row.supportDir) }

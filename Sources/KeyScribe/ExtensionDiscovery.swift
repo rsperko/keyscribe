@@ -38,14 +38,15 @@ final class ExtensionDiscovery: AgentDiscovery {
         switch event {
         case .hello(let hello):
             sessions = sessions.filter { $0.key == hello.session || $0.value.pid != hello.pid }
-            let known = sessions[hello.session].flatMap { $0.pid == hello.pid ? $0.explicitName : nil }
+            let same = sessions[hello.session].flatMap { $0.pid == hello.pid ? $0 : nil }
+            let known = same?.explicitName
             sessions[hello.session] = AgentSession(
                 agent: kind.id, id: hello.session, pid: hello.pid, cwd: hello.cwd ?? "",
                 explicitName: hello.quiet ? known : Self.name(hello.title),
                 state: .idle,
                 startedAt: sessions[hello.session].flatMap { $0.pid == hello.pid ? $0.startedAt : nil } ?? startedAt(of: hello.pid))
             if let installation = hello.installation { installations[hello.session] = installation }
-            sessions[hello.session]?.setup = installations[hello.session].flatMap(folder)
+            sessions[hello.session]?.setup = installations[hello.session].flatMap(folder) ?? same?.setup
             mark(&inTurn, hello.session, !hello.knownIdle)
             mark(&waiting, hello.session, hello.waiting != nil)
             resolve(hello.session)

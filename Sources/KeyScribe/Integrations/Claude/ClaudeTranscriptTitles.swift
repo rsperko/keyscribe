@@ -30,10 +30,11 @@ final class ClaudeTranscriptTitles: @unchecked Sendable {
         lock.withLock { read(entry, rereading: rereading) }
     }
 
-    func reread(_ entry: ClaudeRegistryEntry) -> Bool {
+    func reread(_ entry: ClaudeRegistryEntry) -> ClaudeTranscriptTitle? {
         lock.withLock {
             let before = cache[entry.sessionId]?.titles ?? .init()
-            return read(entry, rereading: true) != before
+            let titles = read(entry, rereading: true)
+            return titles == before ? nil : titles
         }
     }
 

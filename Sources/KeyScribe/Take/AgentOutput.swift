@@ -14,9 +14,11 @@ final class AgentOutput {
     var keepsHistory: @MainActor () -> Bool = { false }
     var noticesBlocked: @MainActor () -> Bool = { false }
     var hide: @MainActor (Double) -> Void = { _ in }
-    private var pendingNotices: [AgentReceipt] = []
+    var rememberWords: @MainActor (String) -> Void = { _ in }
+    private var pendingNotices: [(receipt: AgentReceipt, words: String?)] = []
     private var awaited: [String: AwaitedReceipt] = [:]
     private var recordedTakes: [(request: String, id: String, at: Date)] = []
+    private var sentWords: [(request: String, words: String)] = []
     private static let rememberedTakes = 64
     private var noticeTask: Task<Void, Never>?
     var noticeDelayOverride: Duration?
@@ -32,6 +34,7 @@ final class AgentOutput {
 
     func forgetReceipts() {
         awaited = [:]
+        sentWords = []
     }
 
     func deliver(
@@ -39,7 +42,15 @@ final class AgentOutput {
     ) async -> (request: String, receipt: AgentReceipt) {
         let request = UUID().uuidString
         awaited[request] = AwaitedReceipt()
-        return (request, await agents.deliver(text, to: id, request: request, images: images, inFront: inFront))
+        sentWords.append((request, text))
+        if sentWords.count > Self.rememberedTakes { sentWords.removeFirst(sentWords.count - Self.rememberedTakes) }
+        let receipt = await agents.deliver(text, to: id, request: request, images: images, inFront: inFront)
+        if !Self.mayStillSettle(receipt) { forgetWords(request) }
+        return (request, receipt)
+    }
+
+    private func forgetWords(_ request: String) {
+        sentWords.removeAll { $0.request == request }
     }
 
     func noteRecorded(_ entry: HistoryEntry, request: String) {
@@ -108,13 +119,16 @@ final class AgentOutput {
     }
 
     func showNotice(_ receipt: AgentReceipt, request: String? = nil) {
+        let words = Self.offersPaste(receipt) ? request.flatMap { asked in sentWords.last { $0.request == asked }?.words } : nil
+        if let request, !Self.mayStillSettle(receipt) { forgetWords(request) }
         if let request { recordLateReceipt(receipt, request: request) }
-        pendingNotices.append(receipt)
+        pendingNotices.append((receipt, words))
         flushNotices(afterWaiting: false)
     }
 
     func forgetReceipt(request: String) {
         stopAwaiting(request)
+        forgetWords(request)
     }
 
     private func stopAwaiting(_ request: String) {
@@ -163,10 +177,11 @@ final class AgentOutput {
     }
 
     private func presentNotices() {
-        let attention = pendingNotices.filter(Self.needsAttention)
-        guard let receipt = attention.first ?? pendingNotices.last else { return }
+        let attention = pendingNotices.filter { Self.needsAttention($0.receipt) }
+        guard let notice = attention.first ?? pendingNotices.last else { return }
         pendingNotices = Array(attention.dropFirst())
-        hud.present(Self.receiptState(receipt, mode: "Agent", heard: ""))
+        if let words = notice.words { rememberWords(words) }
+        hud.present(Self.receiptState(notice.receipt, mode: "Agent", heard: "", pastesLast: notice.words != nil))
         hide(Self.noticeSeconds)
         guard !pendingNotices.isEmpty else { return }
         noticeTask = Task { @MainActor [weak self] in
@@ -179,13 +194,13 @@ final class AgentOutput {
     private static func needsAttention(_ receipt: AgentReceipt) -> Bool {
         switch receipt {
         case .notSent, .kept, .uncertain: true
-        case .sent, .sentWithDraft, .queued: false
+        case .sent, .sentWithDraft, .queued, .waiting: false
         }
     }
 
     static func spokenRefusal(_ receipt: AgentReceipt) -> String? {
         switch receipt {
-        case .sent, .sentWithDraft, .queued, .uncertain: return nil
+        case .sent, .sentWithDraft, .queued, .uncertain, .waiting: return nil
         case .kept(let handle, let reason):
             switch reason {
             case .composing: return "\(handle) didn\u{2019}t take that: its prompt box has text"
@@ -217,14 +232,14 @@ final class AgentOutput {
 
     static func dictationOutcome(_ receipt: AgentReceipt) -> DictationOutcome {
         switch receipt {
-        case .sent, .sentWithDraft, .queued, .kept: .inserted
+        case .sent, .sentWithDraft, .queued, .kept, .waiting: .inserted
         case .notSent, .uncertain: .failed
         }
     }
 
     private static func mayStillSettle(_ receipt: AgentReceipt) -> Bool {
         switch receipt {
-        case .queued, .uncertain: true
+        case .queued, .uncertain, .waiting: true
         case .sent, .sentWithDraft, .kept, .notSent: false
         }
     }
@@ -364,8 +379,14 @@ final class AgentOutput {
         private static func count(_ n: Int, _ noun: String) -> String { "\(n) \(noun)\(n == 1 ? "" : "s")" }
     }
 
+    static func offersPaste(_ receipt: AgentReceipt) -> Bool {
+        if case .notSent = receipt { return true }
+        return false
+    }
+
     static func receiptState(
-        _ receipt: AgentReceipt, mode: String, heard: String, settingsMode: String? = nil, clipboard: ClipboardNote = ClipboardNote()
+        _ receipt: AgentReceipt, mode: String, heard: String, settingsMode: String? = nil, clipboard: ClipboardNote = ClipboardNote(),
+        pastesLast: Bool? = nil
     ) -> HUDState {
         switch receipt {
         case .sent(let handle):
@@ -418,9 +439,11 @@ final class AgentOutput {
             case .connectorNotRunning, .disconnected: settingsMode.map { HUDErrorAction.openAgents($0) }
             default: nil
             }
-            return .error(message: message, action: action, heard: HeardExcerpt(heard: heard))
+            return .error(message: message, action: action, heard: HeardExcerpt(heard: heard), pastesLast: pastesLast ?? true)
         case .uncertain(let handle):
             return .advisory(message: "May not have reached \(handle): check its terminal")
+        case .waiting(let handle):
+            return .advisory(message: "\(handle) is busy; still waiting")
         }
     }
 }

@@ -78,7 +78,7 @@ enum HUDState: Equatable {
     case complete(outcome: DictationOutcome, mode: String, notice: String? = nil, spokenEdits: String? = nil)
     case commandDone(summary: String, detail: String = HUDState.commandDetail)
     case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
-    case error(message: String, action: HUDErrorAction?, heard: HeardExcerpt? = nil)
+    case error(message: String, action: HUDErrorAction?, heard: HeardExcerpt? = nil, pastesLast: Bool = false)
     case advisory(message: String)
     case choice(VoiceCommandChoicePrompt, status: VoiceCommandChoiceStatus, level: Float = 0)
     case help(SpokenHelp)
@@ -167,7 +167,7 @@ extension HUDState {
             return summary
         case .stoppedAtLimit(_, let limit, _):
             return "Stopped at the \(limit) limit"
-        case .error(let message, _, _), .advisory(let message):
+        case .error(let message, _, _, _), .advisory(let message):
             return message
         case .choice(let prompt, _, _):
             return prompt.title
@@ -178,7 +178,7 @@ extension HUDState {
 
     var errorAction: HUDErrorAction? {
         switch self {
-        case .error(_, let action, _), .choice(_, .waiting(_, _, let action), _): action
+        case .error(_, let action, _, _), .choice(_, .waiting(_, _, let action), _): action
         case .localFallback(_, _, _?, let connectionId?): .openAIService(connectionId)
         default: nil
         }
@@ -230,7 +230,7 @@ extension HUDState {
             return latchedTrigger.map { "Listening \u{2014} tap \($0) again to stop" } ?? "Listening"
         case .choice(_, .working, _):
             return "Transcribing"
-        case .error(_, _, let heard):
+        case .error(_, _, let heard, _):
             return heard?.text
         case .advisory:
             return nil
@@ -243,7 +243,7 @@ extension HUDState {
 
     var secondaryIsHeardExcerpt: Bool {
         switch self {
-        case .error(_, _, _?), .choice(_, .waiting(_, _?, _), _): true
+        case .error(_, _, _?, _), .choice(_, .waiting(_, _?, _), _): true
         default: false
         }
     }
@@ -273,6 +273,8 @@ extension HUDState {
             // A synthetic ⌘V is itself blocked without Accessibility, so don't offer a button that can't
             // work — the text is already on the clipboard for a manual paste.
             return reason != .accessibilityDenied
+        case .error(_, _, _, let pastesLast):
+            return pastesLast
         default:
             return false
         }

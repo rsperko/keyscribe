@@ -123,8 +123,9 @@ message. “Tell” and “ask” always send, so check the **To …** line on
 the recording panel before you stop recording.
 
 **If it didn't go through:** when the panel says **Nothing sent.**, your words are kept: **Paste Last
-Dictation** pastes them. When it says **May not have reached** a conversation, check its terminal before
-sending again. Starting a recording or pressing Esc stops spoken playback, never the agent's work.
+Dictation** pastes them. **is busy; still waiting** means the agent hasn't answered yet; the message goes through
+when it does, and otherwise the panel says what became of it. When it says **May not have reached** a conversation, check its
+terminal before sending again. Starting a recording or pressing Esc stops spoken playback, never the agent's work.
 
 ---
 

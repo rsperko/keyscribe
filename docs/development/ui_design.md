@@ -853,9 +853,14 @@ waits for the turn, and the receipt says what it waits on, how to respond, and w
 reports its kind is named by it: a confirm reads as an approval, a select, input or editor as a question, and
 anything else as a dialog. One rule (`AgentLiveState.named(by:)`) names it the same way in the receipt, the
 spoken notice, the conversation list and a status check, its "last seen" included.
-“May not have reached docs: check its terminal” appears only after the app has asked the connector where the
-message is and still cannot tell; when the answer is that it reached the conversation, the receipt is
-“Sent to docs”. A take left uncertain still has its turn's reply spoken when nothing says that turn belongs to another
+While the conversation's connector has not answered, the receipt is “docs is busy; still waiting”, and the take
+lands when the connector catches up. “May not have reached docs: check its terminal” appears only with evidence
+that it may be lost: the connector went away or restarted while holding it, or says it does not know it. When the
+answer is that it reached the conversation, the receipt is “Sent to docs”. When a take's time runs out before any
+connector collected it, it is not sent and never sends later on its own: the HUD says “docs didn’t take it in
+time. Nothing sent.” When a connector had collected it, the app cannot tell, so the HUD says “May not have reached
+docs”, and a receipt that still comes says “Sent to docs”. Every “Nothing sent.” offers **Paste last dictation**,
+which pastes the words of the take that notice is about. A take left uncertain still has its turn's reply spoken when nothing says that turn belongs to another
 message, and History's Delivery line records
 when each side saw the message, for diagnosing a receipt that went missing.
 A take for the conversation in front whose prompt box already holds text is added after that text, and the whole

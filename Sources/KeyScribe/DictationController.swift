@@ -408,6 +408,7 @@ final class DictationController {
         agentOutput.keepsHistory = { [weak self] in self?.settings.history.enabled ?? false }
         agentOutput.noticesBlocked = { [weak self] in self.map { $0.machine.isBusy || $0.voiceCommands.pendingChoice != nil } ?? false }
         agentOutput.hide = { [weak self] in self?.scheduleHide(after: $0) }
+        agentOutput.rememberWords = { [weak self] in self?.rememberResult($0) }
         commandOutput.host = self
         agentTake.host = self
         engines.host = self

@@ -230,9 +230,10 @@ function start(host: Host, config: Config) {
     }))
   }
 
-  async function submit(id: number, text: string, images: Image[], requestId: string): Promise<number> {
+  async function submit(id: number, text: string, images: Image[], requestId: string, stillWanted: () => boolean): Promise<number | null> {
     const conversation = await harness.conversation(id as ConversationId, context)
     if (!conversation) throw new Error('Ultimate no longer has this conversation.')
+    if (!stillWanted()) return null
     const content = images.length
       ? [...(text.trim() ? [{ type: 'text', text }] : []), ...images.map((image) => ({ type: 'image', ...image }))]
       : text
