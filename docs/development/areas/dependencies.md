@@ -21,7 +21,13 @@ Vapor/openapi out of resolution (gated behind `BUILD_ALL`).
 
 ## FluidAudio and the pinned VAD artifact
 
-**FluidAudio** → `FluidInference/FluidAudio` (upstream, **no fork**): provides Parakeet TDT
+**FluidAudio** → `rsperko/FluidAudio`, a **one-commit fork** of `FluidInference/FluidAudio` at the
+revision `Package.swift` pins: the English lexicon the spoken result voice loads is kept as one joined string per
+word (`JoinedLexiconAssetCache`, which Paradee uses too) and released when the voice is (`KokoroAneManager.cleanup`). Upstream holds
+each word as an array of one-character strings, about 51 MB for the 178,546-word lexicon against about 14 MB joined
+(measured 2026-11-26), and keeps it for the manager's life. Retire the fork by moving the pin to an upstream revision
+that contains the change, then re-run the voice checks below. A bump on the fork
+rebases that one commit onto the new upstream revision. FluidAudio provides Parakeet TDT
 transcription. Historical: KeyScribe once paired it with FluidAudio's **CTC-WS** keyword spotter
 (NeMo constrained-CTC) for Parakeet recognition bias, gated by `spotterRescueEnabled`. That spotter
 was **removed** (2026-07-09) — it false-fired a dictionary term into a majority of ordinary
@@ -111,6 +117,19 @@ it in ~2 min with a throwaway package depending on both, then `swift package sho
 **Do not chase upstream speech-swift casually either:** current upstream adds
 `mlx-swift-lm` as `branch: "main"`, a floating dependency inside a notarized app. Retiring the fork
 means upstreaming the patch (it no longer cherry-picks — upstream restructured the manifest).
+
+## TOMLKit fork
+
+**TOMLKit** → `rsperko/TOMLKit`, a **one-commit fork** of `LebJe/TOMLKit` 0.6.0: upstream frees nothing it
+parses (no wrapper deletes its toml++ node, and the key, value and string buffers it hands Swift are never freed), so
+every config read leaked its whole tree, about 12 KB per read of `settings.toml` alone and 41,272 objects over four
+hours of a running app (2026-11-26). The fork gives each parsed or created tree one owner that deletes it when the
+last wrapper into it goes, and frees each buffer once Swift has copied it; no public API changed, so
+`MigrationStep` and `ConfigDecode.table(..., migrations:)` are untouched. The fork's own tests count the nodes it
+allocates and fail on stock TOMLKit; an in-app malloc check proved too noisy inside the parallel suite. A wrapper for
+a child the code itself removes or replaces in its parent still points at freed memory, as in upstream: never keep one
+across such a write (`ConfigKeyCheck` walks from the root for each removal). Retire the fork when upstream frees what
+it parses.
 
 ## Upstream dependency mutation
 

@@ -1,5 +1,5 @@
 {
-  "originHash": "43126abe3b2381194ecdf42a246ef052930b87acb4cb88a1f856d2b70bdf6316",
+  "originHash": "4d1dc011af49e6fadee55d9d179c6577abafe52e5b01f6209a56067ffac5c883",
   "pins": [
     {
       "identity": "argmax-oss-swift",
@@ -22,9 +22,9 @@
     {
       "identity": "fluidaudio",
       "kind": "remoteSourceControl",
-      "location": "https://github.com/FluidInference/FluidAudio.git",
+      "location": "https://github.com/rsperko/FluidAudio.git",
       "state": {
-        "revision": "503b4bd1bbf7220882de39fe8ae6716aae4132da"
+        "revision": "45656095521d78850951009a8e3ab5fdee7df748"
       }
     },
     {
@@ -155,10 +155,9 @@
     {
       "identity": "tomlkit",
       "kind": "remoteSourceControl",
-      "location": "https://github.com/LebJe/TOMLKit.git",
+      "location": "https://github.com/rsperko/TOMLKit.git",
       "state": {
-        "revision": "ec6198d37d495efc6acd4dffbd262cdca7ff9b3f",
-        "version": "0.6.0"
+        "revision": "055df96add833f31569a4ab72de5ded63b8c6e84"
       }
     },
     {

@@ -9,8 +9,8 @@ let packageDependencies: [Package.Dependency] = [
     // v0.17.7. The VAD artifact is pinned separately in SpeechPresenceDetector: 0.15.5 moved the SDK's
     // default Silero model to v6.2.1 (PR #734, a one-line artifact swap), which FAILS the blips gate —
     // so KeyScribe names the v6.0.0 artifact itself. See docs/development/areas/dependencies.md "FluidAudio".
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", revision: "503b4bd1bbf7220882de39fe8ae6716aae4132da"),
-    .package(url: "https://github.com/LebJe/TOMLKit.git", exact: "0.6.0"),
+    .package(url: "https://github.com/rsperko/FluidAudio.git", revision: "45656095521d78850951009a8e3ab5fdee7df748"),
+    .package(url: "https://github.com/rsperko/TOMLKit.git", revision: "055df96add833f31569a4ab72de5ded63b8c6e84"),
     .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.1"),
     .package(url: "https://github.com/rsperko/speech-swift.git", revision: "96273cd375783531129e5bb97a7ec25a7e717994"),
     // MLX compiles the Qwen3 shaders and runs its inference, so a bump can change transcripts the same
