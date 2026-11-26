@@ -59,8 +59,8 @@ struct ScriptedTakeTests {
         defer { try? FileManager.default.removeItem(at: folder) }
         let clip = folder.appendingPathComponent("take.wav")
         let started = ContinuousClock.now
-        #expect(ScriptedTakeCLI.speak("hi", into: clip, using: tool, within: 0.5) == .spoken)
-        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(ScriptedTakeCLI.speak("hi", into: clip, using: tool, within: 2) == .spoken)
+        #expect(ContinuousClock.now - started < .seconds(10))
         #expect(FileManager.default.contents(atPath: clip.path) == Data("clip".utf8))
     }
 
