@@ -17,18 +17,14 @@ final class FakeChordRegistrar: ChordRegistering {
         onUpdate?(registrations)
         return !refuses
     }
-
-    func stop() { lastRegistrations = [] }
 }
 
 @MainActor
 final class FakeMouseTap: MouseTapping {
-    var onEdge: ((Int, TriggerEdge) -> Void)?
+    var onEdge: ((Int, TriggerEdge, UInt64) -> Void)?
     var consumedButtons: Set<Int> = []
-    var stopped = false
 
     func setConsumedButtons(_ buttons: Set<Int>) { consumedButtons = buttons }
-    func stop() { stopped = true; consumedButtons = [] }
 }
 
 @MainActor
@@ -95,12 +91,12 @@ struct HotkeyMonitorChordTests {
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse4")])
 
-        mouse.onEdge?(4, .down)
+        mouse.onEdge?(4, .down, 0)
         await drainMain()
         #expect(starts == 1)
         #expect(commits == 0)
 
-        mouse.onEdge?(4, .up)
+        mouse.onEdge?(4, .up, 0)
         await drainMain()
         #expect(commits == 1)
     }
@@ -553,7 +549,12 @@ struct HotkeyMonitorChordTests {
         let down = flags([.maskCommand], Self.leftCmd)
 
         m.handle(type: .flagsChanged, keyCode: 55, flags: down)
-        m.handle(type: .scrollWheel, keyCode: 0, flags: down, scrollIsUserDriven: false)
+        let momentum = CGEvent(
+            scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: 4, wheel2: 0, wheel3: 0)!
+        momentum.setIntegerValueField(.scrollWheelEventMomentumPhase, value: 1)
+        momentum.flags = down
+        m.received(type: .scrollWheel, event: momentum)
+        await drainMain()
         clock.fireAll()
         await drainMain()
         #expect(starts == 1)
@@ -906,7 +907,7 @@ struct HotkeyMonitorChordTests {
             carbon: FakeChordRegistrar(), mouseTap: mouse)
         m.update(bindings: [mouseBinding("mouse4")])
 
-        mouse.onEdge?(3, .down)
+        mouse.onEdge?(3, .down, 0)
         await drainMain()
         #expect(starts == 0)
     }

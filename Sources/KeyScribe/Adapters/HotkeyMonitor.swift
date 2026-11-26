@@ -25,10 +25,8 @@ final class HotkeyMonitor {
         var suppressedUntilRelease = false
         // A modifier-only .down held back for the chord grace: the modifiers are engaged but nothing has
         // started yet, so a key arriving inside the window discards the arm SILENTLY — no mic, no cue, no
-        // HUD. `armGeneration` is bumped on every arm and every cancel so a scheduled arm that lost its
-        // race (cancelled, released, or rebuilt onto a different binding) recognises itself as stale.
+        // HUD. The arm is due at `engagedAt` plus the grace, whichever event or timer notices first.
         var pendingArm = false
-        var armGeneration = 0
         var engagedAt: TimeInterval?
         var lastPressSide = 0
 
@@ -49,8 +47,7 @@ final class HotkeyMonitor {
 
     private var bindings: [Binding]
     private var actionBindings: [ActionBinding]
-    private var tap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
+    private var tapThread: EventTapThread?
     private let carbon: ChordRegistering
     private let mouseTap: MouseTapping
     var layout: () -> KeyboardLayoutIndex = { KeyboardLayout.current() }
@@ -106,7 +103,7 @@ final class HotkeyMonitor {
         self.carbon = carbon
         self.mouseTap = mouseTap
         self.isProcessTrusted = isProcessTrusted
-        self.mouseTap.onEdge = { [weak self] button, edge in self?.fireMouse(button: button, edge: edge) }
+        self.mouseTap.onEdge = { [weak self] button, edge, at in self?.fireMouse(button: button, edge: edge, at: at) }
     }
 
     func update(bindings: [Binding], actionBindings: [ActionBinding] = []) {
@@ -125,10 +122,14 @@ final class HotkeyMonitor {
             carried.engaged = match.engaged
             carried.suppressedUntilRelease = match.suppressedUntilRelease
             carried.pendingArm = match.pendingArm
-            carried.armGeneration = match.armGeneration
             carried.engagedAt = match.engagedAt
             carried.lastPressSide = match.lastPressSide
             return carried
+        }
+        for dropped in previous where dropped.pendingArm
+            && !self.bindings.contains(where: { $0.pendingArm && $0.descriptor == dropped.descriptor }) {
+            let key = dropped.triggerKey
+            dispatchSideEffect { self.onEngageDropped(key) }
         }
         self.actionBindings = actionBindings
         rebuildCarbon()
@@ -142,7 +143,6 @@ final class HotkeyMonitor {
             bindings[i].engaged = false
             bindings[i].suppressedUntilRelease = false
             bindings[i].pendingArm = false
-            bindings[i].armGeneration &+= 1
         }
     }
 
@@ -162,17 +162,18 @@ final class HotkeyMonitor {
     // requests Input Monitoring. Footgun: `tapCreate` *before* the grant fails AND makes tccd write a *denied*
     // ListenEvent record that then suppresses the tap permanently, even after Accessibility is later granted,
     // until ListenEvent is reset — so `start()` gates on `isProcessTrusted()` and never touches it untrusted.
-    // `.listenOnly` (not `.defaultTap`): we never consume an event, and it is delivered async, so a wedged
-    // main thread can never hold global input hostage. Chords → `CarbonHotKeys`; ESC-to-cancel → the HUD.
+    // `.listenOnly` (not `.defaultTap`): we never consume an event, so a wedged main thread can never hold
+    // global input hostage. The tap runs on its own thread so a slow main thread cannot get it disabled and
+    // lose a release; matching still runs on main. Chords → `CarbonHotKeys`; ESC-to-cancel → the HUD.
     // isTapActive false while Accessibility reads granted means a launch-cached denied verdict or a suppressing
     // ListenEvent record, both repaired by the permission relaunch — the readiness signal AppDelegate/Settings
     // surface (live `AXIsProcessTrusted` would wrongly say "Ready").
-    var isTapActive: Bool { tap != nil }
+    var isTapActive: Bool { tapThread != nil }
 
     @discardableResult
     func start() -> Bool {
         defer { rebuildCarbon(); rebuildMouse() }
-        if tap != nil { return true }
+        if tapThread != nil { return true }
         // Never create the tap untrusted: it fails AND can leave a denied ListenEvent record that suppresses
         // it for good (see isTapActive). The post-grant relaunch re-invokes start() with the verdict present.
         // Carbon chords register via the defer with no permission; the mouse tap self-gates on the same trust
@@ -185,43 +186,46 @@ final class HotkeyMonitor {
         // followed by a click sends no keyDown at all, so without them a `left_command` trigger would fire
         // on every ⌘-click, ⌥-drag and ⇧-click.
         let mask = HotkeyMonitor.watchedEventTypes.reduce(CGEventMask(0)) { $0 | CGEventMask(1 << $1.rawValue) }
-        guard let tap = makeTap(mask: mask, options: .listenOnly) else {
+        let thread = EventTapThread(name: "com.keyscribe.hotkeytap") { [weak self] type, event in
+            self?.received(type: type, event: event)
+            return Unmanaged.passUnretained(event)
+        }
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
+            eventsOfInterest: mask, callback: eventTapThreadCallback, userInfo: thread.userInfo)
+        else {
             hotkeyLog.error("modifier-key event tap not created despite Accessibility granted; a denied ListenEvent record may be suppressing it — relaunch to repair")
             return false
         }
-        let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        self.tap = tap
-        self.runLoopSource = source
+        thread.start(port: tap)
+        tapThread = thread
         activeHotkeyMonitor = self
-        hotkeyLog.info("modifier-key event tap active")
+        hotkeyLog.info("modifier-key event tap active on dedicated thread")
         return true
     }
 
-    private func makeTap(mask: CGEventMask, options: CGEventTapOptions) -> CFMachPort? {
-        CGEvent.tapCreate(
-            tap: .cgSessionEventTap, place: .headInsertEventTap, options: options,
-            eventsOfInterest: mask, callback: hotkeyTapCallback, userInfo: nil)
-    }
-
-    func stop() {
-        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
-        if let runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes) }
-        tap = nil
-        runLoopSource = nil
-        carbon.stop()
-        mouseTap.stop()
-        activeHotkeyMonitor = nil
-    }
-
-    // macOS disables a tap (emitting one of these events) when its callback is slow or under certain
-    // input conditions; it must be re-enabled or the monitor goes permanently deaf — dictation gets
-    // stuck "listening" because the release edge never arrives.
-    fileprivate func reEnable(reason: CGEventType) {
-        guard let tap else { return }
-        hotkeyLog.error("event tap disabled (type=\(reason.rawValue, privacy: .public)); re-enabling")
-        CGEvent.tapEnable(tap: tap, enable: true)
+    nonisolated func received(type: CGEventType, event: CGEvent) {
+        if KeyReplay.isReplayed(event) { return }
+        // Only a scroll the user is actually driving counts. Momentum keeps arriving for a second after the
+        // fingers lift, and a resting hand emits `mayBegin` with zero deltas; either one would eat a trigger
+        // pressed nearby — and `cancelPendingArm` suppresses until release, so it is lost outright.
+        if type == .scrollWheel, !HotkeyMonitor.scrollIsUserDriven(
+            momentumPhase: event.getIntegerValueField(.scrollWheelEventMomentumPhase),
+            scrollPhase: event.getIntegerValueField(.scrollWheelEventScrollPhase),
+            deltaAxis1: event.getIntegerValueField(.scrollWheelEventDeltaAxis1),
+            deltaAxis2: event.getIntegerValueField(.scrollWheelEventDeltaAxis2)) { return }
+        let at = event.timestamp != 0 ? event.timestamp : DispatchTime.now().uptimeNanoseconds
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        let flags = event.flags
+        let input = UserInput.canMoveFocus(type) && event.getIntegerValueField(.keyboardEventAutorepeat) == 0
+            && (type != .keyDown || !CarbonHotKeys.consumes(keyCode: Int(keyCode), flags: flags))
+        if input { UserInput.record(at: at) }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                if input { UserInput.onInput?(at) }
+                self?.handle(type: type, keyCode: keyCode, flags: flags, at: at)
+            }
+        }
     }
 
     // Suspended while a HotkeyRecorder is capturing in Settings, so pressing a chord to record it can't
@@ -259,11 +263,10 @@ final class HotkeyMonitor {
         return deltaAxis1 != 0 || deltaAxis2 != 0
     }
 
-    func handle(
-        type: CGEventType, keyCode: Int64, flags: CGEventFlags, scrollIsUserDriven: Bool = true
-    ) {
+    func handle(type: CGEventType, keyCode: Int64, flags: CGEventFlags, at: UInt64? = nil) {
         guard !isSuspended else { return }
-        let now = clock()
+        let now = at.map(Self.seconds) ?? clock()
+        armDue(by: now)
         switch type {
         case .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown:
             // A click carries the generic modifier flags and nothing else, so a set of only Fn can never be
@@ -283,11 +286,6 @@ final class HotkeyMonitor {
                 }
             }
         case .scrollWheel:
-            // Only a scroll the user is actually driving counts. Momentum keeps arriving for a second after
-            // the fingers lift, and a resting hand emits `mayBegin` with zero deltas; either one would eat a
-            // trigger pressed nearby — and `cancelPendingArm` suppresses until release, so it is lost
-            // outright, not merely delayed.
-            guard scrollIsUserDriven else { return }
             for i in bindings.indices where bindings[i].descriptor.isModifierSet {
                 if bindings[i].gesture.style == .doubleTap { bindings[i].gesture.interrupt() }
                 if bindings[i].pendingArm { cancelPendingArm(index: i) }
@@ -355,19 +353,24 @@ final class HotkeyMonitor {
         mouseTap.setConsumedButtons(buttons)
     }
 
-    private func fireMouse(button: Int, edge: TriggerEdge) {
+    private func fireMouse(button: Int, edge: TriggerEdge, at: UInt64) {
         guard let index = bindings.firstIndex(where: {
             if case .mouseButton(let n) = $0.descriptor { return n == button }
             return false
         }) else { return }
-        fire(index: index, edge: edge, now: clock())
+        fire(index: index, edge: edge, now: Self.seconds(at))
     }
 
-    private func fire(index: Int, edge: TriggerEdge, now: TimeInterval, pressedAt: DispatchTime = .now()) {
+    private nonisolated static func seconds(_ nanoseconds: UInt64) -> TimeInterval {
+        TimeInterval(nanoseconds) / 1_000_000_000
+    }
+
+    private func fire(index: Int, edge: TriggerEdge, now: TimeInterval, pressedAt: TimeInterval? = nil) {
         let key = bindings[index].triggerKey
         let style = bindings[index].gesture.style
+        let pressed = DispatchTime(uptimeNanoseconds: UInt64((max(0, pressedAt ?? now) * 1_000_000_000).rounded()))
         switch bindings[index].gesture.handle(edge, at: now) {
-        case .start: dispatchSideEffect { self.onStart(key, style, pressedAt) }
+        case .start: dispatchSideEffect { self.onStart(key, style, pressed) }
         case .commit: dispatchSideEffect { self.onCommit(key) }
         case .none: break
         }
@@ -378,9 +381,7 @@ final class HotkeyMonitor {
     // applied uniformly instead of per-named-key. What separates the two ways to disengage is whether the
     // set is still WHOLLY held: every member still down means something foreign joined (a chord is forming
     // → abort); a member having lifted means the user let go (→ commit).
-    private func resolveModifierSet(
-        binding i: Int, set: ModifierKeySet, flags: CGEventFlags, now: TimeInterval
-    ) {
+    private func resolveModifierSet(binding i: Int, set: ModifierKeySet, flags: CGEventFlags, now: TimeInterval) {
         let engaged = ModifierMatcher.engaged(set, in: flags)
         let wholeSetHeld = ModifierMatcher.allMembersDown(set, in: flags)
 
@@ -439,32 +440,25 @@ final class HotkeyMonitor {
     }
 
     // Hold the .down for the grace instead of firing it. A grace of 0 arms inline, which is the pre-grace
-    // behaviour and what the edge-semantics tests pin.
+    // behaviour and what the edge-semantics tests pin. The timer only settles what is due by its own time,
+    // so a timer whose arm was cancelled, flushed, or replaced by a later press finds nothing to do.
     private func beginArm(index i: Int, now: TimeInterval) {
         bindings[i].engagedAt = now
         guard chordGraceSeconds > 0 else { fire(index: i, edge: .down, now: now); return }
-        bindings[i].armGeneration &+= 1
         bindings[i].pendingArm = true
-        let generation = bindings[i].armGeneration
-        // Re-resolved by DESCRIPTOR when the grace elapses, never through the index captured here. `update`
-        // rebuilds the array in the INCOMING order and carries pendingArm/armGeneration across by
-        // descriptor, so a binding dropping out ahead of this one shifts its slot: a captured index then
-        // addresses a different binding, or points past the end and the press is swallowed with no onStart.
-        // Context-aware claiming rebuilds on every app switch, which makes that routine rather than a
-        // config-reload rarity. The generation check still discards an arm that lost its race.
-        let descriptor = bindings[i].descriptor
-        let pressedAt = DispatchTime.now()
+        let armsAt = now + chordGraceSeconds
         let key = bindings[i].triggerKey
         dispatchSideEffect { self.onEngage(key) }
-        schedule(chordGraceSeconds) { [weak self] in
-            guard let self else { return }
-            guard let index = self.bindings.firstIndex(where: { $0.descriptor == descriptor }) else {
-                self.dispatchSideEffect { self.onEngageDropped(key) }
-                return
-            }
-            guard self.bindings[index].pendingArm, self.bindings[index].armGeneration == generation else { return }
-            self.bindings[index].pendingArm = false
-            self.fire(index: index, edge: .down, now: self.clock(), pressedAt: pressedAt)
+        schedule(min(chordGraceSeconds, max(0, armsAt - clock()))) { [weak self] in
+            self?.armDue(by: armsAt)
+        }
+    }
+
+    private func armDue(by now: TimeInterval) {
+        for i in bindings.indices where bindings[i].pendingArm {
+            guard let engagedAt = bindings[i].engagedAt, engagedAt + chordGraceSeconds <= now else { continue }
+            bindings[i].pendingArm = false
+            fire(index: i, edge: .down, now: engagedAt + chordGraceSeconds, pressedAt: engagedAt)
         }
     }
 
@@ -474,7 +468,6 @@ final class HotkeyMonitor {
         guard bindings[i].pendingArm else { return }
         dropEngaged(index: i)
         bindings[i].pendingArm = false
-        bindings[i].armGeneration &+= 1
         bindings[i].suppressedUntilRelease = true
     }
 
@@ -488,8 +481,7 @@ final class HotkeyMonitor {
     private func flushPendingArm(index i: Int, now: TimeInterval) {
         guard bindings[i].pendingArm else { return }
         bindings[i].pendingArm = false
-        bindings[i].armGeneration &+= 1
-        fire(index: i, edge: .down, now: now)
+        fire(index: i, edge: .down, now: now, pressedAt: bindings[i].engagedAt)
     }
 
     // How long after the trigger engaged a chord key landed — the distribution the chord grace is tuned
@@ -510,9 +502,8 @@ final class HotkeyMonitor {
         dispatchSideEffect { self.onCancel(key) }
     }
 
-    // Run a gesture/action callback off the event-tap delivery context: `onStart`/`onCommit`/`onAction` do
-    // real work (engine resolve, audio start, HUD) that inline would risk a `tapDisabledByTimeout`. Gesture
-    // state already advanced synchronously; only the side-effect is deferred, FIFO so a start precedes its commit.
+    // Gesture state advances synchronously; the callback's real work (engine resolve, audio start, HUD) runs
+    // after, FIFO so a start precedes its commit.
     private func dispatchSideEffect(_ work: @escaping @MainActor () -> Void) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated(work)
@@ -619,56 +610,24 @@ extension KeyDescriptor {
     }
 }
 
-nonisolated(unsafe) private weak var activeHotkeyMonitor: HotkeyMonitor?
+@MainActor private weak var activeHotkeyMonitor: HotkeyMonitor?
 
-@MainActor
 enum UserInput {
-    private(set) static var latest: UInt64 = 0
-    static var onInput: (@MainActor (UInt64) -> Void)?
+    private static let noted = OSAllocatedUnfairLock<UInt64>(initialState: 0)
+    static var latest: UInt64 { noted.withLock { $0 } }
+    @MainActor static var onInput: (@MainActor (UInt64) -> Void)?
 
-    static var isObserved: Bool { activeHotkeyMonitor?.isTapActive == true }
+    @MainActor static var isObserved: Bool { activeHotkeyMonitor?.isTapActive == true }
 
-    static func any(after time: UInt64) -> Bool? {
+    @MainActor static func any(after time: UInt64) -> Bool? {
         isObserved ? latest > time : nil
     }
 
-    static func note(at time: UInt64) {
-        latest = max(latest, time)
-        onInput?(time)
+    static func record(at time: UInt64) {
+        noted.withLock { $0 = max($0, time) }
     }
 
     nonisolated static func canMoveFocus(_ type: CGEventType) -> Bool {
         type == .keyDown || type == .leftMouseDown || type == .rightMouseDown
     }
-}
-
-private func hotkeyTapCallback(
-    proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, userInfo: UnsafeMutableRawPointer?
-) -> Unmanaged<CGEvent>? {
-    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        MainActor.assumeIsolated { activeHotkeyMonitor?.reEnable(reason: type) }
-        return Unmanaged.passUnretained(event)
-    }
-    if KeyReplay.isReplayed(event) { return Unmanaged.passUnretained(event) }
-    if UserInput.canMoveFocus(type), event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
-        let at = event.timestamp
-        let consumed = type == .keyDown ? (keyCode: Int(event.getIntegerValueField(.keyboardEventKeycode)), flags: event.flags) : nil
-        MainActor.assumeIsolated {
-            guard consumed.map({ CarbonHotKeys.consumes(keyCode: $0.keyCode, flags: $0.flags) }) != true else { return }
-            UserInput.note(at: at)
-        }
-    }
-    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-    let rawFlags = event.flags.rawValue
-    let scrollIsUserDriven = type != .scrollWheel || HotkeyMonitor.scrollIsUserDriven(
-        momentumPhase: event.getIntegerValueField(.scrollWheelEventMomentumPhase),
-        scrollPhase: event.getIntegerValueField(.scrollWheelEventScrollPhase),
-        deltaAxis1: event.getIntegerValueField(.scrollWheelEventDeltaAxis1),
-        deltaAxis2: event.getIntegerValueField(.scrollWheelEventDeltaAxis2))
-    MainActor.assumeIsolated {
-        activeHotkeyMonitor?.handle(
-            type: type, keyCode: keyCode, flags: CGEventFlags(rawValue: rawFlags),
-            scrollIsUserDriven: scrollIsUserDriven)
-    }
-    return Unmanaged.passUnretained(event)
 }

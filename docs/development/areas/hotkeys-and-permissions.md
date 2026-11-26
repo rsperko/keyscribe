@@ -203,9 +203,51 @@ delivery to a listen-only tap under Accessibility alone is measured (see `MouseE
 Monitoring grant before relying on it. The failure mode is "clicks never abort", not a crash. Once Accessibility is granted, that session tap runs on **Accessibility alone**
 (we never request Input Monitoring) and never
 consumes a keystroke. `.listenOnly` (not `.defaultTap`) because we never modify/consume the event:
-a listen-only tap is delivered async, so the window server does NOT block the system input stream on
-our callback — a busy/wedged main thread can never hold global input hostage, it only delays our own
-observation.
+the window server does not block the system input stream on our callback, so a busy/wedged main thread
+can never hold global input hostage.
+
+### The tap's own thread
+
+**Both taps run on their own run-loop thread, never the main run loop** (`EventTapThread`). macOS
+still disables a listen-only tap whose callback falls behind (the `tapDisabledByTimeout` the thread
+re-enables), and every event in between is lost. A disabled modifier tap was reported during launch
+bursts (2026-11-25), and a lost modifier release leaves a hold take recording with no release. The
+modifier tap's callback (`HotkeyMonitor.received`) only reads the event and hands it to main in order,
+so a slow main thread delays matching but never disables the tap. The rules that keep it that way:
+
+- **Matching stays on main, timed by the event.** `handle`, the gesture state, the chord grace and every
+  callback run on the main actor, so the matcher rules above and `rebuildHotkeyMonitor` are unchanged.
+  Each event carries its own `CGEvent.timestamp`, and every edge is matched at that one instant: holds,
+  taps, the grace, and the press time `fire` hands to `onStart`, never the time main got to it.
+  Otherwise a hold queued behind a stall reads as a tap and latches, two slow taps read as a
+  double-tap, and input typed after the press reads as before it. The timestamp is uptime nanoseconds
+  on the clock of `DispatchTime.uptimeNanoseconds` and `systemUptime`, which excludes sleep. As measured,
+  2026-11-25, on a Mac that had slept about 45 hours since boot, an event posted to a scratch process
+  arrived stamped within 6 ms of `DispatchTime.now()`, where a sleep-inclusive clock would have been
+  hours apart. The grace timer's delay is still clamped to the grace, so a timestamp on another base
+  can never hold an arm for longer. **A grace that ended before an event is settled first**
+  (`armDue`): the press arms at the grace's end and only then does the event apply, so a key after the
+  grace still aborts a started take and a release after it still commits, in whatever order main sees
+  the timer. The timer itself only settles what is due by its own time, so a cancelled, flushed, or
+  replaced arm needs no generation to recognise. Mouse buttons carry their event time the same way.
+  **Carbon chords still read `clock()` when handled**: their time base has not been measured, so a chord
+  handled after a stall still times from when main got to it.
+- **What the callback reads off main is lock-guarded.** `UserInput.latest` is written on the tap
+  thread, so an Agent take asking whether the user typed after the press sees input main has not yet
+  handled. `CarbonHotKeys.consumes` reads a locked copy of the registered chords. Anything else the
+  callback needs must be made safe the same way, never reached through `MainActor.assumeIsolated`.
+- **The taps live as long as the app.** The monitor is built once and changed only through `update`,
+  so neither tap, nor `HotkeyMonitor`, has a `stop()`. Adding one is a lifecycle change, not a
+  convenience: an event or callback already queued for main when it runs must not start a take
+  afterwards, because no release can reach a stopped tap to end it, and every engage it discards must
+  still end in `onEngageDropped` so the early capture closes. Also, `CFRunLoopStop` does nothing to a
+  loop that has not yet entered its mode.
+- **Created on main, served by the thread.** The tap is created on main behind the Accessibility gate,
+  so `start()` and `isTapActive` answer synchronously, and is disabled until the thread has added its
+  source, so the consuming mouse tap never holds input before anything serves it.
+
+The thread cannot make handling happen sooner than main allows: a wedged main thread still delays a
+take's start. It guarantees the events arrive, in order and with the time they happened.
 
 ### Double-tap
 
@@ -335,7 +377,7 @@ therefore swallowed globally while the app runs, the same trade Wispr/Superwhisp
 **Footgun: this is the ONE consuming tap, and it must NEVER run on the main run loop.** An active
 tap is synchronous (the window server blocks on the callback); the original freeze was a
 `.defaultTap` on the *main* thread held hostage by a wedged main thread (Bluetooth A2DP→HFP audio
-bring-up). `MouseEventTap` runs the tap on a **dedicated run-loop thread**; its callback only reads
+bring-up). `MouseEventTap` runs the tap on its own **`EventTapThread`**; its callback only reads
 a lock-guarded `Set<Int>` and hands the edge to main async — it touches no audio/AX/SwiftUI, so a
 wedged main thread (a different thread) can never block it. The button set is emptied while a
 `HotkeyRecorder` is capturing, so a mouse button can be recorded as the raw click. Mouse cannot ride

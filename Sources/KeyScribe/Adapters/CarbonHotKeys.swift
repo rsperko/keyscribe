@@ -11,7 +11,6 @@ private let carbonLog = Logger(subsystem: "com.keyscribe.app", category: "hotkey
 protocol ChordRegistering: AnyObject {
     @discardableResult
     func update(_ registrations: [CarbonHotKeys.Registration]) -> Bool
-    func stop()
 }
 
 // Chord triggers (key + modifiers) register as system hot keys via `RegisterEventHotKey` — no Input
@@ -29,11 +28,12 @@ final class CarbonHotKeys: ChordRegistering {
     private var handler: EventHandlerRef?
     private var refs: [EventHotKeyRef?] = []
     private var byId: [UInt32: Registration] = [:]
-    private static var registered: [ObjectIdentifier: [(keyCode: Int, modifiers: ModifierSet)]] = [:]
+    private struct Held: Sendable { let keyCode: Int; let modifiers: ModifierSet }
+    private nonisolated static let registered = OSAllocatedUnfairLock<[ObjectIdentifier: [Held]]>(initialState: [:])
 
-    static func consumes(keyCode: Int, flags: CGEventFlags) -> Bool {
+    nonisolated static func consumes(keyCode: Int, flags: CGEventFlags) -> Bool {
         let held = modifiers(of: flags)
-        return registered.values.contains { $0.contains { $0.keyCode == keyCode && $0.modifiers == held } }
+        return registered.withLock { $0.values.contains { $0.contains { $0.keyCode == keyCode && $0.modifiers == held } } }
     }
 
     nonisolated static func modifiers(of flags: CGEventFlags) -> ModifierSet {
@@ -55,6 +55,7 @@ final class CarbonHotKeys: ChordRegistering {
         guard !registrations.isEmpty else { return true }
         installHandlerIfNeeded()
         var allRegistered = true
+        var held: [Held] = []
         for reg in registrations {
             let numericId = nextCarbonHotKeyId
             nextCarbonHotKeyId &+= 1
@@ -66,7 +67,7 @@ final class CarbonHotKeys: ChordRegistering {
             if status == noErr, ref != nil {
                 refs.append(ref)
                 byId[numericId] = reg
-                Self.registered[ObjectIdentifier(self), default: []].append((reg.keyCode, reg.modifiers))
+                held.append(Held(keyCode: reg.keyCode, modifiers: reg.modifiers))
             } else {
                 allRegistered = false
                 // Only an exclusive-lock collision returns an error here; a system-reserved combo
@@ -75,6 +76,9 @@ final class CarbonHotKeys: ChordRegistering {
                     "RegisterEventHotKey failed (kc=\(reg.keyCode, privacy: .public) mods=\(reg.modifiers.rawValue, privacy: .public) status=\(status, privacy: .public))")
             }
         }
+        let id = ObjectIdentifier(self)
+        let registeredNow = held
+        Self.registered.withLock { $0[id] = registeredNow }
         return allRegistered
     }
 
@@ -82,7 +86,7 @@ final class CarbonHotKeys: ChordRegistering {
         stop()
     }
 
-    func stop() {
+    private func stop() {
         unregisterAll()
         if let handler {
             RemoveEventHandler(handler)
@@ -94,7 +98,8 @@ final class CarbonHotKeys: ChordRegistering {
         for ref in refs where ref != nil { UnregisterEventHotKey(ref) }
         refs.removeAll()
         byId.removeAll()
-        Self.registered[ObjectIdentifier(self)] = nil
+        let id = ObjectIdentifier(self)
+        Self.registered.withLock { $0[id] = nil }
     }
 
     private func installHandlerIfNeeded() {
