@@ -2467,10 +2467,14 @@ struct AgentHubTests {
         private(set) var observed: [AgentEvent] = []
         private(set) var retired: [Set<String>] = []
         init(kind: AgentKind = AgentKind(id: "fake", displayName: "Fake", connectorName: "Fake connector")) { self.kind = kind }
-        func scan(rereadingTitles: Bool) async -> AgentScan {
+        var onScan: ((Bool) -> Void)?
+        private(set) var rereads: [Bool] = []
+        func scan(rereadingTitles: Bool, reusingProcesses: Bool) async -> AgentScan {
             scans += 1
+            rereads.append(rereadingTitles)
             if let stall { try? await Task.sleep(for: stall) }
             if blocked { await withCheckedContinuation { waiting.append($0) } }
+            onScan?(reusingProcesses)
             return result
         }
         var running = false
@@ -2511,6 +2515,124 @@ struct AgentHubTests {
             .turnStarted(session: "s1", turn: "t1"),
         ])
         #expect(one.observed == [.title(session: "s9", text: "x")])
+    }
+
+    @Test func onlyHelloAndTitleScansForProcessesAlreadyListedReuseTheProcessTable() async {
+        let world = AgentProcessTableTests.World()
+        let table = AgentProcessTable(rules: [.pi], maxAge: 5, home: "/Users/a", now: { world.now }) { _ in
+            world.listings += 1
+            return world.processes
+        }
+        let fake = FakeDiscovery()
+        fake.result = .found([Self.fakeSession("f1")])
+        fake.onScan = { _ = table.found(.pi, reusing: $0) }
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake])
+        await hub.rescan()
+        #expect(world.listings == 1)
+        for minute in 0..<10 {
+            world.now += 60
+            hub.handle(.turnStarted(session: "fake:f1", turn: "t\(minute)"))
+            hub.handle(.turnComplete(session: "fake:f1", reason: "answer", answer: "done", turn: "t\(minute)"))
+            hub.handle(.title(session: "fake:f1", text: "title \(minute)"))
+            hub.handle(.hello(.init(protocolVersion: 3, agent: "fake", agentVersion: "", instance: "i1", session: "fake:f1", pid: 10)))
+            await hub.scansSettled()
+        }
+        #expect(world.listings == 1)
+        let unheld: [(String, @MainActor () async -> Void)] = [
+            ("a hello from a process no scan listed", {
+                hub.handle(.hello(.init(protocolVersion: 3, agent: "fake", agentVersion: "", instance: "i2", session: "fake:f2", pid: 77)))
+                await hub.scansSettled()
+            }),
+            ("a press", { await hub.refreshHostsForPress() }),
+            ("Settings", { await hub.rescan(rereadingTitles: false, wantingHosts: true) }),
+            ("a folder change or an exit", { await hub.rescan(rereadingTitles: false, agents: hub.processAgents) }),
+            ("a connector hanging up", { await hub.hungUp(agents: ["fake"]) }),
+            ("a title scan merged with an exit's", {
+                hub.handle(.title(session: "fake:f1", text: "merged"))
+                await hub.rescan(rereadingTitles: false, agents: hub.processAgents)
+            }),
+        ]
+        for (index, (cause, act)) in unheld.enumerated() {
+            world.now += 60
+            await act()
+            #expect(world.listings == index + 2, "\(cause)")
+        }
+    }
+
+    @Test func aScanStillRunningPastItsDeadlineKeepsItsChoiceAndAStrongerRequestRunsAfterIt() async {
+        @MainActor final class Seen { var scans: [Bool] = []; var running = ["f1"] }
+        let world = AgentProcessTableTests.World()
+        let table = AgentProcessTable(rules: [.pi], maxAge: 5, home: "/Users/a", now: { world.now }) { _ in
+            world.listings += 1
+            return world.processes
+        }
+        let seen = Seen()
+        let fake = FakeDiscovery()
+        fake.result = .found([Self.fakeSession("f1")])
+        fake.onScan = { reusing in
+            seen.scans.append(reusing)
+            let before = world.listings
+            _ = table.found(.pi, reusing: reusing)
+            if world.listings > before { fake.result = .found(seen.running.map(Self.fakeSession)) }
+        }
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake], scanDeadline: .milliseconds(50))
+        await hub.rescan()
+        #expect(world.listings == 1)
+
+        world.now += 60
+        seen.running.append("f2")
+        fake.blocked = true
+        hub.handle(.title(session: "fake:f1", text: "late"))
+        await hub.scansSettled()
+        await hub.rescan(rereadingTitles: false, wantingHosts: true)
+        fake.blocked = false
+        #expect(await BBHostTests.within { hub.directory.conversations.map(\.id).contains("fake:f2") })
+        #expect(seen.scans == [false, true, false])
+        #expect(world.listings == 2)
+        await hub.scansSettled()
+
+        world.now += 60
+        fake.blocked = true
+        await hub.rescan(rereadingTitles: false, wantingHosts: true)
+        hub.handle(.title(session: "fake:f1", text: "later"))
+        await hub.scansSettled()
+        fake.blocked = false
+        #expect(await BBHostTests.within { seen.scans.count == 5 })
+        await hub.scansSettled()
+        #expect(seen.scans == [false, true, false, false, true])
+        #expect(world.listings == 3)
+    }
+
+    @Test func aScanThatEndsAfterItsRoundGaveUpIsAppliedAtOnceAndNeverAnsweredAgainLater() async {
+        let fake = FakeDiscovery()
+        fake.result = .found([Self.fakeSession("f1")])
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake], scanDeadline: .milliseconds(50))
+        fake.blocked = true
+        await hub.rescan()
+        #expect(hub.directory.conversations.isEmpty)
+        fake.blocked = false
+        #expect(await BBHostTests.within { hub.directory.conversations.map(\.id) == ["fake:f1"] })
+        await hub.scansSettled()
+        #expect(fake.scans == 1)
+
+        fake.result = .found([Self.fakeSession("f1"), Self.fakeSession("f2")])
+        await hub.rescan()
+        #expect(fake.scans == 2)
+        #expect(hub.directory.conversations.map(\.id).sorted() == ["fake:f1", "fake:f2"])
+    }
+
+    @Test func aRoundWantingTitlesReadAgainBehindAScanThatDidNotScansAgainOnceItEnds() async {
+        let fake = FakeDiscovery()
+        fake.result = .found([Self.fakeSession("f1")])
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake], scanDeadline: .milliseconds(50))
+        fake.blocked = true
+        await hub.rescan(rereadingTitles: false)
+        await hub.rescan(rereadingTitles: true)
+        #expect(fake.rereads == [false])
+        fake.blocked = false
+        #expect(await BBHostTests.within { fake.rereads == [false, true] })
+        await hub.scansSettled()
+        #expect(fake.rereads == [false, true])
     }
 
     @Test func retiringAnInstallationForgetsOnlyWhatItsConnectorsAnnounced() async {
@@ -3740,7 +3862,7 @@ struct AgentHubTests {
     }
 
     @Test func aConversationWhoseStateComesFromItsConnectorShowsWorkingAsSoonAsItsTurnStarts() async {
-        let pi = ExtensionDiscovery(kind: .pi, processStart: { _ in .started(milliseconds: 1) }, isRunning: { _ in true }, processes: { AgentProcesses.Found() })
+        let pi = ExtensionDiscovery(kind: .pi, processStart: { _ in .started(milliseconds: 1) }, isRunning: { _ in true }, processes: { _ in AgentProcesses.Found() })
         let transport = FakeTransport()
         let hub = AgentHub(transport: transport, discovery: [pi], scanDeadline: .seconds(30))
         transport.live.insert("pi:s1")

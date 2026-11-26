@@ -595,6 +595,145 @@ struct BBHostTests {
         #expect(changes.count == 2)
     }
 
+    final class Descriptions: @unchecked Sendable {
+        private let condition = NSCondition()
+        private var _count = 0
+        private var _held: Set<Int> = []
+        private var _answers: [Int: BBBuild] = [:]
+        private var _build: BBBuild
+        init(_ build: BBBuild) { _build = build }
+        var count: Int { condition.withLock { _count } }
+        var build: BBBuild {
+            get { condition.withLock { _build } }
+            set { condition.withLock { _build = newValue } }
+        }
+        func hold(_ call: Int, answering answer: BBBuild? = nil) {
+            condition.withLock {
+                _held.insert(call)
+                _answers[call] = answer
+            }
+        }
+        func release(_ call: Int) {
+            condition.withLock {
+                _held.remove(call)
+                condition.broadcast()
+            }
+        }
+        func describe(_ folder: String) -> BBBuild? {
+            condition.withLock {
+                _count += 1
+                let call = _count
+                while _held.contains(call) { condition.wait() }
+                let build = _answers[call] ?? _build
+                return folder == build.folder ? build : nil
+            }
+        }
+    }
+
+    private func described(_ descriptions: Descriptions, _ apps: Apps, front: AgentHostApp? = nil) -> BBHost {
+        let folder = descriptions.build.folder
+        return BBHost(
+            home: Self.home, enrolled: { [folder] }, describe: { descriptions.describe($0) },
+            installed: { _ in true }, isOpen: { _ in true },
+            run: { _, _, _, _ in HostCLI.Output(status: 0, stdout: Data("[]".utf8), stderr: "", truncated: false) },
+            activate: { _ in }, frontmost: { _ in front }, frontApp: { front.map { AgentHostApp(bundle: $0.bundle, pid: $0.pid, name: $0.name, path: $0.path) } },
+            dataFolder: { _ in nil },
+            appsChanging: {
+                apps.changed = $0
+                return {}
+            },
+            launchRetries: 1, launchRetryDelay: .milliseconds(1))
+    }
+
+    @Test(arguments: [true, false])
+    func anOlderDescriptionThatFinishesLastNeverReplacesANewerOne(newerFinishesFirst: Bool) async {
+        let old = BBBuild(folder: Self.work.folder, app: "/Applications/bb Old.app", bundle: Self.bundle, name: "bb Old")
+        let descriptions = Descriptions(old)
+        let front = AgentHostApp(bundle: Self.bundle, pid: 41, name: "bb", window: "cg:7", path: Self.work.app)
+        let bb = described(descriptions, Apps(), front: front)
+        _ = await bb.scan()
+        let older = descriptions.count + 1, newer = descriptions.count + 2
+        descriptions.hold(older, answering: old)
+        descriptions.hold(newer, answering: Self.work)
+        bb.want()
+        let scanning = Task { _ = await bb.scan() }
+        #expect(await Self.within { descriptions.count == older })
+        let location = AgentHostLocation(host: "bb", instance: Self.work.folder, native: "thr_abc1")
+        let renaming = Task { _ = await bb.rename(location, to: "docs") }
+        #expect(await Self.within { descriptions.count == newer })
+        if newerFinishesFirst {
+            descriptions.release(newer)
+            await renaming.value
+            descriptions.release(older)
+            await scanning.value
+        } else {
+            descriptions.release(older)
+            await scanning.value
+            descriptions.release(newer)
+            await renaming.value
+        }
+        #expect(bb.focusedWindow()?.instance == Self.work.folder)
+    }
+
+    @Test func aScanDescribesTheBuildsAgainOnlyAfterACopyLaunchesOrQuitsOrAPressWantsThem() async {
+        let descriptions = Descriptions(Self.work)
+        let apps = Apps()
+        let bb = described(descriptions, apps)
+        bb.watch { _ in }
+        _ = await bb.scan()
+        _ = await bb.scan()
+        _ = await bb.scan()
+        #expect(descriptions.count == 1)
+        apps.changed?("/Applications/Safari.app", true)
+        _ = await bb.scan()
+        #expect(descriptions.count == 1)
+        apps.changed?(Self.work.app!, false)
+        _ = await bb.scan()
+        #expect(descriptions.count == 2)
+        _ = await bb.scan()
+        #expect(descriptions.count == 2)
+        bb.want()
+        _ = await bb.scan()
+        #expect(descriptions.count == 3)
+    }
+
+    @Test func aLaunchOrAPressWhileTheBuildsAreBeingDescribedDescribesThemAgainAtTheNextScan() async {
+        for change in ["launch", "quit", "press"] {
+            let descriptions = Descriptions(Self.work)
+            let apps = Apps()
+            let bb = described(descriptions, apps)
+            bb.watch { _ in }
+            _ = await bb.scan()
+            bb.want()
+            let held = descriptions.count + 1
+            descriptions.hold(held)
+            let scanning = Task { _ = await bb.scan() }
+            #expect(await Self.within { descriptions.count == held }, "\(change)")
+            switch change {
+            case "launch": apps.changed?(Self.work.app!, true)
+            case "quit": apps.changed?(Self.work.app!, false)
+            default: bb.want()
+            }
+            descriptions.release(held)
+            await scanning.value
+            _ = await bb.scan()
+            #expect(descriptions.count == 3, "\(change)")
+        }
+    }
+
+    @Test func aBuildDescribedBeforeItsAppWasFoundIsDescribedAgainUntilItIs() async {
+        let descriptions = Descriptions(BBBuild(folder: Self.usual.folder, name: BBBuilds.fallbackName))
+        let apps = Apps()
+        let bb = described(descriptions, apps)
+        _ = await bb.scan()
+        _ = await bb.scan()
+        #expect(descriptions.count == 2)
+        descriptions.build = Self.usual
+        _ = await bb.scan()
+        _ = await bb.scan()
+        #expect(descriptions.count == 3)
+    }
+
     @Test func aCopyThatLaunchedIsScannedAgainUntilItListsWhileTheOtherCopiesListFine() async {
         final class Lists: @unchecked Sendable { var failing = 1 }
         let lists = Lists()

@@ -18,7 +18,7 @@ struct PiDiscoveryTests {
     }
 
     private func make(_ processes: Processes = Processes()) -> ExtensionDiscovery {
-        ExtensionDiscovery(kind: .pi, processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found })
+        ExtensionDiscovery(kind: .pi, processStart: processes.start, isRunning: processes.isRunning, processes: { _ in processes.found })
     }
 
     private func hello(_ session: String, pid: Int = 10, cwd: String? = "/src/api", title: String? = nil, idle: Bool = true, features: [String] = ["readiness"]) -> AgentEvent {
@@ -123,7 +123,7 @@ struct PiDiscoveryTests {
             isRunning: { pid in
                 DispatchQueue.main.async { MainActor.assumeIsolated { during.deliver?() } }
                 return pid != 99
-            }, processes: { AgentProcesses.Found() })
+            }, processes: { _ in AgentProcesses.Found() })
         discovery.observe(hello("s1", pid: 10))
         discovery.observe(hello("gone", pid: 99))
         let late = hello("s2", pid: 11, cwd: "/src/docs")
@@ -243,7 +243,7 @@ struct PiDiscoveryTests {
         let processes = Processes()
         processes.found = AgentProcesses.Found(candidates: [], unreadable: [10])
         let discovery = ExtensionDiscovery(kind: .pi,
-            processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found },
+            processStart: processes.start, isRunning: processes.isRunning, processes: { _ in processes.found },
             folder: { $0 == "inst-work" ? "/Users/a/pi-work" : nil })
         discovery.observe(.hello(.init(
             protocolVersion: 2, agent: "pi", agentVersion: "", instance: "i10", session: "s1", pid: 10, idle: true, installation: "inst-work")))
@@ -262,7 +262,7 @@ struct PiDiscoveryTests {
             AgentCandidate(agent: "pi", pid: 10, startedAt: 1_700_000_000_000, cwd: "/src/api", setup: "/Users/a/.pi/agent"),
         ])
         let discovery = ExtensionDiscovery(kind: .pi,
-            processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found }, folder: { _ in "/Users/a/pi-work" })
+            processStart: processes.start, isRunning: processes.isRunning, processes: { _ in processes.found }, folder: { _ in "/Users/a/pi-work" })
         discovery.observe(.hello(.init(
             protocolVersion: 2, agent: "pi", agentVersion: "", instance: "i10", session: "s1", pid: 10, idle: true, installation: "inst-work")))
         guard case .found(let sessions, _) = await discovery.scan(rereadingTitles: false) else { return }
@@ -272,7 +272,7 @@ struct PiDiscoveryTests {
     @Test func aFolderTheLoginShellNamesIsListedWithoutAnyConversation() async {
         let processes = Processes()
         let discovery = ExtensionDiscovery(kind: .pi,
-            processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found }, declared: { "/Users/a/pi-shell" })
+            processStart: processes.start, isRunning: processes.isRunning, processes: { _ in processes.found }, declared: { "/Users/a/pi-shell" })
         guard case .found(_, let extras) = await discovery.scan(rereadingTitles: false) else { return }
         #expect(extras.setups == ["/Users/a/pi-shell"])
     }

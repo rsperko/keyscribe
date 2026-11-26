@@ -4,7 +4,7 @@ import KeyScribeKit
 @MainActor
 final class ClaudeDiscovery: AgentDiscovery {
     let kind = AgentKind.claude
-    private let scanRegistry: @Sendable () -> ClaudeRegistryScanner.Scan
+    private let scanRegistry: @Sendable (_ reusingProcesses: Bool) -> ClaudeRegistryScanner.Scan
     private let titles: ClaudeTranscriptTitles?
     private let running: (RememberedName) -> Bool
     private let isRunning: @Sendable (Int) -> Bool
@@ -125,7 +125,7 @@ final class ClaudeDiscovery: AgentDiscovery {
     nonisolated static let partialProblem = "Some Claude Code session lists couldn\u{2019}t be read. Conversations seen earlier stay listed."
 
     init(
-        scanEach: @escaping @Sendable () -> ClaudeRegistryScanner.Scan, titles: ClaudeTranscriptTitles? = nil,
+        scanEach: @escaping @Sendable (_ reusingProcesses: Bool) -> ClaudeRegistryScanner.Scan, titles: ClaudeTranscriptTitles? = nil,
         stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning,
         isRunning: @escaping @Sendable (Int) -> Bool = ProcessStart.isRunning(pid:),
         transcriptWatch: @escaping TranscriptWatch = TranscriptFileWatch.open,
@@ -149,17 +149,17 @@ final class ClaudeDiscovery: AgentDiscovery {
         now: @escaping () -> Date = Date.init
     ) {
         self.init(
-            scanEach: { scan().map { ClaudeRegistryScanner.Scan(entries: $0, unreadable: []) } ?? ClaudeRegistryScanner.Scan(entries: [], unreadable: [Self.unknownFolder]) },
+            scanEach: { _ in scan().map { ClaudeRegistryScanner.Scan(entries: $0, unreadable: []) } ?? ClaudeRegistryScanner.Scan(entries: [], unreadable: [Self.unknownFolder]) },
             titles: titles, stillRunning: stillRunning, transcriptWatch: transcriptWatch, titleSpacing: titleSpacing, now: now)
     }
 
     convenience init(
         enrolled: @escaping @Sendable () -> [URL], defaultFolder: URL = ClaudeConnectorInstaller.defaultSetupFolder(),
         declared: @escaping @Sendable () -> String? = { nil },
-        processes: @escaping @Sendable () -> AgentProcesses.Found
+        processes: @escaping @Sendable (_ reusing: Bool) -> AgentProcesses.Found
     ) {
-        self.init(scanEach: {
-            let running = processes()
+        self.init(scanEach: { reusing in
+            let running = processes(reusing)
             let shell = declared().map { URL(fileURLWithPath: $0, isDirectory: true) }.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
             let fromProcesses = running.setups.map { URL(fileURLWithPath: $0, isDirectory: true) } + (shell.map { [ConnectorFolders.canonical($0)] } ?? [])
             var seen: Set<String> = []
@@ -176,13 +176,13 @@ final class ClaudeDiscovery: AgentDiscovery {
     convenience init(setups: ConnectorSetupRegistry, processes: AgentProcessTable) {
         self.init(enrolled: {
             (setups.setups?.enrolled(agent: AgentKind.claude.id) ?? []).map { URL(fileURLWithPath: $0.folder, isDirectory: true) }
-        }, declared: { ToolEnvironment.shared.folder(AgentProcesses.Rule.claude.setupVariable) }, processes: { processes.found(.claude) })
+        }, declared: { ToolEnvironment.shared.folder(AgentProcesses.Rule.claude.setupVariable) }, processes: { processes.found(.claude, reusing: $0) })
     }
 
-    func scan(rereadingTitles: Bool) async -> AgentScan {
+    func scan(rereadingTitles: Bool, reusingProcesses: Bool) async -> AgentScan {
         let (scanRegistry, titles, previous, isRunning) = (scanRegistry, titles, lastByFolder, isRunning)
         let (scan, kept, watched) = await Task.detached { () -> (AgentScan, [String: [ClaudeRegistryEntry]], [String]) in
-            let found = scanRegistry()
+            let found = scanRegistry(reusingProcesses)
             var entries = found.entries
             var carried: Set<String> = []
             for folder in found.unreadable {

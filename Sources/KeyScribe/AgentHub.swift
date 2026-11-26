@@ -144,7 +144,7 @@ final class AgentHub {
     private var staleAgents: Set<String> = []
     private var shownExtras: [String: AgentScanExtras] = [:]
     private var scanTask: Task<Void, Never>?
-    private var pendingScan: (rereading: Bool, agents: Set<String>?)?
+    private var pendingScan: (rereading: Bool, agents: Set<String>?, reusingProcesses: Bool)?
     private var outstanding: [String: Outstanding] = [:]
     private var connectorNamesAt: [String: Date] = [:]
     private var stopped = false
@@ -279,7 +279,7 @@ final class AgentHub {
         placeTracker?.onChange = { [weak self] in self?.refresh() }
         for discovery in discoveries {
             let agent = discovery.kind.id
-            discovery.follow { [weak self] in self?.requestScan(rereadingTitles: false, agents: [agent]) }
+            discovery.follow { [weak self] in self?.requestScan(rereadingTitles: false, agents: [agent], reusingProcesses: true) }
         }
         silenceHostsTurnedOff()
         for source in self.hosts { watch(source) }
@@ -1031,10 +1031,15 @@ final class AgentHub {
     }
 
     @discardableResult
-    private func requestScan(rereadingTitles: Bool, wantingHosts: Bool = false, agents: Set<String>? = nil) -> Task<Void, Never>? {
+    private func requestScan(
+        rereadingTitles: Bool, wantingHosts: Bool = false, agents: Set<String>? = nil, reusingProcesses: Bool = false
+    ) -> Task<Void, Never>? {
         guard !stopped else { return nil }
         if wantingHosts { hosts.forEach { $0.want() } }
-        pendingScan = pendingScan.map { ($0.rereading || rereadingTitles, Self.joined($0.agents, agents)) } ?? (rereadingTitles, agents)
+        let reusing = reusingProcesses && !wantingHosts
+        pendingScan = pendingScan.map {
+            ($0.rereading || rereadingTitles, Self.joined($0.agents, agents), $0.reusingProcesses && reusing)
+        } ?? (rereadingTitles, agents, reusing)
         if let scanTask { return scanTask }
         let task = Task { @MainActor [weak self] in
             while let self, !self.stopped, let round = self.pendingScan {
@@ -1042,7 +1047,7 @@ final class AgentHub {
                 let full = round.agents == nil
                 if full { self.hostScanRounds.started += 1 }
                 let listed = self.hostListings
-                await self.scanOnce(rereadingTitles: round.rereading, only: round.agents)
+                await self.scanOnce(rereadingTitles: round.rereading, reusingProcesses: round.reusingProcesses, only: round.agents)
                 if full { self.hostScanRounds.finished += 1 }
                 if self.hostListings != listed { self.heardHostReport(from: Self.hostsListed) }
                 if full { self.heardHostReport(from: Self.scanRound) }
@@ -1060,8 +1065,25 @@ final class AgentHub {
     private struct Outstanding {
         let task: Task<AgentScan, Never>
         let startedAt: Date
+        let choice: ScanChoice
+        var owed: ScanChoice?
         var result: AgentScan?
         var waiter: FirstAnswer?
+    }
+
+    private struct ScanChoice {
+        var rereadingTitles: Bool
+        var reusingProcesses: Bool
+
+        func covers(_ other: ScanChoice) -> Bool {
+            (rereadingTitles || !other.rereadingTitles) && (!reusingProcesses || other.reusingProcesses)
+        }
+
+        func joined(_ other: ScanChoice) -> ScanChoice {
+            ScanChoice(
+                rereadingTitles: rereadingTitles || other.rereadingTitles,
+                reusingProcesses: reusingProcesses && other.reusingProcesses)
+        }
     }
 
     private static func joined(_ wanted: Set<String>?, _ more: Set<String>?) -> Set<String>? {
@@ -1073,6 +1095,10 @@ final class AgentHub {
         Set(sessions.flatMap { session in
             [AgentSessionID.agent(of: session), filed[session].flatMap { AgentSessionID.agent(of: $0.session) }].compactMap { $0 }
         })
+    }
+
+    private func knowsProcess(_ pid: Int) -> Bool {
+        lastScan.values.contains { $0.contains { $0.pid == pid } }
     }
 
     var processAgents: Set<String> {
@@ -1101,19 +1127,28 @@ final class AgentHub {
             lastScan[agent] = listed
             changed = true
         }
-        if !unlisted.isEmpty { requestScan(rereadingTitles: false, agents: unlisted) }
+        if !unlisted.isEmpty { requestScan(rereadingTitles: false, agents: unlisted, reusingProcesses: true) }
         return changed
     }
 
-    private func scanOnce(rereadingTitles: Bool, only: Set<String>? = nil) async {
+    private func scanOnce(rereadingTitles: Bool, reusingProcesses: Bool, only: Set<String>? = nil) async {
         var results: [(String, AgentScan)] = []
         var scannedAt: [String: Date] = [:]
         for discovery in discoveries where only?.contains(discovery.kind.id) ?? true {
             let agent = discovery.kind.id
-            if outstanding[agent] == nil { begin(agent: agent) { await discovery.scan(rereadingTitles: rereadingTitles) } }
+            let choice = ScanChoice(rereadingTitles: rereadingTitles, reusingProcesses: reusingProcesses)
+            if let running = outstanding[agent] {
+                if !running.choice.covers(choice) { outstanding[agent]?.owed = running.owed.map { $0.joined(choice) } ?? choice }
+            } else {
+                begin(agent: agent, choice: choice) {
+                    await discovery.scan(rereadingTitles: rereadingTitles, reusingProcesses: reusingProcesses)
+                }
+            }
             let startedAt = outstanding[agent]?.startedAt ?? now()
             if let result = await bounded(agent: agent) {
+                let owed = outstanding[agent]?.owed
                 outstanding[agent] = nil
+                if let owed { requestOwed(owed, agent: agent) }
                 results.append((agent, result))
                 scannedAt[agent] = startedAt
             } else {
@@ -1143,16 +1178,21 @@ final class AgentHub {
         onScanned?()
     }
 
-    private func begin(agent: String, _ scan: @escaping @MainActor () async -> AgentScan) {
+    private func begin(agent: String, choice: ScanChoice, _ scan: @escaping @MainActor () async -> AgentScan) {
         let task = Task { @MainActor in await scan() }
-        outstanding[agent] = Outstanding(task: task, startedAt: now())
+        outstanding[agent] = Outstanding(task: task, startedAt: now(), choice: choice)
         Task { @MainActor [weak self] in
             let result = await task.value
             guard let self, self.outstanding[agent]?.task == task else { return }
             self.outstanding[agent]?.result = result
-            self.outstanding[agent]?.waiter?.resume(result)
+            let answered = self.outstanding[agent]?.waiter?.resume(result) ?? false
             self.outstanding[agent]?.waiter = nil
+            if !answered { self.requestOwed(self.outstanding[agent]?.owed ?? choice, agent: agent) }
         }
+    }
+
+    private func requestOwed(_ owed: ScanChoice, agent: String) {
+        requestScan(rereadingTitles: owed.rereadingTitles, agents: [agent], reusingProcesses: owed.reusingProcesses)
     }
 
     func stop() {
@@ -1195,13 +1235,15 @@ final class AgentHub {
             self.continuation = continuation
         }
 
-        func resume(_ result: AgentScan?) {
+        @discardableResult
+        func resume(_ result: AgentScan?) -> Bool {
             let waiting = lock.withLock {
                 let pending = continuation
                 continuation = nil
                 return pending
             }
             waiting?.resume(returning: result)
+            return waiting != nil
         }
     }
 
@@ -1337,7 +1379,7 @@ final class AgentHub {
         lastUsed = lastUsed.filter { present.contains($0.key) }
         let listed = Set((directory.conversations + directory.disconnected).map(\.id))
         pruneHostFollows(listed: listed)
-        placeTracker?.notice(Set(placeQueries.map(\.id)))
+        placeTracker?.notice()
         let keeping = listed.union(scannedIds.values.joined()).union(liveness?.live.sessions ?? [])
         let ended = (liveness?.retained ?? retainedSessions).subtracting(keeping)
         let excluding = exclusions.isKnown ? exclusions.excluded : nil
@@ -1742,7 +1784,7 @@ final class AgentHub {
 
     private struct Named {
         var sessions: Set<String> = []
-        var greeted = false
+        var newProcess = false
     }
 
     func handle(_ events: [AgentEvent]) {
@@ -1755,7 +1797,7 @@ final class AgentHub {
             }
             guard let reported = apply(event, reconciling: named.sessions.isEmpty) else { continue }
             named.sessions.formUnion(reported.sessions)
-            named.greeted = named.greeted || reported.greeted
+            named.newProcess = named.newProcess || reported.newProcess
         }
         if !named.sessions.isEmpty { settle(named) }
     }
@@ -1773,9 +1815,8 @@ final class AgentHub {
 
     private func settle(_ named: Named) {
         refresh(namesReportedFor: named.sessions)
-        if named.greeted { readPlaces() }
         let agents = agents(of: named.sessions)
-        requestScan(rereadingTitles: true, agents: agents)
+        requestScan(rereadingTitles: true, agents: agents, reusingProcesses: !named.newProcess)
     }
 
     private func apply(_ event: AgentEvent, reconciling: Bool) -> Named? {
@@ -1825,7 +1866,7 @@ final class AgentHub {
             }
             connectorNamesAt[hello.session] = now()
             expectListing(hello)
-            named = Named(sessions: [hello.session], greeted: true)
+            named = Named(sessions: [hello.session], newProcess: processAgents.contains(hello.agent) && !knowsProcess(hello.pid))
         case .title(let session, let text):
             let name: String? = text.isEmpty ? nil : text
             connectorNamesAt[session] = now()

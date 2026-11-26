@@ -9,7 +9,7 @@ final class ExtensionDiscovery: AgentDiscovery {
     private var waiting: Set<String> = []
     private let processStart: (Int) -> ProcessStart.Reading
     private let isRunning: @Sendable (Int) -> Bool
-    private let processes: @Sendable () -> AgentProcesses.Found
+    private let processes: @Sendable (_ reusing: Bool) -> AgentProcesses.Found
     private let folder: (String) -> String?
     private let declared: () -> String?
     private var installations: [String: String] = [:]
@@ -18,7 +18,7 @@ final class ExtensionDiscovery: AgentDiscovery {
         kind: AgentKind,
         processStart: @escaping (Int) -> ProcessStart.Reading = ProcessStart.read(pid:),
         isRunning: @escaping @Sendable (Int) -> Bool = ProcessStart.isRunning(pid:),
-        processes: @escaping @Sendable () -> AgentProcesses.Found,
+        processes: @escaping @Sendable (_ reusing: Bool) -> AgentProcesses.Found,
         folder: @escaping (String) -> String? = { _ in nil },
         declared: @escaping () -> String? = { nil }
     ) {
@@ -69,9 +69,9 @@ final class ExtensionDiscovery: AgentDiscovery {
 
     func current(_ scanned: [AgentSession]) -> [AgentSession] { scanned.map { sessions[$0.id] ?? $0 } }
 
-    func scan(rereadingTitles: Bool) async -> AgentScan {
+    func scan(rereadingTitles: Bool, reusingProcesses: Bool) async -> AgentScan {
         let (pids, isRunning, processes) = (Set(sessions.values.compactMap(\.pid)), isRunning, processes)
-        let (alive, found) = await Task.detached { (pids.filter(isRunning), processes()) }.value
+        let (alive, found) = await Task.detached { (pids.filter(isRunning), processes(reusingProcesses)) }.value
         sessions = sessions.filter { $0.value.pid.map { !pids.contains($0) || alive.contains($0) } ?? true }
         inTurn.formIntersection(sessions.keys)
         waiting.formIntersection(sessions.keys)
@@ -140,7 +140,7 @@ extension AgentIntegration {
             discovery: { setups, processes in
                 ExtensionDiscovery(
                     kind: agent.kind,
-                    processes: { processes.found(rule) },
+                    processes: { processes.found(rule, reusing: $0) },
                     folder: { installation in setups.setups?.setups.first { $0.agent == agent.kind.id && $0.installation == installation }?.folder },
                     declared: {
                         ToolEnvironment.shared.folder(rule.setupVariable).flatMap { path in

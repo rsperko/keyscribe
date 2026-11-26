@@ -171,7 +171,7 @@ every rule above applies to it, with these sharpenings:
   other event, and every event while no burst is open, delivers at once, in order, and a press takes in whatever is
   waiting before it reads the conversations (`AgentHub.drainEvents`). Within a batch the hub settles hellos and titles together,
   before any event that reads the roster (`AgentHub.readsRoster`), so a burst of hellos with their titles (an app
-  launch, a host restarting with hundreds of conversations) costs one roster rebuild, one place read and one rescan.
+  launch, a host restarting with hundreds of conversations) costs one roster rebuild, at most one place read and one rescan.
   While a batch still has hellos or titles to settle, its other events leave attention to that settling rather
   than each settling it again: a burst of 430 hellos with their shown events took about 78 ms when every event did,
   and about 9 ms otherwise (debug build, 2026-11-25). A prompt a connector reports is kept while that connector
@@ -189,10 +189,12 @@ every rule above applies to it, with these sharpenings:
   containers and names once rather than searching the roster per conversation (`AgentDirectory.update`). Each agent's processes
   are classified once per process listing (`AgentProcessTable.found`), however many scans ask within it. A press
   refreshes, reads places and freezes the roster only when an agent mode is eligible for it; the refresh
-  stays, because a connector that resumes polling without a hello reports no event. Places are read when
-  something needs them (a hello, a change in the listed conversations, that press), and on a timer only while
-  Settings is open (`AgentHub.tickPlaces`): a terminal read is AppleScript or a CLI per surface, measured at
-  about 4% CPU around the clock when it ran on a timer while a conversation was connected (2026-11-11).
+  stays, because a connector that resumes polling without a hello reports no event. A press reads every
+  conversation's place, and so does a timer, only while Settings is open (`AgentHub.tickPlaces`). Otherwise a place is
+  read only when what the read would ask changed: a conversation newly listed, its process, or the environment its
+  hello reported (`AgentPlaceTracker.notice`), and only for those conversations, so a hello from a conversation
+  already read reads nothing. A terminal read is AppleScript or a CLI per surface, measured at about 4% CPU around
+  the clock when it ran on a timer while a conversation was connected (2026-11-11).
 - **Bound background work across failures and reconnects.** A timed-out request still counts as
   outstanding until it settles. Idle checks, retries, queues, timers, and stored receipts must not
   grow with session age or failure count. Nor may what the hub keeps per conversation grow with how many
@@ -989,7 +991,14 @@ every rule above applies to it, with these sharpenings:
   process id and start time, never the process id alone. Processes that could not be read make the scan
   partial, never empty, and only when the process's own name is the agent's (a wrapped `.pi-wrapped` counts);
   a candidate whose process could not be read stays listed. The process table is listed once for every agent's
-  discovery and reused until it ages out (`AgentProcessTable`), so the liveness tick never sweeps it per agent.
+  discovery and listed again once the last listing is older than its `maxAge` (`AgentProcessTable`). The one
+  exception is a scan an event asked for that says nothing about processes: a title, a turn event, or a hello from a
+  process a scan already listed. Such a scan reuses the listing however old, and a round that merges it with any other
+  request does not. The choice travels with each scan (`AgentDiscovery.scan(rereadingTitles:reusingProcesses:)`), so a
+  scan still running past its deadline keeps its own. A later round that takes over that scan's answer while wanting more
+  (a fresh listing, or titles read again) is owed that: once the running scan ends, one more scan with the stronger
+  choice follows on its own, with no new event, and still only one scan per agent runs at a time. So every other cause of a scan, and every other table, still lists
+  by age, and an agent process started with no connector appears at the next scan for any other reason.
 - **An agent process is recognized by what it runs, never by a fixed process name.** `AgentProcesses.Rule.launch`
   matches the program (its name with wrapper dots and `-wrapped` removed, or an install path the rule names) or, for a
   known runtime or shell (`Rule.runtimes`), only the script in its interpreter slot (the first argument that is not a
@@ -1068,7 +1077,11 @@ every rule above applies to it, with these sharpenings:
   install and a removal inside bb and only that check could tell them apart. Telling which copy is in front uses
   the front app's own details, never its window. Finding the thread in front reads bb's focused window once and
   hands that reading to `AgentHost.front`; which copy owns that window is decided from the app in front first, so a
-  copy whose app opened after its folder was last described is still found, and a send reads it again right before sending, never reusing it. Each enrolled data folder is its own instance:
+  copy whose app opened after its folder was last described is still found, and a send reads it again right before sending, never reusing it.
+  A scan reuses each folder's description. It describes a folder again while its app is unknown or its copy is
+  launching, after its copy launched or quit, and after a press or Settings wanted a fresh list (`BBHost.want`). A
+  change that arrives during a description is kept for the next scan, and a description started earlier never
+  replaces one started later, whichever finishes first. Each enrolled data folder is its own instance:
   its threads are keyed by that folder, and every call for them runs that folder's own command with that folder as
   `BB_DATA_DIR` and a fixed environment that turns bb's telemetry off, never the app's own. The one value taken from
   the folder is the server its runtime record names (`serverUrl`), as `BB_SERVER_URL`, only when that server is on this
@@ -1414,7 +1427,8 @@ every rule above applies to it, with these sharpenings:
   and never touches a file, so a hello, a title or a turn ending is handled at once and only asks for a
   rescan afterwards. Concurrent rescans coalesce into the one in flight plus one follow-up. A scan that
   missed its deadline stays outstanding: no second scan starts for that agent until it settles, one observer
-  waits on it however many rescans time out meanwhile, and its answer is applied by the next rescan. A
+  waits on it however many rescans time out meanwhile, and when it settles with no rescan waiting, a rescan of that
+  agent starts at once to apply its answer, so a finished answer never waits to be taken as current later. A
   stopped hub applies nothing and calls nothing back. A scan carries the time it began, and a title the
   connector reported after that time is never cleared by the scan's older registry name, even when the scan
   settles late.

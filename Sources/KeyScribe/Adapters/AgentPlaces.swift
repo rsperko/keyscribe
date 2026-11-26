@@ -128,9 +128,10 @@ final class AgentPlaceTracker {
     private let now: () -> Date
     private let queries: () -> [AgentPlaceQuery]
     private var task: Task<Void, Never>?
-    private var again = false
+    private var pendingAll = false
+    private var pendingIds: Set<String> = []
     private var lastRead = Date.distantPast
-    private var asked: Set<String> = []
+    private var readAs: [String: AgentPlaceQuery] = [:]
 
     init(reader: any AgentPlaceReading, now: @escaping () -> Date = Date.init, queries: @escaping () -> [AgentPlaceQuery]) {
         self.reader = reader
@@ -145,28 +146,44 @@ final class AgentPlaceTracker {
         if now().timeIntervalSince(lastRead) >= interval { request() }
     }
 
-    func notice(_ ids: Set<String>) {
-        if !ids.isSubset(of: asked) { request() }
+    func notice() {
+        let changed = queries().filter { readAs[$0.id] != Self.asked($0) }
+        if !changed.isEmpty { request(only: Set(changed.map(\.id))) }
     }
 
     func request() {
-        if task != nil {
-            again = true
-            return
-        }
+        pendingAll = true
+        start()
+    }
+
+    private func request(only ids: Set<String>) {
+        pendingIds.formUnion(ids)
+        start()
+    }
+
+    private func start() {
+        guard task == nil else { return }
         task = Task { @MainActor [weak self] in
-            repeat {
-                guard let self else { return }
-                self.again = false
-                let wanted = self.queries()
-                self.asked = Set(wanted.map(\.id))
-                self.lastRead = self.now()
+            while let self, self.pendingAll || !self.pendingIds.isEmpty {
+                let all = self.pendingAll, ids = self.pendingIds
+                self.pendingAll = false
+                self.pendingIds = []
+                let current = self.queries()
+                let wanted = all ? current : current.filter { ids.contains($0.id) }
+                for query in wanted { self.readAs[query.id] = Self.asked(query) }
+                if wanted.count == current.count { self.lastRead = self.now() }
                 let reader = self.reader
                 let answers = wanted.isEmpty ? [:] : await Task.detached { await reader.read(wanted) }.value
-                self.apply(answers, listed: self.asked)
-            } while self?.again == true
+                self.apply(answers, listed: Set(self.queries().map(\.id)))
+            }
             self?.task = nil
         }
+    }
+
+    private static func asked(_ query: AgentPlaceQuery) -> AgentPlaceQuery {
+        var asked = query
+        asked.placed = false
+        return asked
     }
 
     func stop() {
@@ -182,7 +199,9 @@ final class AgentPlaceTracker {
         Set(ids).subtracting(attempted)
     }
 
-    private func apply(_ answers: [String: AgentPlaceAnswer], listed: Set<String>) {
+    private func apply(_ read: [String: AgentPlaceAnswer], listed: Set<String>) {
+        let answers = read.filter { listed.contains($0.key) }
+        readAs = readAs.filter { listed.contains($0.key) }
         var next = places.filter { listed.contains($0.key) }
         let nowChecked = checked.intersection(listed).union(answers.filter { $0.value != .unknown }.keys)
         let nowAttempted = attempted.intersection(listed).union(answers.keys)

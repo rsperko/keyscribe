@@ -45,6 +45,20 @@ struct AgentProcessTableTests {
         #expect(world.listings == 2)
     }
 
+    @Test func aCallerReusingTheListingGetsItHoweverOldAndOthersListAgainByAge() {
+        let world = World()
+        let table = table(world)
+        _ = table.found(.pi)
+        world.now += 600
+        _ = table.found(.pi, reusing: true)
+        #expect(world.listings == 1)
+        _ = table.found(.pi)
+        #expect(world.listings == 2)
+        world.now += 600
+        _ = table.found(.claude, reusing: true)
+        #expect(world.listings == 2)
+    }
+
     @Test func anAgentIsClassifiedOncePerListingHoweverOftenItIsAsked() {
         final class Checks: @unchecked Sendable { var count = 0 }
         let world = World()

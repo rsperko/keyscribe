@@ -19,7 +19,7 @@ enum AgentScan: Equatable, Sendable {
 protocol AgentDiscovery: AnyObject {
     var kind: AgentKind { get }
     var watchedFolders: [URL] { get }
-    func scan(rereadingTitles: Bool) async -> AgentScan
+    func scan(rereadingTitles: Bool, reusingProcesses: Bool) async -> AgentScan
     func stillRunning(_ remembered: RememberedName) -> Bool
     func observe(_ event: AgentEvent)
     func retire(sessions: Set<String>)
@@ -30,6 +30,7 @@ protocol AgentDiscovery: AnyObject {
 }
 
 extension AgentDiscovery {
+    func scan(rereadingTitles: Bool) async -> AgentScan { await scan(rereadingTitles: rereadingTitles, reusingProcesses: false) }
     var watchedFolders: [URL] { [] }
     func observe(_ event: AgentEvent) {}
     func retire(sessions: Set<String>) {}

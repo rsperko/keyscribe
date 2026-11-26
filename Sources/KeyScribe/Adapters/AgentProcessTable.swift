@@ -32,10 +32,10 @@ final class AgentProcessTable: @unchecked Sendable {
         self.list = list
     }
 
-    func found(_ rule: AgentProcesses.Rule) -> AgentProcesses.Found {
+    func found(_ rule: AgentProcesses.Rule, reusing: Bool = false) -> AgentProcesses.Found {
         let (listing, processes, known): (Int, [TerminalProcess]?, AgentProcesses.Found?) = lock.withLock {
             if !rules.contains(where: { $0.agent == rule.agent }) { rules.append(rule) }
-            if let listed, listed.agents.contains(rule.agent), now().timeIntervalSince(listed.at) < maxAge {
+            if let listed, listed.agents.contains(rule.agent), reusing || now().timeIntervalSince(listed.at) < maxAge {
                 return (listed.generation, listed.processes, listed.found[rule.agent])
             }
             let fresh = list(rules)

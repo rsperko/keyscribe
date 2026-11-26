@@ -39,7 +39,7 @@ struct AgentPlaceTrackerTests {
         return AgentPlace(surface: "herdr", labels: labels, containers: [key, "/s#tab:t1", "/s#workspace:w1"])
     }
 
-    private func makeHub(_ reader: Reader, clock: Clock = Clock(), names: AgentNameStore? = nil)
+    private func makeHub(_ reader: any AgentPlaceReading, clock: Clock = Clock(), names: AgentNameStore? = nil)
         -> (AgentHub, Registry) {
         let registry = Registry()
         registry.entries = [ClaudeRegistryEntry(pid: 10, sessionId: "a", cwd: "/src/home", name: nil, status: "idle", waitingFor: nil, startedAt: 100)]
@@ -187,6 +187,63 @@ struct AgentPlaceTrackerTests {
         #expect(chosen.isEmpty)
         #expect(remembered["claude:a"]?.name == "architect")
         #expect(remembered["claude:a"]?.previous == ["builder"])
+    }
+
+    @Test func aConversationThatLeavesWhileItsPlaceIsReadKeepsNothingFromThatRead() async {
+        let reader = AgentDeliveryWiringTests.SlowReader()
+        let (hub, registry) = makeHub(reader)
+        registry.entries.append(ClaudeRegistryEntry(pid: 11, sessionId: "b", cwd: "/src/work", name: nil, status: "idle", waitingFor: nil, startedAt: 100))
+        await hub.rescan()
+        await settle(hub)
+        reader.answers = ["claude:a": .found(place(pane: "architect")), "claude:b": .unknown]
+        reader.blocking = true
+        let before = reader.reads
+        hub.readPlaces()
+        while reader.reads == before { await Task.yield() }
+        registry.entries.removeAll { $0.sessionId == "b" }
+        await hub.rescan()
+        reader.blocking = false
+        reader.release.signal()
+        await settle(hub)
+        #expect(hub.names["architect"] == "claude:a")
+        #expect(hub.placeTracker?.failingSince["claude:b"] == nil)
+        #expect(hub.placeTracker?.attempted.contains("claude:b") == false)
+        #expect(hub.placeTracker?.places["claude:b"] == nil)
+    }
+
+    struct Greeting: Sendable, CustomTestStringConvertible {
+        var session: String
+        var pid: Int
+        var environment: [String: String] = [:]
+        var reads: [[String]]
+        var testDescription: String { "\(session) pid \(pid) \(environment) reads \(reads)" }
+    }
+
+    @Test(arguments: [
+        Greeting(session: "claude:a", pid: 10, reads: []),
+        Greeting(session: "claude:a", pid: 10, environment: ["TERM_PROGRAM": "ghostty"], reads: [["claude:a"]]),
+        Greeting(session: "claude:a", pid: 13, reads: [["claude:a"]]),
+        Greeting(session: "claude:c", pid: 12, reads: [["claude:c"]]),
+    ])
+    func aHelloReadsThePlaceOfOnlyAConversationWhoseQuestionChanged(_ greeting: Greeting) async {
+        let reader = Reader()
+        reader.answers = ["claude:a": .found(place(pane: "architect"))]
+        let (hub, registry) = makeHub(reader)
+        registry.entries.append(ClaudeRegistryEntry(pid: 11, sessionId: "b", cwd: "/src/work", name: nil, status: "idle", waitingFor: nil, startedAt: 100))
+        await hub.rescan()
+        await settle(hub)
+        let before = reader.asked.count
+        let native = String(greeting.session.dropFirst("claude:".count))
+        registry.entries.removeAll { $0.sessionId == native }
+        registry.entries.append(ClaudeRegistryEntry(
+            pid: greeting.pid, sessionId: native, cwd: "/src/home", name: nil, status: "idle", waitingFor: nil, startedAt: 100))
+        hub.handle(.hello(.init(
+            protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: greeting.session, pid: greeting.pid,
+            environment: greeting.environment)))
+        await hub.scansSettled()
+        await settle(hub)
+        #expect(Array(reader.asked.dropFirst(before)) == greeting.reads)
+        #expect(hub.names["architect"] == "claude:a")
     }
 }
 

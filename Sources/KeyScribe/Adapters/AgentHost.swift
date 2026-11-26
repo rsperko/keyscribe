@@ -123,9 +123,11 @@ public protocol AgentHost: AnyObject {
     var queuesInHub: Bool { get }
     func confirm(request: String, at location: AgentHostLocation) async -> Bool?
     func taken(in turn: String, at location: AgentHostLocation) async -> [String]?
+    func want()
 }
 
 extension AgentHost {
+    public func want() {}
     public var takesImages: Bool { false }
     public var identityKeys: [String] { [] }
     public func location(in environment: [String: String]) -> AgentHostLocation? { nil }
@@ -213,7 +215,10 @@ final class HostDiscovery: AgentDiscovery {
 
     var isEnabled: Bool { allowed() && host.isEnabled }
 
-    func want() { wanted = true }
+    func want() {
+        wanted = true
+        host.want()
+    }
 
     func observe(_ event: AgentEvent) {
         host.observe(event)
@@ -290,7 +295,7 @@ final class HostDiscovery: AgentDiscovery {
         return overlaid([session]).first
     }
 
-    func scan(rereadingTitles: Bool) async -> AgentScan {
+    func scan(rereadingTitles: Bool, reusingProcesses: Bool) async -> AgentScan {
         guard allowed() else {
             last = nil
             answered = false

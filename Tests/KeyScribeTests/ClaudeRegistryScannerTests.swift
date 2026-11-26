@@ -19,7 +19,7 @@ struct ClaudeRegistryScannerTests {
     @Test func aScanWatchesEverySessionFolderThatExists() async throws {
         let present = try configDir()
         let absent = FileManager.default.temporaryDirectory.appendingPathComponent("ks-claude-\(UUID().uuidString)")
-        let discovery = ClaudeDiscovery(enrolled: { [present, absent] }, defaultFolder: absent, processes: { AgentProcesses.Found() })
+        let discovery = ClaudeDiscovery(enrolled: { [present, absent] }, defaultFolder: absent, processes: { _ in AgentProcesses.Found() })
         #expect(discovery.watchedFolders.isEmpty)
         _ = await discovery.scan(rereadingTitles: false)
         #expect(discovery.watchedFolders.map(\.standardizedFileURL.path) == [present.appendingPathComponent("sessions").standardizedFileURL.path])
@@ -109,7 +109,7 @@ struct ClaudeRegistryScannerTests {
     @MainActor
     @Test func aFolderThatBecomesUnreadableKeepsItsConversationsAsLastSeenWhileTheOthersStayFresh() async {
         let scans = Scans()
-        let discovery = ClaudeDiscovery(scanEach: { scans.next }, isRunning: { $0 != 99 })
+        let discovery = ClaudeDiscovery(scanEach: { _ in scans.next }, isRunning: { $0 != 99 })
         scans.next = ClaudeRegistryScanner.Scan(
             entries: [entry("one", pid: 10, in: "/a"), entry("two", pid: 20, in: "/b"), entry("gone", pid: 99, in: "/b")], unreadable: [])
         _ = await discovery.scan(rereadingTitles: false)
@@ -130,7 +130,7 @@ struct ClaudeRegistryScannerTests {
         var scan = ClaudeRegistryScanner.Scan(entries: [], unreadable: [])
         scan.processesUnreadable = true
         let fixed = scan
-        let discovery = ClaudeDiscovery(scanEach: { fixed })
+        let discovery = ClaudeDiscovery(scanEach: { _ in fixed })
         #expect(await discovery.scan(rereadingTitles: false) == .found([], AgentScanExtras(problem: ClaudeDiscovery.partialProblem)))
     }
 }

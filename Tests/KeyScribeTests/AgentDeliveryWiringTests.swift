@@ -212,13 +212,30 @@ struct AgentDeliveryWiringTests {
         var unreadable = false
         var firstPid = 10
         var firstGone = false
+        private let held = NSCondition()
+        private var _holding = false
+        var holding: Bool {
+            get { held.withLock { _holding } }
+            set { held.withLock { _holding = newValue } }
+        }
+        func waitWhileHeld() {
+            held.withLock {
+                while _holding { held.wait() }
+            }
+        }
+        func release() {
+            held.withLock {
+                _holding = false
+                held.broadcast()
+            }
+        }
     }
 
     @MainActor private final class Unconnected: AgentDiscovery {
         let kind = AgentKind.pi
         let candidates: [AgentCandidate]
         init(candidates: [AgentCandidate]) { self.candidates = candidates }
-        func scan(rereadingTitles: Bool) async -> AgentScan { .found([], AgentScanExtras(candidates: candidates)) }
+        func scan(rereadingTitles: Bool, reusingProcesses: Bool) async -> AgentScan { .found([], AgentScanExtras(candidates: candidates)) }
         func stillRunning(_ remembered: RememberedName) -> Bool { false }
     }
 
@@ -276,7 +293,8 @@ struct AgentDeliveryWiringTests {
         registry.firstWaitingFor = firstWaitingFor
         registry.firstPid = firstPid
         let entries: @Sendable () -> [ClaudeRegistryEntry]? = {
-            registry.unreadable ? nil : [
+            registry.waitWhileHeld()
+            return registry.unreadable ? nil : [
                 ClaudeRegistryEntry(pid: registry.firstPid, sessionId: "s1", cwd: "/src/keyscribe", name: nil, status: registry.firstStatus, waitingFor: registry.firstWaitingFor),
                 ClaudeRegistryEntry(pid: 11, sessionId: "s2", cwd: "/src/keyscribe", name: nil, status: "idle", waitingFor: nil),
             ].filter { !registry.firstGone || $0.sessionId != "s1" }
@@ -1131,6 +1149,46 @@ struct AgentDeliveryWiringTests {
         let pane = "/s#pane:p1"
         return ["claude:s1": .found(AgentPlace(
             surface: "herdr", labels: [.init(text: "architect", level: .pane, container: pane)], containers: [pane]))]
+    }
+
+    private struct PressOutcome: Equatable {
+        var sent: [String]
+        var texts: [String]
+        var placeReadStartedOnPress: Bool
+        var placeReads: Int
+    }
+
+    private func pressWithEveryScanHeld(after events: Int) async -> PressOutcome {
+        let reader = SlowReader()
+        reader.answers = architect()
+        let rig = await rig("architect, run the tests.", focused: "claude:s2", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        for index in 0..<events / 2 {
+            let session = index.isMultiple(of: 2) ? "claude:s1" : "claude:s2"
+            rig.hub.handle(.turnStarted(session: session, turn: "t\(index)"))
+            rig.hub.handle(.turnComplete(session: session, reason: "answer", answer: "done", turn: "t\(index)"))
+        }
+        await rig.hub.scansSettled()
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        rig.registry.holding = true
+        let before = reader.reads
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        let started = rig.hub.placeTracker?.reading != nil
+        await rig.controller.captureBringUpTask?.value
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        let outcome = PressOutcome(sent: rig.sent.map(\.1), texts: rig.texts, placeReadStartedOnPress: started, placeReads: reader.reads - before)
+        rig.registry.release()
+        await rig.hub.scansSettled()
+        return outcome
+    }
+
+    @Test func aTakeAfterLongTrafficWithEveryScanHeldGoesWhereATakeOnAFreshStartDoes() async {
+        let fresh = await pressWithEveryScanHeld(after: 0)
+        let replayed = await pressWithEveryScanHeld(after: 10_000)
+        #expect(fresh == PressOutcome(sent: ["claude:s1"], texts: ["run the tests."], placeReadStartedOnPress: true, placeReads: 1))
+        #expect(replayed == fresh)
     }
 
     @Test func aTakeWaitingOnALabelReadThatDoesNotFinishIsHeldInsteadOfGoingToTheCurrentConversation() async {

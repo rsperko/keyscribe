@@ -53,6 +53,9 @@ final class BBHost: AgentHost {
     private let windowRetryDelay: Duration
     private var launching: [String: Int] = [:]
     private var known: [String: BBBuild] = [:]
+    private var outdated: Set<String> = []
+    private var descriptions = 0
+    private var describedBy: [String: Int] = [:]
     private var copies: [String: BBBuild?] = [:]
     private var listed: [String: [BBThreads.Thread]] = [:]
 
@@ -110,11 +113,24 @@ final class BBHost: AgentHost {
     @discardableResult
     private func refreshBuilds(_ only: [String]? = nil) async -> [BBBuild] {
         let folders = only ?? self.folders
+        outdated.subtract(folders)
+        descriptions += 1
+        let started = descriptions
         let describe = self.describe
         let found = await Task.detached { folders.map { ($0, describe($0)) } }.value
-        for (folder, build) in found { known[folder] = build ?? BBBuild(folder: folder, name: BBBuilds.fallbackName) }
+        for (folder, build) in found where describedBy[folder, default: 0] < started { keep(build, for: folder, as: started) }
         copies = [:]
         return builds
+    }
+
+    private func keep(_ build: BBBuild?, for folder: String, as description: Int? = nil) {
+        if description == nil { descriptions += 1 }
+        known[folder] = build ?? BBBuild(folder: folder, name: BBBuilds.fallbackName)
+        describedBy[folder] = description ?? descriptions
+    }
+
+    func want() {
+        outdated.formUnion(folders)
     }
 
     private func environment(_ build: BBBuild) -> [String: String] {
@@ -131,6 +147,7 @@ final class BBHost: AgentHost {
             let copies = self.folders(of: app)
             guard !copies.isEmpty else { return }
             if launched { for folder in copies { self.launching[folder] = self.launchRetries } }
+            self.outdated.formUnion(copies)
             self.listChanged?(.listing)
         }
     }
@@ -183,7 +200,8 @@ final class BBHost: AgentHost {
     }
 
     func scan() async -> AgentHostScan {
-        let builds = await refreshBuilds()
+        let undescribed = folders.filter { known[$0]?.app == nil || launching[$0] != nil || outdated.contains($0) }
+        let builds = undescribed.isEmpty ? self.builds : await refreshBuilds(undescribed)
         var sessions: [AgentSession] = []
         var titles: [String: String] = [:]
         var shownInstead: [String: String] = [:]
@@ -303,7 +321,7 @@ final class BBHost: AgentHost {
     }
 
     private var describedBuilds: [BBBuild] {
-        for folder in folders where known[folder] == nil { known[folder] = describe(folder) ?? BBBuild(folder: folder, name: BBBuilds.fallbackName) }
+        for folder in folders where known[folder] == nil { keep(describe(folder), for: folder) }
         return builds
     }
 
@@ -347,17 +365,22 @@ final class BBHost: AgentHost {
         if let cached = copies[key] { return cached }
         let usual = ConnectorFolders.canonical(URL(fileURLWithPath: (home as NSString).appendingPathComponent(BBBuilds.usualFolder))).path
         if let declared = dataFolder(path) {
-            let found = known[declared].flatMap { $0.app == nil ? nil : $0 } ?? describe(declared)
-            if let found, known[declared] != nil { known[declared] = found }
+            var found = known[declared].flatMap { $0.app == nil ? nil : $0 }
+            if found == nil {
+                found = describe(declared)
+                if let found, known[declared] != nil { keep(found, for: declared) }
+            }
             if found != nil { copies[key] = .some(found) }
             return found
         }
         let runs = { (build: BBBuild) in build.app == path || (build.bundle != nil && build.bundle == bundle) }
         let notDescribed = known[usual] == nil
         let describedWithoutApp = known[usual].map { $0.app == nil } ?? false
-        let found = known[usual].flatMap { runs($0) ? $0 : nil }
-            ?? (notDescribed || describedWithoutApp ? describe(usual).flatMap { runs($0) ? $0 : nil } : nil)
-        if let found, known[usual] != nil { known[usual] = found }
+        var found = known[usual].flatMap { runs($0) ? $0 : nil }
+        if found == nil, notDescribed || describedWithoutApp {
+            found = describe(usual).flatMap { runs($0) ? $0 : nil }
+            if let found, known[usual] != nil { keep(found, for: usual) }
+        }
         copies[key] = .some(found)
         return found
     }
