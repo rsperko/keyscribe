@@ -91,3 +91,7 @@ bash corpus/record.sh --commands vb01 np_period   # (re)record specific command 
 
 Then replay: `bash corpus/compare.sh` (ranks engines over `stt/`) or
 `KeyScribe --commands-check corpus/commands`.
+
+For one speaker's folder, `python3 corpus/speaker-report.py <folder>` reads its `manifest.json` and
+`results.json` and prints a report: engines ranked, WER by section, the word substitutions the engines
+made, clips that lost their first or last word, and the hardest clips.

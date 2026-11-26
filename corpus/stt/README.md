@@ -95,5 +95,12 @@ every engine is faster than real time anyway.
 
     KeyScribeDev.app/Contents/MacOS/KeyScribe --benchmark corpus/stt [--engines …] [--fuzzy] [--raw]
 
-It prints the per-engine table (WER unbiased vs biased, bias term recall, RTF) and writes
+It prints the per-engine table (WER unbiased vs biased, a normalized WER, bias term recall, RTF) and writes
 `results.json` here; `compare.sh` adds the ranking and recommendations on top of that file.
+
+The normalized WER (`werNormalizedBiased`, `werNormalizedUnbiased`) is the same score after both sides are
+reduced to one canonical form for formatting only: digits vs spelled numbers, clock times, percent and
+currency, hyphens, and British vs American spelling (`BenchmarkScoring.normalizedWer`). The plain WER is
+unchanged and stays the number to compare against earlier runs. `results.json` also holds a `transcripts`
+object, `{engine: {clip: {biased, unbiased}}}`, with the final text each engine was scored on, so error
+classes can be studied afterwards. A run limited with `--engines` merges into the existing file.

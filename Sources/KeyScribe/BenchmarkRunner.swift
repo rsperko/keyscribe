@@ -13,6 +13,8 @@ enum BenchmarkRunner {
         var clips = 0
         var werUnbiased = 0.0
         var werBiased = 0.0
+        var werNormalizedUnbiased = 0.0
+        var werNormalizedBiased = 0.0
         var rtfSum = 0.0
         var termClips = 0
         var recallUnbiased = 0.0
@@ -49,9 +51,11 @@ enum BenchmarkRunner {
 
         var results: [String: EngineResult] = [:]
         var clipRows: [String: [String: [String: Double]]] = [:]
+        var transcripts: [String: [String: [String: String]]] = [:]
         for engine in engines {
             var r = EngineResult()
             var rows: [String: [String: Double]] = [:]
+            var engineTranscripts: [String: [String: String]] = [:]
             do {
                 try await engine.loadIfNeeded()
             } catch {
@@ -92,9 +96,17 @@ enum BenchmarkRunner {
                 r.clips += 1
                 let clipWerB = BenchmarkScoring.wer(reference: entry.text, hypothesis: biasedH)
                 let clipWerU = BenchmarkScoring.wer(reference: entry.text, hypothesis: unbiasedH)
+                let clipNormB = BenchmarkScoring.normalizedWer(reference: entry.text, hypothesis: biasedH)
+                let clipNormU = BenchmarkScoring.normalizedWer(reference: entry.text, hypothesis: unbiasedH)
                 r.werBiased += clipWerB
                 r.werUnbiased += clipWerU
-                var row = ["werBiased": clipWerB, "werUnbiased": clipWerU]
+                r.werNormalizedBiased += clipNormB
+                r.werNormalizedUnbiased += clipNormU
+                engineTranscripts[entry.id] = ["biased": biasedH, "unbiased": unbiasedH]
+                var row = [
+                    "werBiased": clipWerB, "werUnbiased": clipWerU,
+                    "werNormalizedBiased": clipNormB, "werNormalizedUnbiased": clipNormU,
+                ]
                 if dur > 0 { r.rtfSum += elapsed / dur }
                 if !entry.biasTerms.isEmpty {
                     r.termClips += 1
@@ -129,11 +141,12 @@ enum BenchmarkRunner {
             await engine.evict()
             results[engine.id] = r
             clipRows[engine.id] = rows
+            transcripts[engine.id] = engineTranscripts
         }
         printTable(results, engineOrder: engines.map(\.id))
         let jsonName = fuzzy ? "results-fuzzy.json" : "results.json"
         writeJSON(
-            results, clips: clipRows, to: dir.appendingPathComponent(jsonName),
+            results, clips: clipRows, transcripts: transcripts, to: dir.appendingPathComponent(jsonName),
             fuzzy: fuzzy, replace: only == nil)
     }
 
@@ -174,8 +187,8 @@ enum BenchmarkRunner {
 
     private static func printTable(_ results: [String: EngineResult], engineOrder: [String]) {
         func pct(_ v: Double) -> String { String(format: "%5.1f%%", v * 100) }
-        print("\nengine                  clips  WER(unbias)  WER(bias)  recall(unbias)  recall(bias)  ff(unbias)  ff(bias)  sub(bias)   RTF")
-        print(String(repeating: "─", count: 127))
+        print("\nengine                  clips  WER(unbias)  WER(bias)  WERn(bias)  recall(unbias)  recall(bias)  ff(unbias)  ff(bias)  sub(bias)   RTF")
+        print(String(repeating: "─", count: 139))
         for id in engineOrder {
             guard let r = results[id] else { continue }
             guard r.status == "ok", r.clips > 0 else {
@@ -192,10 +205,11 @@ enum BenchmarkRunner {
             print(
                 "\(id.padding(toLength: 22, withPad: " ", startingAt: 0))  "
                 + "\(String(format: "%4d", r.clips))   "
-                + "\(pct(r.werUnbiased / n))       \(pct(r.werBiased / n))      "
+                + "\(pct(r.werUnbiased / n))       \(pct(r.werBiased / n))       \(pct(r.werNormalizedBiased / n))      "
                 + "\(recallU)         \(recallB)     \(ffU)    \(ffB)    \(subB)   \(String(format: "%.3f", r.rtfSum / n))")
         }
-        print("\n(RTF < 1.0 = faster than real time. recall = fraction of bias terms recovered.")
+        print("\n(WERn = WER after normalizing formatting only: digits vs spelled numbers, times, %, $, hyphens, UK/US spellings.")
+        print(" RTF < 1.0 = faster than real time. recall = fraction of bias terms recovered.")
         print(" ff = total false fires (bias terms in the hypothesis, absent from the reference).")
         print(" sub(bias) = the substitution subset: fires whose words are NOT in the reference — different")
         print(" words the dictionary put in; the disqualifying class. ff − sub = orthographic snaps, tolerated.)")
@@ -203,7 +217,7 @@ enum BenchmarkRunner {
 
     private static func writeJSON(
         _ results: [String: EngineResult], clips: [String: [String: [String: Double]]],
-        to url: URL, fuzzy: Bool, replace: Bool
+        transcripts: [String: [String: [String: String]]], to url: URL, fuzzy: Bool, replace: Bool
     ) {
         var fresh: [String: [String: Double]] = [:]
         for (id, r) in results where r.clips > 0 {
@@ -214,6 +228,8 @@ enum BenchmarkRunner {
                 "termClips": Double(r.termClips),
                 "werUnbiased": r.werUnbiased / n,
                 "werBiased": r.werBiased / n,
+                "werNormalizedUnbiased": r.werNormalizedUnbiased / n,
+                "werNormalizedBiased": r.werNormalizedBiased / n,
                 "recallUnbiased": r.termClips > 0 ? r.recallUnbiased / tn : -1,
                 "recallBiased": r.termClips > 0 ? r.recallBiased / tn : -1,
                 "falseFiresUnbiased": r.falseFiresUnbiased,
@@ -231,7 +247,12 @@ enum BenchmarkRunner {
         let freshClips = clips.filter { !$0.value.isEmpty }
         let clipsObj = BenchmarkResultsMerge.merged(
             existing: existing.clips, fresh: freshClips, replace: replace)
-        let obj: [String: Any] = ["fuzzy": fuzzy, "engines": engineObj, "clips": clipsObj]
+        let freshTranscripts = transcripts.filter { !$0.value.isEmpty }
+        let transcriptsObj = BenchmarkResultsMerge.merged(
+            existing: existing.transcripts, fresh: freshTranscripts, replace: replace)
+        let obj: [String: Any] = [
+            "fuzzy": fuzzy, "engines": engineObj, "clips": clipsObj, "transcripts": transcriptsObj,
+        ]
         if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url)
             print("\nwrote \(url.path)")
@@ -240,12 +261,16 @@ enum BenchmarkRunner {
 
     private static func readResults(
         from url: URL
-    ) -> (engines: [String: [String: Double]], clips: [String: [String: [String: Double]]]) {
+    ) -> (
+        engines: [String: [String: Double]], clips: [String: [String: [String: Double]]],
+        transcripts: [String: [String: [String: String]]]
+    ) {
         guard let data = try? Data(contentsOf: url),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([:], [:]) }
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([:], [:], [:]) }
         return (
             obj["engines"] as? [String: [String: Double]] ?? [:],
-            obj["clips"] as? [String: [String: [String: Double]]] ?? [:]
+            obj["clips"] as? [String: [String: [String: Double]]] ?? [:],
+            obj["transcripts"] as? [String: [String: [String: String]]] ?? [:]
         )
     }
 }

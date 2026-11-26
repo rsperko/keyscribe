@@ -20,6 +20,152 @@ public enum BenchmarkScoring {
         return Double(editDistance(r, h)) / Double(r.count)
     }
 
+    public static func normalizedWer(reference: String, hypothesis: String) -> Double {
+        let r = canonicalTokens(reference)
+        let h = canonicalTokens(hypothesis)
+        guard !r.isEmpty else { return h.isEmpty ? 0 : 1 }
+        return Double(editDistance(r, h)) / Double(r.count)
+    }
+
+    static func canonicalTokens(_ s: String) -> [String] {
+        let spelled = tokens(spokenForms(s)).map { americanSpelling[$0] ?? $0 }
+        return numbersAsDigits(spelled)
+    }
+
+    private static func spokenForms(_ s: String) -> String {
+        var text = s.lowercased()
+        let rules: [(String, String)] = [
+            (#"(?<![a-z])([ap])\.m\.?(?![a-z])"#, "$1m"),
+            (#"(\d)\s*(am|pm)(?![a-z])"#, "$1 $2"),
+            (#"(\d),(?=\d{3})"#, "$1"),
+            (#"([$£€])\s*(\d+(?:\.\d+)?)"#, "$2 $1"),
+            (#"%"#, " percent "),
+            (#"(\d{1,2}):(\d{2})"#, "$1$2"),
+            (#"(\d)\.(?=\d)"#, "$1 point "),
+        ]
+        for (pattern, template) in rules {
+            text = text.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
+        }
+        return text
+            .replacingOccurrences(of: "$", with: "dollars")
+            .replacingOccurrences(of: "£", with: "pounds")
+            .replacingOccurrences(of: "€", with: "euros")
+    }
+
+    private static let ordinalWords: [String: String] = [
+        "first": "one", "second": "two", "third": "three", "fourth": "four", "fifth": "five",
+        "sixth": "six", "seventh": "seven", "eighth": "eight", "ninth": "nine", "tenth": "ten",
+        "eleventh": "eleven", "twelfth": "twelve", "thirteenth": "thirteen", "fourteenth": "fourteen",
+        "fifteenth": "fifteen", "sixteenth": "sixteen", "seventeenth": "seventeen",
+        "eighteenth": "eighteen", "nineteenth": "nineteen", "twentieth": "twenty",
+        "thirtieth": "thirty", "fortieth": "forty", "fiftieth": "fifty", "sixtieth": "sixty",
+        "seventieth": "seventy", "eightieth": "eighty", "ninetieth": "ninety",
+        "hundredth": "hundred", "thousandth": "thousand",
+    ]
+
+    private static let numberForms: Set<SpokenNumber.Form> = [.whole, .grouped, .digits]
+
+    private static func numbersAsDigits(_ words: [String]) -> [String] {
+        var out: [String] = []
+        var i = 0
+        while i < words.count {
+            if let digits = ordinalDigits(words[i]) {
+                out.append(digits)
+                i += 1
+                continue
+            }
+            let run = SpokenNumber.read(words[i...], forms: numberForms)
+            let length = run?.words ?? 0
+            if length > 0, i + length < words.count, let cardinal = ordinalWords[words[i + length]],
+               let ordinal = SpokenNumber.read(Array(words[i..<(i + length)] + [cardinal])[...], forms: numberForms),
+               ordinal.words == length + 1, let value = ordinal.value {
+                out.append("\(value)th")
+                i += length + 1
+            } else if let run, let value = run.value {
+                out.append(String(value))
+                i += run.words
+            } else if length > 0 {
+                out.append(contentsOf: words[i..<(i + length)])
+                i += length
+            } else if let cardinal = ordinalWords[words[i]],
+                      let value = SpokenNumber.read([cardinal][...], forms: numberForms)?.value {
+                out.append("\(value)th")
+                i += 1
+            } else {
+                out.append(words[i])
+                i += 1
+            }
+        }
+        return out
+    }
+
+    private static func ordinalDigits(_ word: String) -> String? {
+        for suffix in ["st", "nd", "rd", "th"] where word.hasSuffix(suffix) {
+            let digits = word.dropLast(2)
+            if !digits.isEmpty, digits.allSatisfy({ $0.isASCII && $0.isNumber }), let value = Int(digits) {
+                return "\(value)th"
+            }
+        }
+        return nil
+    }
+
+    private static let americanSpelling: [String: String] = {
+        let plain = ["", "s", "ed", "ing", "er", "ers"]
+        let stems: [(british: String, american: String, endings: [String])] = [
+            ("colour", "color", plain + ["ful", "less"]),
+            ("favour", "favor", plain + ["ite", "ites", "able"]),
+            ("neighbour", "neighbor", plain + ["hood", "hoods", "ing"]),
+            ("honour", "honor", plain + ["able"]),
+            ("labour", "labor", plain),
+            ("behaviour", "behavior", plain + ["al"]),
+            ("humour", "humor", plain),
+            ("flavour", "flavor", plain),
+            ("harbour", "harbor", plain),
+            ("centre", "center", ["", "s", "d"]),
+            ("metre", "meter", ["", "s"]),
+            ("litre", "liter", ["", "s"]),
+            ("theatre", "theater", ["", "s"]),
+            ("organis", "organiz", ["e", "es", "ed", "ing", "er", "ers", "ation", "ations"]),
+            ("realis", "realiz", ["e", "es", "ed", "ing", "ation"]),
+            ("recognis", "recogniz", ["e", "es", "ed", "ing"]),
+            ("analys", "analyz", ["e", "es", "ed", "ing"]),
+            ("apologis", "apologiz", ["e", "es", "ed", "ing"]),
+            ("prioritis", "prioritiz", ["e", "es", "ed", "ing", "ation"]),
+            ("summaris", "summariz", ["e", "es", "ed", "ing"]),
+            ("customis", "customiz", ["e", "es", "ed", "ing", "ation"]),
+            ("minimis", "minimiz", ["e", "es", "ed", "ing"]),
+            ("maximis", "maximiz", ["e", "es", "ed", "ing"]),
+            ("authoris", "authoriz", ["e", "es", "ed", "ing", "ation"]),
+            ("emphasis", "emphasiz", ["e", "es", "ed", "ing"]),
+            ("normalis", "normaliz", ["e", "es", "ed", "ing", "ation"]),
+            ("cancell", "cancel", ["ed", "ing", "ation"]),
+            ("travell", "travel", ["ed", "ing", "er", "ers"]),
+            ("labell", "label", ["ed", "ing"]),
+            ("modell", "model", ["ed", "ing"]),
+            ("fuell", "fuel", ["ed", "ing"]),
+            ("catalogue", "catalog", ["", "s"]),
+            ("dialogue", "dialog", ["", "s"]),
+            ("programme", "program", ["", "s"]),
+            ("defence", "defense", [""]),
+            ("offence", "offense", [""]),
+            ("grey", "gray", ["", "s"]),
+            ("cheque", "check", ["", "s"]),
+            ("aluminium", "aluminum", [""]),
+            ("jewellery", "jewelry", [""]),
+            ("judgement", "judgment", ["", "s"]),
+            ("ageing", "aging", [""]),
+            ("sceptical", "skeptical", [""]),
+            ("artefact", "artifact", ["", "s"]),
+        ]
+        var table = ["dollar": "dollars", "euro": "euros"]
+        for stem in stems {
+            for ending in stem.endings {
+                table[stem.british + ending] = stem.american + ending
+            }
+        }
+        return table
+    }()
+
     static func editDistance(_ a: [String], _ b: [String]) -> Int {
         if a.isEmpty { return b.count }
         if b.isEmpty { return a.count }

@@ -103,3 +103,68 @@ struct BenchmarkScoringTests {
         #expect(b == (orthographic: 0, substitution: 0))
     }
 }
+
+struct NormalizedWerTests {
+    @Test(arguments: [
+        ("4:15", "four fifteen"),
+        ("3:30 p.m.", "three thirty pm"),
+        ("at 4:15 p.m. sharp", "at four fifteen PM sharp"),
+        ("10:30", "ten thirty"),
+        ("15%", "15 percent"),
+        ("fifteen percent", "15%"),
+        ("$185", "185 dollars"),
+        ("$185", "one hundred eighty five dollars"),
+        ("$1,200", "one thousand two hundred dollars"),
+        ("2.8.1", "two point eight point one"),
+        ("3.14", "three point one four"),
+        ("30-minute", "thirty minute"),
+        ("double-check", "double check"),
+        ("3rd", "third"),
+        ("21st", "twenty first"),
+        ("47291", "four seven two nine one"),
+        ("2027", "twenty twenty seven"),
+        ("2027", "two thousand twenty seven"),
+        ("neighbour", "neighbor"),
+        ("my favourite colour", "my favorite color"),
+        ("organised", "organized"),
+        ("the centre", "the center"),
+        ("25", "twenty five"),
+    ])
+    func formattingDifferencesScoreZero(reference: String, hypothesis: String) {
+        #expect(BenchmarkScoring.normalizedWer(reference: reference, hypothesis: hypothesis) == 0)
+        #expect(BenchmarkScoring.normalizedWer(reference: hypothesis, hypothesis: reference) == 0)
+    }
+
+    @Test(arguments: [
+        ("bat", "bad"),
+        ("call", "cult"),
+        ("4:15", "four sixteen"),
+        ("15%", "16 percent"),
+        ("$185", "185 euros"),
+        ("2.8.1", "two point eight point two"),
+        ("3rd", "fourth"),
+        ("47291", "four seven two nine two"),
+        ("neighbour", "neighbors"),
+        ("three trees", "3 3s"),
+        ("color", "collar"),
+        ("25", "twenty six"),
+    ])
+    func realDifferencesStayErrors(reference: String, hypothesis: String) {
+        #expect(BenchmarkScoring.normalizedWer(reference: reference, hypothesis: hypothesis) > 0)
+    }
+
+    @Test func plainWerIsUnchangedByFormatting() {
+        #expect(BenchmarkScoring.wer(reference: "4:15", hypothesis: "four fifteen") > 0)
+        #expect(BenchmarkScoring.wer(reference: "neighbour", hypothesis: "neighbor") == 1)
+    }
+
+    @Test func normalizedWerCountsRemainingErrors() {
+        let w = BenchmarkScoring.normalizedWer(reference: "meet at 4:15 in the neighbourhood", hypothesis: "meet at four fifteen in a neighborhood")
+        #expect(abs(w - 1.0 / 6.0) < 1e-9)
+    }
+
+    @Test func emptyReferenceBehavesLikePlainWer() {
+        #expect(BenchmarkScoring.normalizedWer(reference: "", hypothesis: "stuff") == 1)
+        #expect(BenchmarkScoring.normalizedWer(reference: "", hypothesis: "") == 0)
+    }
+}

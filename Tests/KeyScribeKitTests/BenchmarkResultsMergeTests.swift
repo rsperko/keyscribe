@@ -47,4 +47,17 @@ struct BenchmarkResultsMergeTests {
         let merged = BenchmarkResultsMerge.merged(existing: existing, fresh: fresh, replace: true)
         #expect(merged == fresh)
     }
+
+    @Test func filteredRunMergesTranscriptsPerEngine() {
+        let existing: [String: [String: [String: String]]] = [
+            "a": ["01": ["biased": "old a", "unbiased": "old a"]],
+            "b": ["01": ["biased": "old b", "unbiased": "old b"]],
+        ]
+        let fresh: [String: [String: [String: String]]] = [
+            "b": ["01": ["biased": "new b", "unbiased": "new b plain"]]
+        ]
+        let merged = BenchmarkResultsMerge.merged(existing: existing, fresh: fresh, replace: false)
+        #expect(merged["a"]?["01"]?["biased"] == "old a")
+        #expect(merged["b"]?["01"]?["unbiased"] == "new b plain")
+    }
 }
