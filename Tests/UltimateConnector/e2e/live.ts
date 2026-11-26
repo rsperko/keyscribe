@@ -125,10 +125,14 @@ try {
     return ((await answer.json()) as { result: any }).result
   }
   send({ op: "status", id: "live-label", expectedSession: session, text: "\u201Clive check\u201D" })
-  for (let tries = 0; ; tries++) {
-    const { label } = await action("keyscribe", "label", { conversation: created.id })
+  const labelBy = Date.now() + 30_000
+  for (;;) {
+    const { labels } = await action("keyscribe", "next", {
+      page: "live", focused: false, conversation: null, draft: false, asking: false, labelsOf: [created.id], labels: {},
+    })
+    const label = labels?.[created.id] ?? null
     if (label === "\u201Clive check\u201D") break
-    if (tries > 60) throw new Error(`the page reads the label ${JSON.stringify(label)}`)
+    if (Date.now() > labelBy) throw new Error(`the page reads the label ${JSON.stringify(label)}`)
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
   console.log("the page reads the name to say")

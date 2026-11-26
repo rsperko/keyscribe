@@ -34,6 +34,8 @@ export type PageReport = {
   problem?: string
 }
 export type ComposeAsk = { id: string; kind?: "start"; conversation: number; text: string }
+export type Watch = { asking?: boolean; labelsOf?: unknown; labels?: unknown }
+type Waiter = { answer: (ask: ComposeAsk | null) => void; asking: boolean; ids: number[]; known: string }
 export type StartResult = { sent: boolean; withDraft?: boolean; reason?: string; detail?: string }
 export type Config = {
   protocol: number
@@ -98,7 +100,7 @@ const greetingLimit = 8
 const deliveryLimit = 64
 const recentLimit = 64
 const pageSilence = 15000
-const pageSweep = 5000
+const labelsAsked = 16
 const shownRetry = 5000
 const readAloudDeadline = 4000
 const composeStart = 1000
@@ -244,7 +246,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
   }>()
   const joins = new Map<string, Join>()
   const starts = new Map<string, PendingStart>()
-  const waiters = new Map<string, (ask: ComposeAsk | null) => void>()
+  const waiters = new Map<string, Waiter>()
   let config: Config | null = null
   let token = ""
   let launch: string | null = null
@@ -326,6 +328,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     acked = []
     polling?.cancel()
     polling = null
+    relabel()
     schedule()
   }
 
@@ -347,7 +350,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     retelling = null
     for (const join of [...joins.values()]) finishJoin(join.ask.id, false)
     for (const pending of [...starts.values()]) finishStart(pending.ask.id, { sent: false, reason: "gone" })
-    for (const waiter of waiters.values()) waiter(null)
+    for (const waiter of waiters.values()) waiter.answer(null)
     waiters.clear()
   }
 
@@ -397,6 +400,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     if (stopped) return
     connected = true
     host.log("connected to the app")
+    relabel()
     await greetAll()
   }
 
@@ -457,6 +461,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       m.quiet = false
     }
     m.helloed = true
+    relabel()
     if (!m.quiet) m.unsaid = false
     if (!m.quiet && m.prompts > greetedPrompts) {
       const prompts = m.prompts
@@ -535,6 +540,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     }
     const unknown: string[] = Array.isArray(parsed?.unknown) ? parsed.unknown : []
     for (const [id, m] of members) if (unknown.includes(instanceOf(id)) || readmitted.includes(id)) m.helloed = false
+    relabel()
     if (unknown.length || readmitted.length) return greetAll()
     tell()
     repoll()
@@ -806,6 +812,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       members.delete(id)
       removed = true
     }
+    if (removed) relabel()
     if (!connected) return
     if (added) return void greetAll()
     if (removed) {
@@ -861,7 +868,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     page: string; conversation: number | null; draft: boolean; newConversation: boolean; parent?: number; pageConversation?: string; problem?: string
   } | null {
     const now = host.now()
-    for (const [page, p] of pages) if (now - p.seenAt > pageSilence) pages.delete(page)
+    for (const [page, p] of pages) if (!waiters.has(page) && now - p.seenAt > pageSilence) pages.delete(page)
     let best: {
       page: string; conversation: number | null; draft: boolean; newConversation: boolean; parent?: number; pageConversation?: string
       focusedAt: number; problem?: string
@@ -935,18 +942,32 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     wantedPage = shown?.pageConversation
     wantedProblem = shown?.problem
     tell()
-    if (pages.size && !sweeping && !stopped) {
-      sweeping = host.after(pageSweep, () => {
-        sweeping = null
-        settleFront()
-      })
-    }
+    sweep()
   }
 
-  function page(report: PageReport) {
-    if (stopped || typeof report?.page !== "string") return
+  function sweep() {
+    sweeping?.()
+    sweeping = null
+    if (stopped) return
+    const unheld = [...pages].filter(([page]) => !waiters.has(page)).map(([, p]) => p.seenAt)
+    if (!unheld.length) return
+    const silentAt = Math.min(...unheld) + pageSilence + 1
+    sweeping = host.after(Math.max(silentAt - host.now(), 0), () => {
+      sweeping = null
+      settleFront()
+    })
+  }
+
+  function rest(page: string) {
+    const seen = pages.get(page)
+    if (seen) seen.seenAt = host.now()
+    sweep()
+  }
+
+  function page(report: PageReport): boolean {
+    if (stopped || typeof report?.page !== "string") return false
     const known = pages.get(report.page)
-    if (typeof report.seq === "number" && known?.seq !== undefined && report.seq < known.seq) return
+    if (typeof report.seq === "number" && known?.seq !== undefined && report.seq < known.seq) return false
     if (typeof report.conversation === "number" && !members.has(report.conversation)) changed()
     const focused = report.focused === true
     const conversation = typeof report.conversation === "number" ? report.conversation : null
@@ -970,6 +991,7 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       seq: typeof report.seq === "number" ? report.seq : known?.seq,
     })
     settleFront()
+    return true
   }
 
   function askStart(page: string, ask: ComposeAsk): Promise<StartResult> {
@@ -981,10 +1003,10 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       pending.stop = host.after(composeDeadline, () => finishStart(ask.id, { sent: false, reason: "gone" }))
       starts.set(ask.id, pending)
       const waiter = waiters.get(page)
-      if (waiter) {
+      if (waiter?.asking) {
         waiters.delete(page)
         pending.picked = true
-        waiter(ask)
+        waiter.answer(ask)
       }
     })
   }
@@ -1010,9 +1032,9 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
       join.stop = host.after(composeStart, () => finishJoin(ask.id, false))
       joins.set(ask.id, join)
       const waiter = waiters.get(page)
-      if (waiter) {
+      if (waiter?.asking) {
         waiters.delete(page)
-        waiter(ask)
+        waiter.answer(ask)
       }
     })
   }
@@ -1026,24 +1048,71 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     join.sent?.(sent)
   }
 
-  function nextCompose(page: string): Promise<ComposeAsk | null> {
-    if (stopped) return Promise.resolve(null)
-    for (const join of joins.values()) if (join.page === page && !join.started) return Promise.resolve(join.ask)
-    for (const pending of starts.values()) if (pending.page === page && !pending.picked) {
-      pending.picked = true
-      return Promise.resolve(pending.ask)
+  function labelOf(id: number): string | null {
+    return connected && reachable(id) ? members.get(id)?.label ?? null : null
+  }
+
+  function asked(ids: unknown): number[] {
+    return Array.isArray(ids) ? ids.filter((id): id is number => typeof id === "number").slice(0, labelsAsked) : []
+  }
+
+  function labels(ids: unknown): Record<string, string> {
+    const found: Record<string, string> = {}
+    for (const id of asked(ids)) {
+      const label = labelOf(id)
+      if (label) found[id] = label
     }
-    waiters.get(page)?.(null)
-    return new Promise((resolve) => {
-      const clear = host.after(composeWait, () => {
-        if (waiters.get(page) === answer) waiters.delete(page)
-        resolve(null)
-      })
-      const answer = (ask: ComposeAsk | null) => {
-        clear()
-        resolve(ask)
+    return found
+  }
+
+  function fingerprint(ids: number[], shown: unknown): string {
+    const given = shown && typeof shown === "object" ? shown as Record<string, unknown> : {}
+    return JSON.stringify(ids.map((id) => (typeof given[id] === "string" ? given[id] : null)))
+  }
+
+  function relabel() {
+    for (const [page, waiter] of [...waiters]) {
+      if (fingerprint(waiter.ids, labels(waiter.ids)) === waiter.known) continue
+      waiters.delete(page)
+      waiter.answer(null)
+    }
+  }
+
+  function nextCompose(page: string, watch: Watch = {}, signal?: AbortSignal): Promise<ComposeAsk | null> {
+    if (stopped || signal?.aborted) return Promise.resolve(null)
+    const before = waiters.get(page)
+    waiters.delete(page)
+    before?.answer(null)
+    const asking = watch.asking !== false
+    if (asking) {
+      for (const join of joins.values()) if (join.page === page && !join.started) return Promise.resolve(join.ask)
+      for (const pending of starts.values()) if (pending.page === page && !pending.picked) {
+        pending.picked = true
+        return Promise.resolve(pending.ask)
       }
-      waiters.set(page, answer)
+    }
+    const ids = asked(watch.labelsOf)
+    const known = fingerprint(ids, watch.labels)
+    if (fingerprint(ids, labels(ids)) !== known) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      const waiter: Waiter = {
+        asking, ids, known,
+        answer: (ask) => {
+          clear()
+          if (waiters.get(page) === waiter) waiters.delete(page)
+          if (waiters.get(page) === undefined) rest(page)
+          resolve(ask)
+        },
+      }
+      const wait = host.after(composeWait, () => waiter.answer(null))
+      const left = () => waiter.answer(null)
+      signal?.addEventListener("abort", left, { once: true })
+      const clear = () => {
+        wait()
+        signal?.removeEventListener("abort", left)
+      }
+      waiters.set(page, waiter)
+      sweep()
     })
   }
 
@@ -1076,7 +1145,9 @@ export function keyscribe(ultimate: Ultimate, host: Host, loadConfig: () => Prom
     started,
     readAloud,
     command,
-    label: (id: number) => (connected && reachable(id) ? members.get(id)?.label ?? null : null),
+    label: labelOf,
+    labels,
     get config() { return config },
+    get stopped() { return stopped },
   }
 }

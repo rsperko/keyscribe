@@ -23,6 +23,7 @@ function harness(options: {
   const logs: string[] = []
   const submitted: Array<{ id: number; text: string; images: Image[]; requestId: string }> = []
   let timerId = 0
+  let lists = 0
   let now = 1_000_000
   let submissions = 100
   const config = {
@@ -43,7 +44,10 @@ function harness(options: {
   const ultimate: Ultimate = {
     version: "",
     home,
-    list: () => state.conversations,
+    list: () => {
+      lists++
+      return state.conversations
+    },
     submit: options.submit ?? (async (id, text, images, requestId) => {
       submitted.push({ id, text, images, requestId })
       return ++submissions
@@ -130,6 +134,8 @@ function harness(options: {
       await flush()
     },
     get now() { return now },
+    get lists() { return lists },
+    get armed() { return timerId },
   }
 }
 
@@ -497,8 +503,138 @@ test("a page that stops reporting no longer counts as in front", async () => {
   await h.connect()
   h.connector.page({ page: "p1", focused: true, conversation: 61, draft: false })
   await h.flush()
-  await h.advance(20_000)
+  await h.advance(14_000)
+  assert.equal(h.events("shown").at(-1).on, true)
+  await h.advance(2_000)
   assert.equal(h.events("shown").at(-1).on, false)
+})
+
+test("a page that keeps a request held stays in front with no other report, and is forgotten once it stops asking", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.page({ page: "p1", focused: true, conversation: 61, draft: false })
+  for (let i = 0; i < 4; i++) {
+    void h.connector.nextCompose("p1", { asking: false })
+    await h.advance(25_000)
+  }
+  assert.equal(h.events("shown").at(-1).on, true)
+  await h.advance(16_000)
+  assert.equal(h.events("shown").at(-1).on, false, "silence counts from when its last wait ended")
+})
+
+const front = { page: "p1", focused: true, conversation: 61, draft: false }
+const gaps: Record<string, (h: ReturnType<typeof harness>, ask: () => void) => Promise<void>> = {
+  "nothing": async () => {},
+  "its wait ends and it asks again": async (h, ask) => { await h.advance(25_000); ask() },
+  "the clock jumps while it is held": async (h) => { await h.advance(120_000) },
+  "the clock jumps and another page reports at wake, before it asks again": async (h, ask) => {
+    await h.advance(120_000)
+    h.connector.page({ page: "p2", focused: false, conversation: 53, draft: false })
+    await h.flush()
+    assert.equal(h.events("shown").at(-1).on, true)
+    ask()
+  },
+  "another page reports while it is held, long after it was last seen": async (h) => {
+    await h.advance(20_000)
+    h.connector.page({ page: "p2", focused: false, conversation: 53, draft: false })
+  },
+  "its asks fail for a minute, then it asks again": async (h, ask) => { await h.advance(60_000); ask() },
+}
+for (const known of ["reported before its first ask", "known only from its asks, as after a restart"]) {
+  for (const [gap, run] of Object.entries(gaps)) {
+    test(`a focused page asking with its report is in front: ${known}; ${gap}`, async () => {
+      const h = harness()
+      await h.connect()
+      if (known.startsWith("reported")) h.connector.page(front)
+      const ask = () => {
+        h.connector.page(front)
+        void h.connector.nextCompose("p1", { asking: false })
+      }
+      ask()
+      await run(h, ask)
+      await h.flush()
+      const shown = h.events("shown").at(-1)
+      assert.deepEqual([shown.session, shown.on], [session(61), true])
+    })
+  }
+}
+
+test("a reconnect to the same launch answers a held request with the names it lost", async () => {
+  const h = harness()
+  await h.connect()
+  await h.command({ op: "status", id: "s1", expectedSession: session(61), text: "login fix" })
+  h.poll()!.answer(500)
+  await h.flush()
+  let answered = false
+  void h.connector.nextCompose("p1", { asking: false, labelsOf: [61], labels: {} }).then(() => { answered = true })
+  await h.flush()
+  assert.equal(answered, false)
+  await h.advance(10_000)
+  assert.equal(answered, true)
+  assert.deepEqual(h.connector.labels([61]), { 61: "login fix" })
+})
+
+test("a held request is answered as soon as a name it shows changes, appears, or goes away", async () => {
+  const h = harness()
+  await h.connect()
+  let answered = false
+  const first = h.connector.nextCompose("p1", { asking: false, labelsOf: [61], labels: {} }).then((ask) => { answered = true; return ask })
+  await h.flush()
+  assert.equal(answered, false, "the page already shows the current names")
+  await h.command({ op: "status", id: "s1", expectedSession: session(61), text: "login fix" })
+  assert.equal(answered, true, "a new name answers the held request")
+  assert.equal(await first, null)
+  assert.deepEqual(h.connector.labels([61]), { 61: "login fix" })
+
+  const stale = await h.connector.nextCompose("p1", { asking: false, labelsOf: [61], labels: {} })
+  assert.equal(stale, null, "a page asking with names older than the connector's is answered at once")
+
+  answered = false
+  const held = h.connector.nextCompose("p1", { asking: false, labelsOf: [61], labels: { 61: "login fix" } }).then(() => { answered = true })
+  await h.flush()
+  assert.equal(answered, false)
+  h.poll()!.answer(500)
+  await h.flush()
+  assert.equal(answered, true, "a lost connection answers the held request")
+  await held
+  assert.deepEqual(h.connector.labels([61]), {}, "a lost connection shows no name")
+})
+
+test("names are given only for numbers, and only for the first ones a page asks about", async () => {
+  const h = harness()
+  await h.connect()
+  await h.command({ op: "status", id: "s1", expectedSession: session(61), text: "login fix" })
+  assert.deepEqual(h.connector.labels([61, "61", null]), { 61: "login fix" })
+  assert.deepEqual(h.connector.labels([...Array.from({ length: 16 }, (_, i) => 1000 + i), 61]), {})
+  assert.deepEqual(h.connector.labels("61"), {})
+})
+
+test("a held request that is not asking for a dictation never receives one, so the dictation goes alone", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.page({ page: "p1", focused: true, conversation: 61, draft: true })
+  let handed: unknown = "pending"
+  void h.connector.nextCompose("p1", { asking: false }).then((ask) => { handed = ask })
+  await h.command({ op: "submit", id: "m1", expectedSession: session(61), text: "and the logout too", merge: true, expiresAt: h.now + 10_000 })
+  await h.advance(1500)
+  assert.equal(handed, "pending")
+  assert.equal(h.submitted[0]?.text, "and the logout too")
+})
+
+test("a page report arms one sweep for when it would go silent, never a repeating one", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.page({ page: "p1", focused: true, conversation: 61, draft: false })
+  await h.flush()
+  const armed = h.armed
+  for (let i = 0; i < 2; i++) await h.advance(5_000)
+  assert.equal(h.armed, armed, "nothing fires or re-arms before the page could have gone silent")
+  assert.equal(h.events("shown").at(-1).on, true)
+  await h.advance(6_000)
+  assert.equal(h.events("shown").at(-1).on, false)
+  const after = h.armed
+  await h.advance(100_000)
+  assert.equal(h.armed, after, "with no page left, nothing is armed")
 })
 
 test("a dictation for the conversation in front joins the draft in its box and sends them together", async () => {
@@ -662,6 +798,7 @@ test("the app retiring the extension stops it", async () => {
   await h.connect()
   await h.command({ op: "retire", id: "r", expectedSession: session(61) })
   assert.ok(h.logs.some((log) => log.includes("retired")))
+  assert.equal(h.connector.stopped, true, "a retired connector says so, so the page's held request fails and backs off")
   const before = h.requests.length
   h.state.conversations[1].busy = true
   h.connector.changed()
@@ -709,10 +846,12 @@ test("a focused page that keeps reporting the same thing is told once", async ()
   h.connector.page(page)
   await h.flush()
   const before = h.events("shown").length
+  const walks = h.lists
   await h.advance(5000)
   h.connector.page(page)
   await h.flush()
   assert.equal(h.events("shown").length, before)
+  assert.equal(h.lists, walks)
 })
 
 test("a new reason the page cannot take a take is told, also while the previous report is in flight", async () => {
@@ -972,4 +1111,28 @@ test("a page dialog reported before any member finishes hello is still sent once
   await h.flush()
   assert.equal(h.events("shown").at(-1)?.on, false)
   assert.equal(h.events("shown").at(-1)?.problem, "A dialog covers Ultimate’s composer.")
+})
+
+test("an older report from a page is refused, so its request can never displace a newer one", async () => {
+  const h = harness()
+  await h.connect()
+  assert.equal(h.connector.page({ page: "p1", seq: 2, focused: true, conversation: 61, draft: false }), true)
+  assert.equal(h.connector.page({ page: "p1", seq: 1, focused: true, conversation: 53, draft: false }), false)
+})
+
+test("a page whose held request closes is forgotten once silent, without waiting out the hold", async () => {
+  const h = harness()
+  await h.connect()
+  h.connector.page(front)
+  const controller = new AbortController()
+  let answered = false
+  void h.connector.nextCompose("p1", { asking: false }, controller.signal).then(() => { answered = true })
+  await h.advance(5_000)
+  controller.abort()
+  await h.flush()
+  assert.equal(answered, true)
+  await h.advance(14_000)
+  assert.equal(h.events("shown").at(-1).on, true)
+  await h.advance(2_000)
+  assert.equal(h.events("shown").at(-1).on, false, "gone 15 s after its request closed, not after the 25 s hold")
 })

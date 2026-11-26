@@ -40,10 +40,17 @@ writeFileSync(join(extension, "keyscribe.json"), JSON.stringify({
   setup, version: "smoke", appName: "KeyScribe", plugin: "keyscribe",
 }))
 
+const told: Array<{ op: string; on?: boolean; session?: string; at: number }> = []
 const app = createServer((request, response) => {
   if (request.url === "/poll") return void setTimeout(() => response.end("[]"), 20_000)
-  request.resume()
-  request.on("end", () => response.end("{}"))
+  let body = ""
+  request.on("data", (chunk) => { body += chunk })
+  request.on("end", () => {
+    try {
+      if (request.url === "/event") told.push({ ...JSON.parse(body), at: Date.now() })
+    } catch {}
+    response.end("{}")
+  })
 })
 await new Promise<void>((done) => app.listen(socketPath, done))
 
@@ -205,6 +212,24 @@ try {
     after(mark, (report) => report.conversation === null && /has no message box/.test(report.problem ?? "")), 60)
   await opened.close()
   console.log("the surface the project opens on is the one the page reports")
+
+  const held = new AbortController()
+  const marked = told.length
+  void fetch(origin + "/api/extensions/keyscribe/actions/next", {
+    method: "POST", headers: { origin, "content-type": "application/json" }, signal: held.signal,
+    body: JSON.stringify({
+      args: { page: "smoke-held", seq: 1, focused: true, conversation: second, draft: false, asking: false, labelsOf: [second], labels: {} },
+    }),
+  }).catch(() => undefined)
+  await until("the held page claiming focus", () => told.slice(marked).find((event) => event.op === "shown" && event.on === true), 30)
+  const closedAt = Date.now()
+  held.abort()
+  const releasing = told.length
+  const gone = await until("the closed page being forgotten",
+    () => told.slice(releasing).find((event) => event.op === "shown" && event.on === false), 45)
+  const seconds = (gone.at - closedAt) / 1000
+  assert.ok(seconds < 22, `a page whose held request closed is forgotten ${seconds.toFixed(1)} s after it closed, past its silence`)
+  console.log(`a page whose held request closes is forgotten ${seconds.toFixed(1)} s later, not after its hold`)
 
   assert.deepEqual(problems, [], "the page reported errors from the extension")
   console.log("test-ultimate-page-smoke: passed")

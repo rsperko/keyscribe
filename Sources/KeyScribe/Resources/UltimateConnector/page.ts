@@ -22,11 +22,14 @@ function urlConversation(): number | null {
   }
 }
 
-export function composerNow(shown: number | null = null, home = true): {
+function shownEditors(): HTMLTextAreaElement[] {
+  return [...document.querySelectorAll<HTMLTextAreaElement>('textarea[data-conversation]')].filter(visible)
+}
+
+export function composerNow(shown: number | null = null, home = true, drawn = shownEditors()): {
   conversation: number | null; draft: boolean; newConversation?: boolean; parent?: number; pageConversation: number | null; problem?: string
 } {
-  const editors = [...document.querySelectorAll<HTMLTextAreaElement>('textarea[data-conversation]')]
-    .filter(editor => visible(editor) && !editor.disabled && !editor.readOnly)
+  const editors = drawn.filter(editor => !editor.disabled && !editor.readOnly)
   const blocked = [...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"], dialog[open]')].some(visible)
   const focus = document.activeElement as HTMLElement | null
   const elsewhere = typesText(focus) && !editors.some(editor => editor === focus)
@@ -109,4 +112,90 @@ const automated = automatedBrowser(navigator)
 export const focusedNow = () => !automated && document.visibilityState === 'visible' && document.hasFocus()
 export type Shown = {
   conversation: number | null; draft: boolean; newConversation?: boolean; parent?: number; pageConversation: number | null; problem?: string; focused: boolean
+}
+
+export function labelsWanted(shown: number | null, drawn = shownEditors()): number[] {
+  const ids = drawn.map(editor => Number(editor.dataset.conversation)).filter(id => Number.isSafeInteger(id) && id > 0)
+  return [...new Set(shown === null ? ids : [shown, ...ids])]
+}
+
+export type PageNow = Shown & { labelsOf: number[] }
+
+export function pageNow(shown: number | null, home: boolean): PageNow {
+  const drawn = shownEditors()
+  return {
+    ...composerNow(shown, home, drawn), focused: focusedNow(), labelsOf: labelsWanted(shown, drawn),
+  }
+}
+
+export function reportOf(now: PageNow): Shown {
+  const report: Partial<PageNow> = { ...now }
+  delete report.labelsOf
+  return report as Shown
+}
+
+let labels: Record<string, string> = {}
+const labelListeners = new Set<() => void>()
+
+export function showLabels(next: Record<string, string> | undefined) {
+  const value = next ?? {}
+  if (JSON.stringify(value) === JSON.stringify(labels)) return
+  labels = value
+  for (const listener of labelListeners) listener()
+}
+
+export function labelsFor(ids: number[]): Record<string, string> {
+  return Object.fromEntries(ids.filter(id => labels[String(id)] !== undefined).map(id => [String(id), labels[String(id)]]))
+}
+
+export function labelOf(conversation: number | null): string | null {
+  return conversation === null ? null : labels[String(conversation)] ?? null
+}
+
+export function subscribeLabels(listener: () => void) {
+  labelListeners.add(listener)
+  return () => { labelListeners.delete(listener) }
+}
+
+export const retryPause = 2000
+export const retryLimit = 10000
+
+type Labels = Record<string, string>
+
+export type Reporting<Ask> = {
+  report: Shown
+  labelsOf: number[]
+  signal: AbortSignal
+  tell: (labelsOf: number[]) => Promise<{ labels?: Labels }>
+  ask: (asking: boolean, labelsOf: number[], labels: Labels) => Promise<{ ask: Ask | null; labels?: Labels }>
+  handle: (ask: Ask) => Promise<void>
+}
+
+const later = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+export async function keepReporting<Ask>({ report, labelsOf, signal, tell, ask, handle }: Reporting<Ask>) {
+  const asking = report.focused && (report.draft || report.newConversation === true)
+  let pause = retryPause
+  while (!signal.aborted) {
+    let given: Ask | null = null
+    try {
+      if (report.focused) {
+        const answer = await ask(asking, labelsOf, labelsFor(labelsOf))
+        if (signal.aborted) return
+        showLabels(answer.labels)
+        given = answer.ask
+      } else {
+        const answer = await tell(labelsOf)
+        if (!signal.aborted) showLabels(answer.labels)
+        return
+      }
+      pause = retryPause
+    } catch {
+      if (signal.aborted) return
+      await later(pause)
+      pause = Math.min(pause * 2, retryLimit)
+      continue
+    }
+    if (given && asking && !signal.aborted) await handle(given)
+  }
 }

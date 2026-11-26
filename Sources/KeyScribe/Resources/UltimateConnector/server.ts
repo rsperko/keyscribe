@@ -377,7 +377,7 @@ function start(host: Host, config: Config) {
     list: rows,
     page: async (report: PageReport) => {
       if (verifiesShown(host, report, stillFresh()) && report.conversation !== null) await rememberFresh(report.conversation)
-      connector.page(report)
+      return connector.page(report)
     },
     started: async (id: string, page: string, result: { sent: boolean; withDraft?: boolean; reason?: string; detail?: string; conversation?: number }) => {
       if (result.sent && typeof result.conversation === 'number') await rememberFresh(result.conversation)
@@ -416,10 +416,36 @@ export function opener<T extends { close(): void }>(
   }
 }
 
-export const userActions = ['list', 'page', 'next', 'composed', 'started', 'readAloud', 'label']
+export const userActions = ['list', 'page', 'next', 'composed', 'started', 'readAloud']
 
 function args(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+type Serving = { page(report: PageReport): Promise<boolean>; connector: Pick<ReturnType<typeof keyscribe>, 'stopped' | 'labels' | 'nextCompose'> }
+
+export async function askNext(serving: Serving | null, value: unknown, signal?: AbortSignal) {
+  const report = pageReport(value)
+  const { asking, labelsOf, labels } = args(value)
+  if (!serving || serving.connector.stopped) throw new Error('The Ultimate connector is not serving this project.')
+  if (!(await serving.page(report))) return { ask: null, labels: serving.connector.labels(labelsOf) }
+  const ask = await serving.connector.nextCompose(report.page, { asking: asking !== false, labelsOf, labels }, signal)
+  return { ask, labels: serving.connector.labels(labelsOf) }
+}
+
+function pageReport(value: unknown): PageReport {
+  const { page, seq, focused, conversation, draft, newConversation, parent, pageConversation, problem } = args(value)
+  if (typeof page !== 'string') throw new Error('Expected a page')
+  const report: PageReport = {
+    page, focused: focused === true, conversation: typeof conversation === 'number' ? conversation : null, draft: draft === true,
+    ...(typeof seq === 'number' && Number.isFinite(seq) ? { seq } : {}),
+    ...(newConversation === true ? { newConversation: true } : {}),
+    ...(typeof parent === 'number' ? { parent } : {}),
+    ...(typeof pageConversation === 'number' ? { pageConversation } : {}),
+    ...(typeof problem === 'string' ? { problem: problem.slice(0, 300) } : {}),
+  }
+  if (traceTarget) trace('page->ext', summarizeTraceRecord(report as unknown as Record<string, unknown>))
+  return report
 }
 
 export const actions = {
@@ -428,24 +454,12 @@ export const actions = {
     return current.list()
   },
   async page(value: unknown) {
-    const { page, seq, focused, conversation, draft, newConversation, parent, pageConversation, problem } = args(value)
-    if (typeof page !== 'string') throw new Error('Expected a page')
-    const report: PageReport = {
-      page, focused: focused === true, conversation: typeof conversation === 'number' ? conversation : null, draft: draft === true,
-      ...(typeof seq === 'number' && Number.isFinite(seq) ? { seq } : {}),
-      ...(newConversation === true ? { newConversation: true } : {}),
-      ...(typeof parent === 'number' ? { parent } : {}),
-      ...(typeof pageConversation === 'number' ? { pageConversation } : {}),
-      ...(typeof problem === 'string' ? { problem: problem.slice(0, 300) } : {}),
-    }
-    if (traceTarget) trace('page->ext', summarizeTraceRecord(report as unknown as Record<string, unknown>))
+    const report = pageReport(value)
     await current?.page(report)
-    return {}
+    return { labels: current?.connector.labels(args(value).labelsOf) ?? {} }
   },
-  async next(value: unknown) {
-    const { page } = args(value)
-    if (typeof page !== 'string') throw new Error('Expected a page')
-    return { ask: (await current?.connector.nextCompose(page)) ?? null }
+  async next(value: unknown, context?: { signal?: AbortSignal }) {
+    return askNext(current, value, context?.signal)
   },
   async composed(value: unknown) {
     const { id, page, draft } = args(value)
@@ -463,11 +477,6 @@ export const actions = {
       ...(typeof conversation === 'number' ? { conversation } : {}),
     })
     return { ok: ok ?? false }
-  },
-  async label(value: unknown) {
-    const { conversation } = args(value)
-    if (typeof conversation !== 'number') throw new Error('Expected a conversation')
-    return { label: current?.connector.label(conversation) ?? null }
   },
   async readAloud(value: unknown) {
     const { conversation, on } = args(value)

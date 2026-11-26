@@ -1,6 +1,8 @@
 import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-js'
 import { joined, runsAsCommand } from './keyscribe.ts'
-import { composerNow, draftOf, editorOf, focusedNow, heartbeat, subscribe, type Shown } from './page.ts'
+import {
+  draftOf, editorOf, keepReporting, labelOf, pageNow, reportOf, subscribe, subscribeLabels, type PageNow, type Shown,
+} from './page.ts'
 import { actionRef, api, defineWebExtension, fillComposer, setUiState, useConversationId, useSurface } from '@/sdk/solid'
 
 const extension = 'keyscribe'
@@ -8,21 +10,22 @@ type Ask = { id: string; kind?: 'start'; conversation: number; text: string }
 const PageAction = actionRef<{
   page: string; seq?: number; focused: boolean; conversation: number | null; draft: boolean
   newConversation?: boolean; parent?: number; pageConversation?: number | null; problem?: string
-}, object>(extension, 'page')
-const NextAction = actionRef<{ page: string }, { ask: Ask | null }>(extension, 'next')
+  labelsOf?: number[]
+}, { labels?: Record<string, string> }>(extension, 'page')
+const NextAction = actionRef<
+  Shown & { page: string; seq: number; asking: boolean; labelsOf: number[]; labels: Record<string, string> },
+  { ask: Ask | null; labels?: Record<string, string> }
+>(extension, 'next')
 const ComposedAction = actionRef<{ id: string; page: string; draft: string }, { sent: boolean }>(extension, 'composed')
 const StartedAction = actionRef<{
   id: string; page: string; sent: boolean; withDraft?: boolean; reason?: string; detail?: string; conversation?: number
 }, { ok: boolean }>(extension, 'started')
 const SideChatOpenAction = actionRef<{ text: string }, { id: number }>('side-chat', 'open')
 const ReadAloudAction = actionRef<{ conversation: number; on: boolean }, { message: string }>(extension, 'readAloud')
-const LabelAction = actionRef<{ conversation: number }, { label: string | null }>(extension, 'label')
 
 const page = Math.random().toString(36).slice(2, 12)
 let reportSeq = 0
 const answerShown = 6000
-const retryPause = 2000
-
 
 function shownConversation(): () => number | null {
   const conversationId = useConversationId()
@@ -44,13 +47,10 @@ function Reporter() {
   })
   const snapshot = createMemo(() => {
     changed()
-    return JSON.stringify({ ...composerNow(conversationShown(), surface() === 'agent'), focused: focusedNow() })
+    return JSON.stringify(pageNow(conversationShown(), surface() === 'agent'))
   })
-  const shown = createMemo(() => JSON.parse(snapshot()) as Shown)
-  const asking = createMemo(() => {
-    const { focused, draft, newConversation } = shown()
-    return focused && (draft || newConversation === true)
-  })
+  const now = createMemo(() => JSON.parse(snapshot()) as PageNow)
+  const watched = createMemo(() => JSON.stringify({ report: reportOf(now()), labelsOf: now().labelsOf }))
 
   onSettled(() => {
     const leave = () => {
@@ -64,42 +64,29 @@ function Reporter() {
     return () => window.removeEventListener('pagehide', leave)
   })
 
-  createEffect(shown, (now) => {
+  createEffect(watched, (watch) => {
+    const { report, labelsOf } = JSON.parse(watch) as { report: Shown; labelsOf: number[] }
     const controller = new AbortController()
-    const report = () => api.action(PageAction, { page, seq: ++reportSeq, ...now }, { signal: controller.signal }).catch(() => undefined)
-    void report()
-    const timer = now.focused ? window.setInterval(report, heartbeat) : undefined
-    return () => {
-      controller.abort()
-      window.clearInterval(timer)
-    }
-  })
-
-  createEffect(asking, (active) => {
-    if (!active) return undefined
-    const controller = new AbortController()
-    void (async () => {
-      while (!controller.signal.aborted) {
-        let ask: Ask | null = null
-        try {
-          ask = (await api.action(NextAction, { page }, { signal: controller.signal })).ask
-        } catch {
-          if (controller.signal.aborted) return
-          await new Promise((resolve) => window.setTimeout(resolve, retryPause))
-          continue
-        }
-        if (!ask || controller.signal.aborted) continue
+    const { signal } = controller
+    void keepReporting<Ask>({
+      report,
+      labelsOf,
+      signal,
+      tell: (labelsOf) => api.action(PageAction, { page, seq: ++reportSeq, ...report, labelsOf }, { signal }),
+      ask: (asking, labelsOf, labels) =>
+        api.action(NextAction, { page, seq: ++reportSeq, ...report, asking, labelsOf, labels }, { signal }),
+      handle: async (ask) => {
         if (ask.kind === 'start') {
           const editor = editorOf(ask.conversation)
           if (!editor || !editor.closest('[data-side-mode="side"]')) {
             await api.action(StartedAction, { id: ask.id, page, sent: false, reason: 'gone' }).catch(() => undefined)
-            continue
+            return
           }
           const before = editor.value
           const hasDraft = before.trim() !== ''
           if (hasDraft && (runsAsCommand(before) || runsAsCommand(ask.text))) {
             await api.action(StartedAction, { id: ask.id, page, sent: false, reason: 'draft' }).catch(() => undefined)
-            continue
+            return
           }
           const text = hasDraft ? joined(before, ask.text) : ask.text
           let opened: { id: number }
@@ -108,7 +95,7 @@ function Reporter() {
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error)
             await api.action(StartedAction, { id: ask.id, page, sent: false, reason: 'failed', detail: detail.slice(0, 200) }).catch(() => undefined)
-            continue
+            return
           }
           try {
             if (hasDraft && editorOf(ask.conversation)?.value === before) fillComposer(ask.conversation, '')
@@ -116,15 +103,15 @@ function Reporter() {
             setUiState('ext.side-chat.front', opened.id)
           } catch {}
           await api.action(StartedAction, { id: ask.id, page, sent: true, withDraft: hasDraft, conversation: opened.id }).catch(() => undefined)
-          continue
+          return
         }
         const before = draftOf(ask.conversation)
         const { sent } = await api
           .action(ComposedAction, { id: ask.id, page, draft: before })
           .catch(() => ({ sent: false }))
         if (sent && editorOf(ask.conversation) && draftOf(ask.conversation) === before) fillComposer(ask.conversation, '')
-      }
-    })()
+      },
+    })
     return () => controller.abort()
   })
 
@@ -133,21 +120,16 @@ function Reporter() {
 
 function Name() {
   const conversation = shownConversation()
-  const [label, setLabel] = createSignal<string | null>(null)
-  createEffect(conversation, (id) => {
-    setLabel(null)
-    if (id === null) return undefined
-    let live = true
-    const read = () => {
-      if (document.visibilityState !== 'visible') return
-      api.action(LabelAction, { conversation: id }).then((answer) => live && setLabel(answer.label), () => undefined)
-    }
-    read()
-    const timer = window.setInterval(read, heartbeat)
-    return () => {
-      live = false
-      window.clearInterval(timer)
-    }
+  const [labelsChanged, setLabelsChanged] = createSignal(0)
+  onSettled(() => {
+    const bump = () => setLabelsChanged(count => count + 1)
+    const unsubscribe = subscribeLabels(bump)
+    bump()
+    return unsubscribe
+  })
+  const label = createMemo(() => {
+    labelsChanged()
+    return labelOf(conversation())
   })
   return <Show when={label()}>{(text) => <span class="truncate text-muted-foreground">{text()}</span>}</Show>
 }

@@ -30,13 +30,11 @@ struct SourceInvariantsTests {
             pattern: #"\bsetInterval\("#,
             allowed: [
                 "Sources/KeyScribe/Resources/UltimateConnector/page.ts": 1,
-                "Sources/KeyScribe/Resources/UltimateConnector/web.solid.tsx": 2,
-                "Sources/KeyScribe/Resources/UltimateConnector/web.tsx": 2,
                 "Sources/KeyScribe/Resources/BBPlugin/app.tsx": 1,
             ],
             reason: "A connector runs inside the user's agent and wakes it for nothing while nothing changes; it reports "
-                + "on events and waits on held requests or a watched folder. The page heartbeats allowed here stand in for "
-                + "a liveness signal the hosts' pages do not have yet (docs/development/areas/voice-commands.md).")
+                + "on events and waits on held requests or a watched folder. A page re-read allowed here catches what the "
+                + "page's own events miss, such as a dialog shown by a style change alone (docs/development/areas/voice-commands.md).")
         #expect(rule.violations(in: sources).isEmpty, "\(rule.reason)\n\(rule.violations(in: sources).joined(separator: "\n"))")
     }
 

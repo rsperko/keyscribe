@@ -25,6 +25,44 @@ test("a connector that is not ready reports uncertainty instead of an empty rost
   await assert.rejects(server.actions.list(), /not ready/)
 })
 
+test("a page's ask whose report lookup finishes after a newer ask's never registers or displaces the newer one", async () => {
+  const gates = new Map<number, () => void>()
+  let bothWaiting: () => void = () => {}
+  const waiting = new Promise<void>((resolve) => { bothWaiting = resolve })
+  let newest = 0
+  const registered: number[] = []
+  const serving = {
+    page: async (report: { seq?: number }) => {
+      await new Promise<void>((resolve) => {
+        gates.set(report.seq!, resolve)
+        if (gates.size === 2) bothWaiting()
+      })
+      if (report.seq! < newest) return false
+      newest = report.seq!
+      return true
+    },
+    connector: {
+      stopped: false,
+      labels: () => ({}),
+      nextCompose: async (_page: string, watch: { asking?: boolean }) => { registered.push(watch.asking ? 2 : 1); return null },
+    },
+  }
+  const older = server.askNext(serving as any, { page: "p", seq: 1, focused: true, conversation: 61, draft: false, asking: false })
+  const newer = server.askNext(serving as any, { page: "p", seq: 2, focused: true, conversation: 61, draft: true, asking: true })
+  await waiting
+  gates.get(2)!()
+  await newer
+  gates.get(1)!()
+  assert.deepEqual(await older, { ask: null, labels: {} })
+  assert.deepEqual(registered, [2])
+})
+
+test("a page's held request fails while no connector serves the project, so the page backs off instead of asking again at once", async () => {
+  await assert.rejects(server.actions.next({ page: "p", focused: true, conversation: 61, draft: false, asking: false, labelsOf: [61] }), /not serving/)
+  assert.deepEqual(await server.actions.page({ page: "p", focused: false, conversation: null, draft: false, labelsOf: [61] }), { labels: {} })
+  assert.ok(!server.userActions.includes("label"))
+})
+
 test("one rule lists every writable sidebar conversation with what the app needs, and says why the rest are not listed", () => {
   const kinds: Array<[string, any, any]> = [
     ["root", { id: 1, cwd: "/w" }, "Ultimate shows its root context, which has no writable composer."],

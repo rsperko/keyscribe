@@ -133,7 +133,7 @@ every rule above applies to it, with these sharpenings:
   and a poll that states its connector's wait is held for minutes (`AgentBridgeServer.longestPollHold`), since a
   hang-up is seen at once; a connector
   outside the app wakes its agent only for events too: no repeating timer (`SourceInvariantsTests`, which lists the
-  page heartbeats still allowed), and a ready-file folder watch rather than retries while the app is closed where the
+  page timers still allowed), and a ready-file folder watch rather than retries while the app is closed where the
   agent's runtime offers one;
   a tick or a poll does work only for sessions with a command waiting (`AgentCommandQueue.waitingSessions`), and the
   hub reads every conversation's liveness in one call (`AgentTransport.liveness`). The
@@ -572,8 +572,21 @@ every rule above applies to it, with these sharpenings:
   an installed extension as not working when an Ultimate project under that user folder has been running past
   a startup grace and the extension's `list` action does not answer (`UltimateHost.silentProject`), which covers
   the server half only. The page half is judged where it matters, at a take: a project page verified in front
-  that has not claimed focus within a few heartbeats (`UltimateHost.pageReportsWithin`) holds the take as a
-  page that is not reporting (`pageSilent`), not as one that shows nothing. It
+  that has not claimed focus lately (`UltimateHost.pageReportsWithin`) holds the take as a
+  page that is not reporting (`pageSilent`), not as one that shows nothing. The focused page keeps one `next` request
+  held, and each one carries its full report, so a server half that restarted, a page forgotten during a sleep, or a
+  report that failed is stated again by the next ask: liveness and state travel on the same request. The server half
+  answers it with a dictation to join when the page asks for one, at once when a name the page shows changes, and
+  otherwise at its wait, and the page asks again; an ask whose report is older than one already taken is answered at
+  once and never replaces the newer one. While no connector serves the project the request fails and the page backs
+  off, to a short cap so a page is stated again soon after an outage (`keepReporting` in `page.ts`, shared by both page
+  facets). Ultimate signals an action when its request closes, which ends the hold, so a page that dies without
+  `pagehide` is forgotten `pageSilence` after its request closed (15.0 s, against 39.8 s with the signal ignored;
+  measured against Ultimate `1c5d0565`, 2026-11-25, by `make test-ultimate-page-smoke`, which checks it). Only the focused page holds one, since the page's own event stream already takes one of the browser's few
+  connections per origin for each open tab. Any other page reports on change, retrying a report that fails. A page
+  with a request held is never forgotten; one with none is forgotten once silent for `pageSilence`, counted from its
+  last report or the end of its last wait, with one timer set for the earliest such expiry rather than a repeating
+  sweep. It
   observes, never hooks: commits for input, reply and placement records and the task graph for busy, so nothing it
   does sits in a run's path and a crash replays nothing. It submits with `whenBusy: 'steer'` and the bridge request id
   as Ultimate's `requestId`, so a repeated command never submits twice, and emits Ultimate's `user.input` event, which
@@ -643,7 +656,10 @@ every rule above applies to it, with these sharpenings:
   tab. A rename in KeyScribe retitles a branch through the conversations
   extension's `rename` action on the same loopback API (`UltimateHost.rename`); a standing agent's `@name` title is
   fixed in Ultimate, so its rename stays in KeyScribe. The extension takes `label` and shows the name to say in
-  `composer.status`, read through its `label` action while the page is visible. Measured against Ultimate `1c5d0565`
+  `composer.status`, which the answers to the page's reports and to its held `next` request carry for the visible
+  message boxes' conversations, the one shown first. The held request is answered as soon as one of those names
+  changes, so the focused page never polls for it; a page without focus updates its names with its next report, at
+  the latest when it gains focus. Measured against Ultimate `1c5d0565`
   (2026-11-19); `make test-ultimate-live` drives a real headless Ultimate through all of it.
 - **A dictation for the conversation in front is typed into it, so it is the user's own prompt.** A connector's own
   prompt runs once the agent is idle (Claude Code queues a plugin's prompt behind the turn; measured on 2.1.325,
