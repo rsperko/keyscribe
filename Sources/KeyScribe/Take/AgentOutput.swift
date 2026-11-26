@@ -50,7 +50,7 @@ final class AgentOutput {
     }
 
     func recordSpokenReply(
-        _ heard: SpokenResultOutput.Heard, at now: Date = Date(), alone: () -> (mode: String, retentionDays: Int)?,
+        _ heard: SpokenResultOutput.Heard, at now: Date = Date(), alone: () -> (mode: String, retentionDays: Int?)?,
         then saved: @escaping @MainActor (_ entry: String?) -> Void = { _ in }
     ) {
         guard keepsHistory(), reporter.keepsHistory else { return saved(nil) }

@@ -146,7 +146,7 @@ final class ModesSettingsModel: ObservableObject {
         var mode = Mode(id: ModeStore.newID(for: name, existing: modes.map(\.id)), name: name)
         mode.trailing = .space
         mode.commands.liveEdits = true
-        save(mode)
+        guard save(mode) else { return }
         selectedID = mode.id
         lastCreatedId = mode.id
         awaitingInitialName = mode.id
@@ -163,7 +163,7 @@ final class ModesSettingsModel: ObservableObject {
         mode.commands.liveEdits = true
         mode.enabled = false
         mode.aiRewrite = Mode.AIRewrite(connection: connectionId, prompt: "")
-        save(mode)
+        guard save(mode) else { return }
         selectedID = mode.id
         lastCreatedId = mode.id
         awaitingInitialName = mode.id
@@ -198,7 +198,7 @@ final class ModesSettingsModel: ObservableObject {
         copy.seedId = nil
         copy.seedVersion = nil
         copy.triggerKeys = []
-        save(copy)
+        guard save(copy) else { return }
         selectedID = copy.id
     }
 
@@ -227,8 +227,9 @@ final class ModesSettingsModel: ObservableObject {
         if mode.id == awaitingInitialName {
             let newId = ModeStore.newID(for: mode.name, existing: modes.filter { $0.id != mode.id }.map(\.id))
             if newId != mode.id {
+                guard rename(mode, to: newId) else { return false }
                 awaitingInitialName = nil
-                return rename(mode, to: newId)
+                return true
             }
         }
         return save(mode)

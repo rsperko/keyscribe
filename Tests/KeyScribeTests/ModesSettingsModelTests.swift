@@ -427,4 +427,52 @@ struct ModesSettingsModelTests {
         #expect(!model.fragmentIds.contains(id))
         #expect(model.selected?.aiRewrite?.fragments == [])
     }
+
+    private func readOnly(_ dir: URL, _ on: Bool) throws {
+        try FileManager.default.setAttributes([.posixPermissions: on ? 0o555 : 0o755], ofItemAtPath: dir.path)
+    }
+
+    @Test(arguments: ["create", "createWithConnection", "duplicate"])
+    func aNewModeThatCouldNotBeSavedIsNeitherSelectedNorAwaitingItsName(_ action: String) throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? readOnly(modesDir, false); try? FileManager.default.removeItem(at: support) }
+        try ModeStore.write(Mode(id: "notes", name: "Notes"), to: modesDir)
+        model.reload(force: true)
+        model.selectedID = "notes"
+        try readOnly(modesDir, true)
+
+        switch action {
+        case "create": model.create()
+        case "createWithConnection": model.createWithConnection(connectionId: "fast")
+        default: model.duplicate(try #require(model.modes.first { $0.id == "notes" }))
+        }
+
+        #expect(model.selectedID == "notes")
+        #expect(model.lastCreatedId == nil)
+        #expect(model.modes.map(\.id).filter { !$0.hasPrefix("_") } == ["notes"])
+        #expect(model.notice != nil)
+        try readOnly(modesDir, false)
+        model.create()
+        var named = try #require(model.selected)
+        named.name = "Email"
+        model.update(named)
+        #expect(tomls(in: modesDir) == ["notes", "email"])
+    }
+
+    @Test func aFirstNameThatCouldNotBeSavedIsStillAppliedAsTheFileNameOnTheNextTry() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? readOnly(modesDir, false); try? FileManager.default.removeItem(at: support) }
+        model.create()
+        var named = try #require(model.selected)
+        named.name = "Email"
+        try readOnly(modesDir, true)
+
+        #expect(!model.update(named))
+        #expect(tomls(in: modesDir) == ["new-mode"])
+
+        try readOnly(modesDir, false)
+        #expect(model.update(named))
+        #expect(tomls(in: modesDir) == ["email"])
+        #expect(model.selectedID == "email")
+    }
 }

@@ -71,6 +71,7 @@ final class HistoryPaneModel: ObservableObject {
     static var loadLimitText: String { Self.loadLimit.formatted() }
     @Published private(set) var hasStoredHistory = false
     @Published private(set) var retentionFailure: String?
+    var deletableDays: (Int) -> Int? = { _ in nil }
 
     private static let loadLimit = 1000
     private var rows: [HistoryRow] = []
@@ -363,17 +364,19 @@ final class HistoryPaneModel: ObservableObject {
         ).isEmpty
     }
 
-    // Prune the store to the new retention now and re-read, so a lowered retention drops expired rows
-    // from the visible list immediately instead of leaving them until the next pane switch. Idempotent
-    // with the AppDelegate's settings-driven prune (deletes already-gone files → no-op).
-    func applyRetention(days: Int) {
-        sweepRetention(days: days)
-        reload()
-    }
-
     func sweepRetention(days: Int) {
-        retentionFailure = store.applyRetention(retentionDays: days).succeeded ? nil
-            : "Some history older than this could not be deleted and is still on this Mac. It is tried again the next time you open History."
+        let deletable = deletableDays(days)
+        let sweep = deletable.map { store.applyRetention(retentionDays: $0) }
+        sweep?.logFailures()
+        if sweep?.succeeded == false {
+            retentionFailure = "Some history older than this could not be deleted and is still on this Mac. It is tried again the next time you open History."
+        } else if deletable != days, wouldRemoveHistory(retainingDays: days) {
+            retentionFailure = deletable == nil
+                ? "Older history stays on this Mac until \(SettingsStore.fileName) can be read."
+                : "Older history stays on this Mac until this setting is saved."
+        } else {
+            retentionFailure = nil
+        }
     }
 
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
@@ -920,7 +923,6 @@ struct HistoryPaneView: View {
 
     private func commitRetention(_ days: Int) {
         settings.retentionDays = days
-        model.applyRetention(days: days)
     }
 
     private var pendingRetentionLabel: String {

@@ -31,7 +31,9 @@ struct HistoryRetentionSweepTests {
             result: "old", outcome: .inserted, cloudInvolved: false, redaction: false, contextCategories: [])
     }
 
-    private func makeController(supportDir: URL, history: HistoryStore) -> DictationController {
+    private func makeController(
+        supportDir: URL, history: HistoryStore, deletable: ((Int) -> Int?)? = { $0 }
+    ) -> DictationController {
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
         try? ModeStore.write(Mode(id: "m", name: "M"), to: modesDir)
@@ -41,7 +43,7 @@ struct HistoryRetentionSweepTests {
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let provider = try! SpeechEngineProvider(engines: [FixedEngine()], activeId: "fixed")
-        return DictationController(
+        let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: nil, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
@@ -50,6 +52,25 @@ struct HistoryRetentionSweepTests {
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted },
             accessibilityGranted: { true })
+        if let deletable { controller.deletableHistoryDays = deletable }
+        return controller
+    }
+
+    @Test func aControllerNobodyToldWhatItMayDeleteKeepsExpiredHistory() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-retention-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let history = HistoryStore(supportDir: supportDir)
+        try? history.append(expiredEntry(), today: expiredDay)
+        let expiredFile = history.dir.appendingPathComponent("\(expiredDay).jsonl")
+
+        let controller = makeController(supportDir: supportDir, history: history, deletable: nil)
+        let entriesBefore = history.entries().count
+        await dictate(controller)
+
+        #expect(await pollUntil { history.entries().count > entriesBefore })
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(exists(expiredFile))
     }
 
     private func dictate(_ controller: DictationController) async {

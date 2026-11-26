@@ -142,4 +142,82 @@ struct AppDelegateHotkeyConflictTests {
     @Test func noShadowedGlobalsIsNotAConflict() {
         #expect(!AppDelegate.hotkeyConflictDetected(shadowed: ["some-mode#control+option+shift+z"]))
     }
+
+    private func settingsDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-settings-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func aSettingsSaveSaysWhetherItLandedWasHeldBackOrFailed() throws {
+        let dir = try settingsDir()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        try SettingsStore.write(Settings.defaults, to: dir)
+        var changed = Settings.defaults
+        changed.history.retentionDays = 30
+
+        let unreadable = ConfigFileIssue.unreadable(SettingsStore.fileName, error: .missingSchemaVersion, recovery: .previousVersion)
+        #expect(AppDelegate.saveSettings(changed, issue: unreadable, supportDir: dir) == .held)
+        #expect(try SettingsStore.loadOrCreate(supportDir: dir) == Settings.defaults)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        guard case .failed(let issue) = AppDelegate.saveSettings(changed, issue: nil, supportDir: dir) else {
+            Issue.record("expected .failed")
+            return
+        }
+        #expect(issue.title == "Couldn’t save settings.toml")
+        #expect(issue.isError)
+        #expect(!issue.detail.isEmpty)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        #expect(AppDelegate.saveSettings(changed, issue: issue, supportDir: dir) == .saved)
+        #expect(try SettingsStore.loadOrCreate(supportDir: dir) == changed)
+
+        let file = dir.appendingPathComponent(SettingsStore.fileName)
+        let withTypo = try String(contentsOf: file, encoding: .utf8) + "retention_dayz = 3\n"
+        try withTypo.write(to: file, atomically: true, encoding: .utf8)
+        #expect(AppDelegate.saveSettings(Settings.defaults, issue: nil, supportDir: dir) == .held)
+        #expect(try String(contentsOf: file, encoding: .utf8) == withTypo)
+    }
+
+    @Test func historyIsDeletedOnlyUnderARetentionTheSettingsFileHolds() {
+        var saved = Settings.defaults
+        saved.history.retentionDays = 30
+        let previous = ConfigFileIssue.unreadable(SettingsStore.fileName, error: .missingSchemaVersion, recovery: .previousVersion)
+        let defaults = ConfigFileIssue.unreadable(SettingsStore.fileName, error: .missingSchemaVersion, recovery: .defaults)
+        let notSaved = ConfigFileIssue.notSaved(SettingsStore.fileName, detail: "disk full")
+
+        #expect(AppDelegate.deletableHistoryDays(chosen: 30, saved: saved, issue: nil) == 30)
+        #expect(AppDelegate.deletableHistoryDays(chosen: 3, saved: saved, issue: nil) == 30)
+        #expect(AppDelegate.deletableHistoryDays(chosen: 90, saved: saved, issue: nil) == 90)
+        #expect(AppDelegate.deletableHistoryDays(chosen: 3, saved: saved, issue: notSaved) == 30)
+        #expect(AppDelegate.deletableHistoryDays(chosen: 3, saved: saved, issue: previous) == 30)
+        #expect(AppDelegate.deletableHistoryDays(chosen: 7, saved: saved, issue: defaults) == nil)
+    }
+
+    @Test func theHistoryIsSweptAgainWheneverWhatItMayDeleteOrTheChosenPeriodChanges() {
+        func saved(_ days: Int) -> Settings { var s = Settings.defaults; s.history.retentionDays = days; return s }
+        let defaults = ConfigFileIssue.unreadable(SettingsStore.fileName, error: .missingSchemaVersion, recovery: .defaults)
+        let previous = ConfigFileIssue.unreadable(SettingsStore.fileName, error: .missingSchemaVersion, recovery: .previousVersion)
+        let notSaved = ConfigFileIssue.notSaved(SettingsStore.fileName, detail: "disk full")
+        typealias Cell = (name: String, before: (Int, Settings, ConfigFileIssue?), after: (Int, Settings, ConfigFileIssue?), sweeps: Bool)
+        let grid: [Cell] = [
+            ("a shorter period not saved", (90, saved(90), nil), (7, saved(90), notSaved), true),
+            ("a pending period saved by an unrelated change", (7, saved(90), notSaved), (7, saved(7), nil), true),
+            ("a pending period saved by a reload retry", (7, saved(90), nil), (7, saved(7), nil), true),
+            ("defaults recovered to the same period", (7, Settings.defaults, defaults), (7, saved(7), nil), true),
+            ("the file goes bad while running", (7, saved(7), nil), (7, saved(7), previous), false),
+            ("an unrelated change", (7, saved(7), nil), (7, saved(7), nil), false),
+            ("a failed save of an unrelated change", (7, saved(7), nil), (7, saved(7), notSaved), false),
+        ]
+        for cell in grid {
+            let before = AppDelegate.historyRetention(chosen: cell.before.0, saved: cell.before.1, issue: cell.before.2)
+            let after = AppDelegate.historyRetention(chosen: cell.after.0, saved: cell.after.1, issue: cell.after.2)
+            #expect((before != after) == cell.sweeps, "\(cell.name)")
+        }
+    }
 }

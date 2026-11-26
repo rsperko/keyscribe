@@ -331,11 +331,13 @@ because opening its mic switches it to call mode.
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
-| Config problem (idle, after an external edit) | “Couldn’t read [file] — [parser message] — previous version still in use” (or “— ignored until fixed”), or “[file] — “[key]” (did you mean “[key]”?) has no effect” | — | None; dismisses automatically |
-| Settings replaced (after an edit to `settings.toml` that sets something else, while app-wide changes made in Settings were not saved) | “settings.toml was changed outside [app], so its contents replaced Settings changes that hadn’t been saved. Check Settings and make them again.” | — | None; dismisses after eight seconds. Shown in place of that reload's config-problem notice, which Settings still lists. During a dictation it waits until the dictation's result has shown, or until a cancelled dictation ends |
+| Config problem (after an external edit, or a Settings change that couldn't be saved) | “Couldn’t read [file] — [parser message] — previous version still in use” (or “— ignored until fixed”), or “[file] — “[key]” (did you mean “[key]”?) has no effect”, or “Couldn’t save settings.toml — [reason]” | — | None; dismisses automatically. During a dictation it waits until the dictation's result has shown, and is shown only if the problem still stands |
+| Settings replaced (after an edit to `settings.toml` that sets something else, while app-wide changes made in Settings were not saved) | “settings.toml was changed outside [app], so its contents replaced Settings changes that hadn’t been saved. Check Settings and make them again.” | — | None; dismisses after eight seconds. Shown in place of that reload's config-problem notice, which Settings still lists. During a dictation it waits until the dictation's result has shown, or until a cancelled dictation ends; a dictation that ends on a question shows it as the question's note |
 
-**Config problems.** The HUD names only problems an external edit just introduced — each new unreadable
-file or unread key once, never during a dictation. Settings → Advanced keeps listing every current
+**Config problems.** The HUD names only problems just introduced — each new unreadable file, unread key, or
+settings file that couldn't be saved once, never during a dictation: one that arises during a dictation is named
+once what the dictation ends on (its result, or Help) has left the HUD, if it still stands, or becomes the note
+of a question the dictation ends on. Settings → Advanced keeps listing every current
 problem until it is fixed, and an unreadable file also stays in the menu status. An unread key is an advisory, not a
 failure: it shows with an info icon rather than the error triangle, and a batch that includes an
 unreadable file shows as the failure. While a voice-command question is waiting, the announcement becomes
@@ -2746,7 +2748,10 @@ separate **About & Notices** window, not here.)
   ignored until it’s fixed.` — and, for `settings.toml`, that app-wide settings changed meanwhile
   are not saved yet: they are saved once the file is fixed, unless the fixed file sets something else, which
   replaces them and says so on the HUD; modes and vocabulary save normally), **Show in Finder** selecting
-  that file, and a collapsed **Technical details** with the parser's message as selectable text.
+  that file, and a collapsed **Technical details** with the parser's message as selectable text. A
+  `settings.toml` the app could not write gets its own entry (`Couldn’t save settings.toml` in red): the
+  changes made in Settings are in use, and are saved the next time a change saves or the configuration
+  reloads; the HUD announces it once.
 - **Copy Diagnostics** puts a redaction-safe summary of the install on the clipboard for a bug
   report: version and revision, granted permissions, speech model, each mode's delivery settings,
   and the most recent dictation outcomes. It carries **no transcript text, clipboard contents, or
@@ -2798,7 +2803,10 @@ clicks. A shorter period confirms once only when it would remove existing day fi
 previous period selected. A longer period, an empty history, or a change that removes nothing applies
 immediately without confirmation. Opening History and changing the period each delete what the period has
 expired; when that leaves expired history on this Mac, an issue line under **Keep for** says so until a later
-attempt deletes it.
+attempt deletes it. Deleting history cannot be undone, so it follows only a period `settings.toml` holds: while
+a change is not saved, nothing older than the saved period is deleted, and while defaults stand in for an
+unreadable `settings.toml`, nothing is deleted. The issue line says older history stays until the setting is saved,
+or until `settings.toml` can be read. Once either happens, the next save or reload deletes what the period has expired.
 
 ### List view
 

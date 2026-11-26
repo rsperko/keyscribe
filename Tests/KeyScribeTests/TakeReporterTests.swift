@@ -42,6 +42,19 @@ struct TakeReporterTests {
         #expect(announced == 1)
     }
 
+    @Test func anAppendWithNoSavedRetentionDeletesNothingAndTheNextOneSweeps() throws {
+        let (history, dir) = store()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try history.append(entry("old"), today: "2020-01-01")
+        let reporter = TakeReporter(history: history, replacementUsage: nil)
+
+        #expect(reporter.append(entry("one"), retentionDays: nil, confirm: true))
+        #expect(history.dayFiles().contains("2020-01-01.jsonl"))
+
+        #expect(reporter.append(entry("two"), retentionDays: 7, confirm: true))
+        #expect(!history.dayFiles().contains("2020-01-01.jsonl"))
+    }
+
     @Test func withoutAStoreNothingIsKept() {
         let reporter = TakeReporter(history: nil, replacementUsage: nil)
         #expect(!reporter.keepsHistory)

@@ -27,7 +27,8 @@ not a legal privacy policy.
   transcripts, usage data, or diagnostics. There is no account and no sign-in.
 - **History stays local.** Past dictations are stored as plain JSONL files under
   `~/Library/Application Support/KeyScribe/` and KeyScribe never uploads them. History is on by default and
-  keeps a limited number of days, which you can change or turn off in Settings. The history folder is
+  keeps a limited number of days, which you can change or turn off in Settings. Older days are deleted only
+  under a period your settings file has saved, so a change Settings couldn't save never deletes history. The history folder is
   excluded from Time Machine backups. Other programs you run can still read it: if you open an agent
   in that folder to edit your modes, it can read your history and send it to its AI provider. The folder's
   `AGENTS.md` tells agents not to open history, but that is an instruction, not a lock.

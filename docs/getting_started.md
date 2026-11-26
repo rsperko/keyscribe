@@ -469,7 +469,7 @@ Open menu bar > History to:
 - Export filtered history as Markdown, plain text, or JSON.
 - Delete individual entries.
 
-History is enabled by default with local retention. Change retention in Settings > General, or turn on
+History is enabled by default with local retention. Change how long it is kept with **Keep for** in Settings > History, or turn on
 **Do not save this mode in history** for sensitive modes.
 
 Checkpoint: after your first week, search History for the words you corrected most often. Promote the

@@ -363,7 +363,8 @@ struct VoiceCommandChoiceWiringTests {
         await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         let issue = ConfigFileIssue.unreadable("modes/email.toml", error: .invalid("Expected a value"), recovery: .ignored)
-        h.controller.announceConfigProblems([issue])
+        h.controller.newConfigProblems = { [issue] }
+        h.controller.announceConfigProblems()
         #expect(h.hud.last == .choice(prompt, status: .waiting(note: issue.oneLine)))
         #expect(h.prompt == prompt)
     }
@@ -386,7 +387,8 @@ struct VoiceCommandChoiceWiringTests {
         await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         let issue = ConfigFileIssue.unusedKeys("dictionary.toml", [UnknownConfigKey(path: "wrods", suggestion: nil)])
-        h.controller.announceConfigProblems([issue])
+        h.controller.newConfigProblems = { [issue] }
+        h.controller.announceConfigProblems()
         #expect(h.hud.last == .choice(prompt, status: .waiting(note: issue.oneLine)))
         #expect(h.hud.last?.errorAction == nil)
     }
@@ -889,7 +891,8 @@ struct VoiceCommandChoiceWiringTests {
         h.controller.help.seconds = 0.05
         await h.dictate("what can I say", trigger: "right_command")
         #expect(escape.lastRegistrations.count == 1)
-        h.controller.announceConfigProblems([.unusedKeys("settings.toml", [])])
+        h.controller.newConfigProblems = { [.unusedKeys("settings.toml", [])] }
+        h.controller.announceConfigProblems()
         #expect(escape.lastRegistrations.isEmpty)
         try await Task.sleep(for: .milliseconds(200))
         guard case .advisory = h.hud.last else {
@@ -925,6 +928,93 @@ struct VoiceCommandChoiceWiringTests {
         }
         #expect(h.hud.last == .advisory(message: HUDState.settingsReplaced))
         #expect(h.hud.states.filter { $0 == .advisory(message: HUDState.settingsReplaced) }.count == 1)
+    }
+
+    private static let notSaved = ConfigFileIssue.notSaved(SettingsStore.fileName, detail: "disk full")
+    private static let notSavedShown = HUDState.error(message: notSaved.oneLine, action: nil)
+
+    @MainActor private final class Problems {
+        var current: [ConfigFileIssue] = []
+        var tracker = ConfigProblemAnnouncement()
+        func wire(_ controller: DictationController) { controller.newConfigProblems = { self.tracker.next(current: self.current) } }
+    }
+
+    private func settle(_ h: Harness, _ problems: Problems, _ current: [ConfigFileIssue]) {
+        problems.current = current
+        h.controller.announceConfigProblems()
+    }
+
+    private func waitForHUD(_ h: Harness, _ done: () -> Bool) async throws {
+        for _ in 0..<150 where !done() { try await Task.sleep(for: .milliseconds(20)) }
+    }
+
+    @Test(arguments: [true, false])
+    func aConfigProblemDuringATakeIsSaidOnceAfterTheTakesResultOnlyIfItStillStands(_ stillStands: Bool) async throws {
+        let h = try Harness(places: [])
+        h.controller.hideScale = 0.025
+        let problems = Problems()
+        problems.wire(h.controller)
+        h.engine.text = "hello there"
+        await h.press()
+        settle(h, problems, [Self.notSaved])
+        #expect(!h.hud.states.contains(Self.notSavedShown))
+        if !stillStands { settle(h, problems, []) }
+        h.controller.handleCommit()
+        await h.controller.dictationTask?.value
+
+        try await waitForHUD(h) { h.hud.last == (stillStands ? Self.notSavedShown : .hidden) }
+        #expect(h.hud.states.filter { $0 == Self.notSavedShown }.count == (stillStands ? 1 : 0))
+        if !stillStands { #expect(h.hud.last == .hidden) }
+    }
+
+    @Test func aConfigProblemDuringATakeThatEndsOnAQuestionBecomesTheQuestionsNote() async throws {
+        let h = try Harness(places: [personal, work])
+        let problems = Problems()
+        problems.wire(h.controller)
+        h.engine.text = "open mail"
+        await h.press()
+        settle(h, problems, [Self.notSaved])
+        h.controller.handleCommit()
+        await h.controller.dictationTask?.value
+
+        let prompt = try #require(h.prompt)
+        try await waitForHUD(h) { h.hud.last == .choice(prompt, status: .waiting(note: Self.notSaved.oneLine)) }
+        #expect(h.hud.last == .choice(prompt, status: .waiting(note: Self.notSaved.oneLine)))
+        #expect(h.prompt == prompt)
+    }
+
+    @Test func aConfigProblemDuringATakeThatEndsInHelpIsSaidOnceHelpCloses() async throws {
+        let h = try Harness(places: [])
+        h.controller.help.seconds = 0.05
+        let problems = Problems()
+        problems.wire(h.controller)
+        h.engine.text = "what can I say"
+        await h.press("right_command")
+        settle(h, problems, [Self.notSaved])
+        h.controller.handleCommit()
+        await h.controller.dictationTask?.value
+        #expect(h.hud.last?.spokenHelp != nil)
+
+        try await waitForHUD(h) { h.hud.last == Self.notSavedShown }
+        #expect(h.hud.states.filter { $0 == Self.notSavedShown }.count == 1)
+    }
+
+    @Test func aHeldProblemFixedAndBackBeforeTheResultHidesIsSaidOnce() async throws {
+        let h = try Harness(places: [])
+        h.controller.hideScale = 0.05
+        let problems = Problems()
+        problems.wire(h.controller)
+        h.engine.text = "hello there"
+        await h.press()
+        settle(h, problems, [Self.notSaved])
+        h.controller.handleCommit()
+        await h.controller.dictationTask?.value
+        settle(h, problems, [])
+        settle(h, problems, [Self.notSaved])
+
+        try await waitForHUD(h) { h.hud.states.contains(Self.notSavedShown) && h.hud.last == .hidden }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(h.hud.states.filter { $0 == Self.notSavedShown }.count == 1)
     }
 
     @Test func helpStaysWhileVoiceOverIsRunning() async throws {

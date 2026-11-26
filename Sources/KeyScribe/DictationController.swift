@@ -17,6 +17,7 @@ final class DictationController {
     private let log = Logger(subsystem: "com.keyscribe.app", category: "dictation")
 
     private(set) var settings: Settings
+    var deletableHistoryDays: (Int) -> Int? = { _ in nil }
     private let provider: SpeechEngineProvider
     private let config: ConfigCache
     private let reporter: TakeReporter
@@ -398,6 +399,7 @@ final class DictationController {
         self.voiceCommands.onProgress = { [weak self] progress in self?.showCommandProgress(progress) }
         self.hud.onDraw = { [weak self] state in
             if state.spokenHelp == nil { self?.help.release() }
+            if state == .hidden, self?.hasPendingNotice == true { self?.announcePendingOnceHidden() }
         }
         self.hud.choices = { [weak self] in
             HUDChannel.Choices(answering: self?.answeringChoicePrompt, pending: self?.pendingVoiceCommandChoice)
@@ -591,22 +593,39 @@ final class DictationController {
         scheduleHide()
     }
 
-    func announceConfigProblems(_ issues: [ConfigFileIssue]) {
-        guard !isBusy, !issues.isEmpty else { return }
+    // Asked at the moment a notice can show, so a problem fixed meanwhile or already said is never announced.
+    var newConfigProblems: () -> [ConfigFileIssue] = { [] }
+    private var configProblemsHeld = false
+
+    @discardableResult
+    func announceConfigProblems() -> Bool {
+        guard !isBusy else { configProblemsHeld = true; return false }
+        configProblemsHeld = false
+        let issues = newConfigProblems()
+        guard !issues.isEmpty else { return false }
         let message = issues.map(\.oneLine).joined(separator: " · ")
         hud.present(issues.contains(where: \.isError) ? .error(message: message, action: nil) : .advisory(message: message))
         scheduleHide(after: 8)
+        return true
     }
 
     private var settingsReplacedPending = false
+    private var hasPendingNotice: Bool { settingsReplacedPending || configProblemsHeld }
 
-    private func announceSettingsReplacedOnceHidden() {
+    private func announcePendingOnceHidden() {
         Task { @MainActor [weak self] in
             await Task.yield()
-            guard let self, self.settingsReplacedPending, !self.isBusy,
-                  (self.hud.lastPresented ?? .hidden) == .hidden else { return }
-            self.announceSettingsReplaced()
+            guard let self, self.hasPendingNotice, !self.isBusy,
+                  (self.hud.lastPresented ?? .hidden) == .hidden || self.voiceCommands.pendingChoice != nil else { return }
+            self.announcePending()
         }
+    }
+
+    private func announcePending() {
+        if settingsReplacedPending { return announceSettingsReplaced() }
+        guard !announceConfigProblems(), voiceCommands.pendingChoice == nil,
+              (hud.lastPresented ?? .hidden) != .hidden else { return }
+        hud.present(.hidden)
     }
 
     func announceSettingsReplaced() {
@@ -941,7 +960,7 @@ final class DictationController {
         activeStartTrigger = nil
         scheduleCaptureRefresh()
         onBecameIdle?()
-        if settingsReplacedPending { announceSettingsReplacedOnceHidden() }
+        if hasPendingNotice { announcePendingOnceHidden() }
         // The dictation is fully terminal (reload + transcribe + insert are done), so any deferred idle
         // work — e.g. a Settings model-file deletion parked while this dictation ran — is now safe.
         drainIdleWork()
@@ -1759,7 +1778,7 @@ final class DictationController {
         agentOutput.recordSpokenReply(heard, alone: {
             let mode = config.modes.first { $0.id == Mode.agentModeId }
             guard !(mode?.excludeFromHistory ?? false) else { return nil }
-            return (mode?.name ?? Mode.agentMode.name, settings.history.retentionDays)
+            return (mode?.name ?? Mode.agentMode.name, deletableHistoryDays(settings.history.retentionDays))
         }, then: { [weak self] entry in
             guard let self else { return }
             self.spokenAttempts?.link(heard.attempt, to: entry)
@@ -1985,7 +2004,7 @@ final class DictationController {
         entry.shortcutCandidates = candidates.isEmpty ? nil : candidates
         guard reporter.keepsHistory else { return false }
         onRecorded?(entry)
-        let written = reporter.append(entry, retentionDays: settings.history.retentionDays, confirm: confirmWrite)
+        let written = reporter.append(entry, retentionDays: deletableHistoryDays(settings.history.retentionDays), confirm: confirmWrite)
         if written { lastHistoryEntry = entry.id }
         return written
     }
@@ -2610,12 +2629,15 @@ final class DictationController {
         if let shown = hud.lastPresented, shown != .hidden { hud.present(.hidden) }
     }
 
+    var hideScale = 1.0
+
     private func scheduleHide(after seconds: Double = 2) {
+        let seconds = seconds * hideScale
         hideTask?.cancel()
         hideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled, !isBusy, voiceCommands.pendingChoice == nil else { return }
-            if settingsReplacedPending { return announceSettingsReplaced() }
+            if hasPendingNotice { return announcePending() }
             hud.present(.hidden)
         }
     }

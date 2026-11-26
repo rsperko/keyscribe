@@ -411,6 +411,11 @@ final class SettingsController: NSObject, NSWindowDelegate {
         }
     }
 
+    func historyRetentionChanged(days: Int) {
+        history.sweepRetention(days: days)
+        historyDidChange()
+    }
+
     func historyDidChange() {
         guard window?.isVisible == true, navigation.destination == .history else { return }
         history.reload()

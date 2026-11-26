@@ -1877,7 +1877,8 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   from the app to a file holding one is refused with a notice naming the file and key, leaving the file
   and the unsaved edit as they were, and an automatic rewrite (a starter-mode update or rename) skips
   that file. For `settings.toml`, app-wide changes still apply but are not saved until the key is fixed
-  or removed. A configuration reload keeps those unsaved changes while what `settings.toml` sets is unchanged,
+  or removed. History is deleted only under the `retention_days` the file holds: an unsaved shorter period
+  deletes nothing the saved one keeps. A configuration reload keeps those unsaved changes while what `settings.toml` sets is unchanged,
   and saves them once the key is gone; when the file sets something else, its contents replace them and the
   HUD says so, after the result of a dictation in progress.
 - **Unknown keys are reported, not fatal.** A key this schema does not read — usually a typo such as

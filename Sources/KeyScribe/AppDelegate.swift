@@ -231,7 +231,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         configProblemAnnouncement = ConfigProblemAnnouncement(baseline: configProblems)
         history = HistoryStore(supportDir: KeyScribePaths.supportDir)
-        history.applyRetention(retentionDays: settings.history.retentionDays).logFailures()
+        if let days = deletableHistoryDays(chosen: settings.history.retentionDays) {
+            history.applyRetention(retentionDays: days).logFailures()
+        }
         excludeHistoryFromBackups(settings.history)
         Task {
             await RequestAdaptationCache.shared.persist(to: KeyScribePaths.requestAdaptationsFile)
@@ -430,6 +432,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsController.agents.voice = spokenVoice
         controller.spokenAttempts = spokenAttempts
+        controller.deletableHistoryDays = { [weak self] in self?.deletableHistoryDays(chosen: $0) }
+        controller.newConfigProblems = { [weak self] in
+            guard let self else { return [] }
+            return self.configProblemAnnouncement.next(current: self.configProblems)
+        }
+        settingsController.history.deletableDays = { [weak self] in self?.deletableHistoryDays(chosen: $0) }
         let history = settingsController.history
         history.spokenAudio = { [spokenAttempts] in spokenAttempts.attempt(forEntry: $0) }
         history.forgetSpokenAudio = { [weak self, spokenAttempts] ids in
@@ -473,7 +481,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording
         }
+        let before = historyRetention
         refreshPreferredDeviceName()
+        settleSettings(historyBefore: before)
 
         buildHotkeyMonitor()
         observeKeyboardLayoutChanges()
@@ -734,6 +744,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // watcher (external edits) and the Settings reload button; the rebuild defers if a key is held (see
     // rebuildHotkeyMonitor).
     func reloadConfig() {
+        let before = historyRetention
         // Re-seed/normalize the system Direct floor before reloading, so an external delete or hand-edit
         // of `_direct.toml` heals immediately (and Fn re-registers) instead of waiting for relaunch.
         ensureSystemModes()
@@ -760,14 +771,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsIssue = .unreadable(SettingsStore.fileName, error: error, recovery: kept)
             rebuildHotkeyMonitor()
         }
-        refreshStatus()
-        let problems = configProblemAnnouncement.next(current: configProblems)
-        if reload.replacesUnsaved {
-            Log.config.error("settings changes that were not saved were replaced by an edit to \(SettingsStore.fileName, privacy: .public)")
-            controller.announceSettingsReplaced()
-        } else {
-            controller.announceConfigProblems(problems)
-        }
+        settleSettings(historyBefore: before, replacesUnsaved: reload.replacesUnsaved)
         controller.voiceCommandConfigurationChanged()
         configRepository.notifyExternalChange()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
@@ -831,25 +835,79 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applySettings(_ updated: Settings) {
-        applySettingsEffects(updated)
+        let before = historyRetention
         persistSettings(updated)
+        applySettingsEffects(updated)
+        settleSettings(historyBefore: before)
     }
+
+    private func persistSettings(_ updated: Settings) {
+        let outcome = Self.saveSettings(updated, issue: settingsIssue, supportDir: KeyScribePaths.supportDir)
+        if case .failed(let issue) = outcome {
+            Log.config.error("settings write failed: \(issue.detail, privacy: .public)")
+            settingsIssue = issue
+            return
+        }
+        if settingsIssue?.kind == .notSaved { settingsIssue = nil }
+        guard outcome == .saved else { return }
+        savedSettings = updated
+        recordSettingsSelfWrite()
+    }
+
+    // Every change to the running settings, the saved settings, or the settings problem ends here, so the status,
+    // the announced problems, and what History may delete never fall behind any one path.
+    private func settleSettings(historyBefore: HistoryRetentionState, replacesUnsaved: Bool = false) {
+        if historyRetention != historyBefore {
+            settingsController?.historyRetentionChanged(days: settings.history.retentionDays)
+        }
+        refreshStatus()
+        if replacesUnsaved {
+            _ = configProblemAnnouncement.next(current: configProblems)
+            Log.config.error("settings changes that were not saved were replaced by an edit to \(SettingsStore.fileName, privacy: .public)")
+            controller.announceSettingsReplaced()
+        } else {
+            controller.announceConfigProblems()
+        }
+    }
+
+    enum SettingsSave: Equatable { case saved, held, failed(ConfigFileIssue) }
 
     // A write re-encodes the whole file, so while it holds a key nothing reads the change stays in memory only;
     // the settings.toml advisory says so.
-    private func persistSettings(_ updated: Settings) {
-        guard settingsIssue == nil else { return }
-        let file = KeyScribePaths.supportDir.appendingPathComponent(SettingsStore.fileName)
+    nonisolated static func saveSettings(_ updated: Settings, issue: ConfigFileIssue?, supportDir: URL) -> SettingsSave {
+        if case .unreadable = issue?.kind { return .held }
+        let file = supportDir.appendingPathComponent(SettingsStore.fileName)
         if let toml = try? String(contentsOf: file, encoding: .utf8), !SettingsStore.unknownKeys(in: toml).isEmpty {
             Log.config.error("settings not saved: \(SettingsStore.fileName, privacy: .public) has keys this app doesn't read")
-            return
+            return .held
         }
         do {
-            try SettingsStore.write(updated, to: KeyScribePaths.supportDir)
-            savedSettings = updated
-            recordSettingsSelfWrite()
+            try SettingsStore.write(updated, to: supportDir)
+            return .saved
+        } catch {
+            return .failed(.notSaved(SettingsStore.fileName, detail: error.localizedDescription))
         }
-        catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
+    }
+
+    // Deleting history cannot be undone, so it follows only a retention settings.toml holds: an unsaved change
+    // deletes no more than the saved value allows, and defaults standing in for an unreadable file delete nothing.
+    nonisolated static func deletableHistoryDays(chosen: Int, saved: Settings, issue: ConfigFileIssue?) -> Int? {
+        if issue?.kind == .unreadable(.defaults) { return nil }
+        return max(chosen, saved.history.retentionDays)
+    }
+
+    private func deletableHistoryDays(chosen: Int) -> Int? {
+        Self.deletableHistoryDays(chosen: chosen, saved: savedSettings, issue: settingsIssue)
+    }
+
+    struct HistoryRetentionState: Equatable { let chosen: Int; let deletable: Int? }
+
+    nonisolated static func historyRetention(chosen: Int, saved: Settings, issue: ConfigFileIssue?) -> HistoryRetentionState {
+        HistoryRetentionState(chosen: chosen, deletable: deletableHistoryDays(chosen: chosen, saved: saved, issue: issue))
+    }
+
+    private var historyRetention: HistoryRetentionState {
+        Self.historyRetention(chosen: settings.history.retentionDays, saved: savedSettings, issue: settingsIssue)
     }
 
     private func recordSettingsSelfWrite() {
@@ -1124,8 +1182,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             agents: settings.features.isEnabled(.agents))
     }
 
-    // Apply the runtime consequences of a settings change WITHOUT writing to disk. `applySettings` calls
-    // this then persists; `reloadConfig` calls it after re-reading an external edit off disk (no write,
+    // Apply the runtime consequences of a settings change WITHOUT writing to disk. `applySettings` persists
+    // then calls this; `reloadConfig` calls it after re-reading an external edit off disk (no write,
     // so an externally-changed field isn't round-tripped and clobbered).
     private func applySettingsEffects(_ updated: Settings) {
         let previousHistory = settings.history
@@ -1149,10 +1207,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         answers?.settingsChanged()
         if !updated.agents.spokenResult.enabled { agentRuntime?.hub.speechTurnedOff() }
         if hostsChanged, let hub = agentRuntime?.hub { Task { await hub.rescan(wantingHosts: true) } }
-        if updated.history != previousHistory {
-            history?.applyRetention(retentionDays: updated.history.retentionDays).logFailures()
-            excludeHistoryFromBackups(updated.history)
-        }
+        if updated.history != previousHistory { excludeHistoryFromBackups(updated.history) }
         // Sweep on change too, so a lowered budget reclaims now rather than after the next dictation.
         if updated.audio != previousAudio {
             CaptureArchive.publish(updated.audio)
@@ -1175,7 +1230,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         updater?.setReceivesBetaUpdates(updated.updates.beta)
         if previousUpdates.beta, !updated.updates.beta { menu.setUpdateAvailable(false) }
         settingsController.update(settings: updated)
-        refreshStatus()
     }
 
     private func excludeHistoryFromBackups(_ setting: Settings.History) {

@@ -49,7 +49,8 @@ struct ConfigProblemHUDTests {
             insert: { _, _, _, _, _ in true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true })
-        controller.announceConfigProblems(issues)
+        controller.newConfigProblems = { issues }
+        controller.announceConfigProblems()
         return hud.states.last
     }
 

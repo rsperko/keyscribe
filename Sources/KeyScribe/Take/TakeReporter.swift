@@ -28,7 +28,7 @@ final class TakeReporter {
         replacementUsage?.record(effects: effects, capturedAt: epoch)
     }
 
-    func append(_ entry: HistoryEntry, retentionDays: Int, then: @escaping @MainActor (Bool) -> Void) {
+    func append(_ entry: HistoryEntry, retentionDays: Int?, then: @escaping @MainActor (Bool) -> Void) {
         guard history != nil else { return then(false) }
         let write = writer(entry, retentionDays: retentionDays)
         queue.async {
@@ -38,7 +38,7 @@ final class TakeReporter {
     }
 
     @discardableResult
-    func append(_ entry: HistoryEntry, retentionDays: Int, confirm: Bool) -> Bool {
+    func append(_ entry: HistoryEntry, retentionDays: Int?, confirm: Bool) -> Bool {
         guard history != nil else { return false }
         let write = writer(entry, retentionDays: retentionDays)
         guard confirm else {
@@ -48,15 +48,15 @@ final class TakeReporter {
         return queue.sync(execute: write)
     }
 
-    private func writer(_ entry: HistoryEntry, retentionDays: Int) -> @Sendable () -> Bool {
+    private func writer(_ entry: HistoryEntry, retentionDays: Int?) -> @Sendable () -> Bool {
         guard let history else { return { false } }
         let today = HistoryStore.todayString()
-        let sweepRetention = lastRetentionSweepDay != today
-        lastRetentionSweepDay = today
+        let sweepRetention = lastRetentionSweepDay == today ? nil : retentionDays
+        if sweepRetention != nil { lastRetentionSweepDay = today }
         let write: @Sendable () -> Bool = { [log] in
             do {
                 try history.append(entry, today: today)
-                if sweepRetention { history.applyRetention(today: today, retentionDays: retentionDays).logFailures() }
+                if let sweepRetention { history.applyRetention(today: today, retentionDays: sweepRetention).logFailures() }
                 return true
             } catch {
                 log.error("history append failed: \(error.localizedDescription, privacy: .public)")

@@ -271,7 +271,7 @@ final class AIServiceSettingsModel: ObservableObject {
             connection.baseUrl = preset.baseURL
         }
         let wasEmpty = existing.isEmpty
-        save(connection)
+        guard save(connection) else { return }
         selectedID = id
         testStates[id] = nil
         if wasEmpty { pendingOfferConnectionId = id }

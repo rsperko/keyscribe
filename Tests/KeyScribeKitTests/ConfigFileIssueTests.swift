@@ -29,6 +29,15 @@ struct ConfigFileIssueTests {
         #expect(line.hasSuffix(" — using defaults until fixed"))
     }
 
+    @Test func aSettingsFileThatCouldNotBeSavedSaysTheChangesStillApplyButAreNotSaved() {
+        let issue = ConfigFileIssue.notSaved("settings.toml", detail: "You don’t have permission.")
+        #expect(issue.isError)
+        #expect(issue.title == "Couldn’t save settings.toml")
+        #expect(issue.recovery.contains("aren’t saved yet"))
+        #expect(issue.oneLine == "Couldn’t save settings.toml — You don’t have permission.")
+        #expect(issue.id != ConfigFileIssue.unreadable("settings.toml", error: parserError, recovery: .defaults).id)
+    }
+
     @Test func anErrorWithNoLocationKeepsItsWholeMessage() {
         let issue = ConfigFileIssue.unreadable("notes.toml", error: .missingSchemaVersion, recovery: .ignored)
         #expect(issue.location == nil)

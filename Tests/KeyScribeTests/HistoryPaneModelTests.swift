@@ -13,6 +13,7 @@ struct HistoryPaneModelTests {
         }
         try store.append(entry("old"), today: "2020-01-01")
         let model = model(store)
+        model.deletableDays = { $0 }
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: store.dir.path)
 
         model.sweepRetention(days: 7)
@@ -23,6 +24,42 @@ struct HistoryPaneModelTests {
         model.sweepRetention(days: 7)
         #expect(model.retentionFailure == nil)
         #expect(store.dayFiles().isEmpty)
+    }
+
+    @Test func aRetentionThatIsNotSavedDeletesOnlyWhatTheSavedOneAllowsAndSaysSo() throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let today = HistoryStore.todayString()
+        let day = { (ago: Int) in HistoryStore.todayString(date: Date().addingTimeInterval(-Double(ago) * 86_400)) }
+        try store.append(entry("ancient"), today: day(60))
+        try store.append(entry("recent"), today: day(10))
+        try store.append(entry("now"), today: today)
+        let model = model(store)
+        model.deletableDays = { _ in 30 }
+
+        model.sweepRetention(days: 7)
+        #expect(store.dayFiles() == ["\(day(10)).jsonl", "\(today).jsonl"])
+        #expect(model.retentionFailure == "Older history stays on this Mac until this setting is saved.")
+
+        model.deletableDays = { _ in nil }
+        model.sweepRetention(days: 3)
+        #expect(store.dayFiles() == ["\(day(10)).jsonl", "\(today).jsonl"])
+        #expect(model.retentionFailure == "Older history stays on this Mac until settings.toml can be read.")
+
+        model.deletableDays = { $0 }
+        model.sweepRetention(days: 7)
+        #expect(store.dayFiles() == ["\(today).jsonl"])
+        #expect(model.retentionFailure == nil)
+    }
+
+    @Test func aModelNobodyToldWhatItMayDeleteDeletesNothing() throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(entry("old"), today: "2020-01-01")
+
+        model(store).sweepRetention(days: 7)
+
+        #expect(store.dayFiles() == ["2020-01-01.jsonl"])
     }
 
     @Test func storedHistoryAvailabilityFollowsTheFirstSaveAndLastDeletion() async throws {

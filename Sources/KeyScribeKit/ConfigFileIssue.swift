@@ -2,10 +2,10 @@ import Foundation
 
 public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
     public enum Recovery: Equatable, Sendable { case previousVersion, ignored, defaults }
-    public enum Kind: Equatable, Sendable { case unreadable(Recovery), unusedKeys, inactiveRules }
+    public enum Kind: Equatable, Sendable { case unreadable(Recovery), notSaved, unusedKeys, inactiveRules }
     public enum Cause: Equatable, Sendable {
         case syntax(line: Int, column: Int), unreadableFile, newerSchema, missingSchema, invalidValue, unusedKeys
-        case inactiveRules
+        case inactiveRules, notSaved
     }
 
     public let fileName: String
@@ -14,8 +14,21 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
     public let detail: String
     public let cause: Cause
 
-    public var id: String { "\(relativePath)|\(isError)|\(kind == .inactiveRules)" }
-    public var isError: Bool { if case .unreadable = kind { true } else { false } }
+    public var id: String {
+        let tag = switch kind {
+        case .unreadable: "unreadable"
+        case .notSaved: "notSaved"
+        case .unusedKeys: "unusedKeys"
+        case .inactiveRules: "inactiveRules"
+        }
+        return "\(relativePath)|\(tag)"
+    }
+    public var isError: Bool {
+        switch kind {
+        case .unreadable, .notSaved: true
+        case .unusedKeys, .inactiveRules: false
+        }
+    }
 
     public static func unreadable(
         _ fileName: String, relativePath: String? = nil, error: ConfigError, recovery: Recovery
@@ -30,6 +43,11 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
         return ConfigFileIssue(
             fileName: fileName, relativePath: relativePath ?? fileName,
             kind: .unreadable(recovery), detail: detail, cause: cause)
+    }
+
+    public static func notSaved(_ fileName: String, relativePath: String? = nil, detail: String) -> ConfigFileIssue {
+        ConfigFileIssue(
+            fileName: fileName, relativePath: relativePath ?? fileName, kind: .notSaved, detail: detail, cause: .notSaved)
     }
 
     public static func unusedKeys(
@@ -50,6 +68,7 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
 
     public var title: String {
         if kind == .inactiveRules { return "\(relativePath) has a replacement that never runs" }
+        if kind == .notSaved { return "Couldn’t save \(relativePath)" }
         return isError ? "Couldn’t read \(relativePath)" : "\(relativePath) has a key nothing reads"
     }
 
@@ -72,6 +91,7 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
         case .invalidValue: "Something in it isn’t valid for this app."
         case .unusedKeys: "It has a key this app doesn’t read, usually a typo, so that line has no effect."
         case .inactiveRules: "A replacement rule in it can’t run as written, so it never changes anything."
+        case .notSaved: "It couldn’t be written. Check that you can change it and that the disk has room."
         }
     }
 
@@ -83,11 +103,12 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
         case .unreadable(.ignored): "It’s ignored until it’s fixed."
         case .unusedKeys: "It has no effect, and changes to this file aren’t saved from the app until that line is fixed or removed."
         case .inactiveRules: "The rest of the file works normally. Fix or remove the rule to clear this."
+        case .notSaved: "Your changes are in use but aren’t saved yet. They’re saved the next time a change saves or the configuration reloads, unless the file then sets something else, which replaces them."
         }
         if kind == .unusedKeys, relativePath == SettingsStore.fileName {
             return state + " App-wide settings you change meanwhile aren’t saved yet. They’re saved once that line is fixed or removed, unless the file then sets something else, which replaces them."
         }
-        guard isError, relativePath == SettingsStore.fileName else { return state }
+        guard case .unreadable = kind, relativePath == SettingsStore.fileName else { return state }
         return state + " App-wide settings you change meanwhile aren’t saved yet. They’re saved once the file is fixed, unless the fixed file sets something else, which replaces them. Modes and vocabulary still save normally."
     }
 
@@ -107,6 +128,8 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
             return "\(name) — \(detail) has no effect"
         case .inactiveRules:
             return "\(name) — \(detail) never run"
+        case .notSaved:
+            return "Couldn’t save \(name) — \(detail)"
         }
     }
 

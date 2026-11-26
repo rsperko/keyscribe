@@ -318,6 +318,22 @@ struct AIServiceConnectorTests {
         #expect(model.testState(for: connection.id) == nil)   // never claimed as working on add
     }
 
+    @Test func aServiceThatCouldNotBeSavedIsNotSelected() throws {
+        let support = tempSupport()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: support.path)
+            try? FileManager.default.removeItem(at: support)
+        }
+        let model = settingsModel(support: support)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: support.path)
+
+        model.addService(preset: starterPreset)
+
+        #expect(model.selectedID == nil)
+        #expect(model.connections.isEmpty)
+        #expect(model.error != nil)
+    }
+
     @Test func addServicePreservesThePresetWireAPI() throws {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
