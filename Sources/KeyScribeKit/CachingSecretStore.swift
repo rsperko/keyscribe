@@ -19,14 +19,14 @@ public final class CachingSecretStore: @unchecked Sendable {
     public struct Backend: Sendable {
         public var load: @Sendable (_ keyRef: String) -> SecretLookup
         public var save: @Sendable (_ secret: String, _ keyRef: String, _ cachedOld: String?) -> Bool
-        public var remove: @Sendable (_ keyRef: String) -> Void
-        public var removeAll: @Sendable () -> Int
+        public var remove: @Sendable (_ keyRef: String) -> Bool
+        public var removeAll: @Sendable () -> Int?
 
         public init(
             load: @escaping @Sendable (String) -> SecretLookup,
             save: @escaping @Sendable (String, String, String?) -> Bool,
-            remove: @escaping @Sendable (String) -> Void,
-            removeAll: @escaping @Sendable () -> Int
+            remove: @escaping @Sendable (String) -> Bool,
+            removeAll: @escaping @Sendable () -> Int?
         ) {
             self.load = load
             self.save = save
@@ -90,16 +90,18 @@ public final class CachingSecretStore: @unchecked Sendable {
         return stored
     }
 
-    public func delete(_ keyRef: String) {
-        backend.remove(keyRef)
+    @discardableResult
+    public func delete(_ keyRef: String) -> Bool {
+        let removed = backend.remove(keyRef)
         lock.withLock {
             generation[keyRef, default: 0] += 1
             cache[keyRef] = nil
         }
+        return removed
     }
 
     @discardableResult
-    public func deleteAll() -> Int {
+    public func deleteAll() -> Int? {
         let count = backend.removeAll()
         lock.withLock {
             epoch += 1

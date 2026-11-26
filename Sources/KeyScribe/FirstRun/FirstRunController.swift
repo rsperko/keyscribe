@@ -26,9 +26,8 @@ final class FirstRunController: NSObject, NSWindowDelegate {
         resumeOnboarding: Bool = false,
         repository: ConfigRepository,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
-        deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
-        readAPIKey: @escaping (String) -> String? = { KeychainStore.get($0) },
-        testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester.shared.test($0) },
+        deleteAPIKey: @escaping (String) -> Bool = { KeychainStore.delete($0) },
+        testConnection: @escaping (Connection, String?) async -> ConnectionTestState = { await ConnectionTester.shared.test($0, apiKey: $1) },
         onRelaunch: @escaping () -> Void = {},
         tapActive: @escaping () -> Bool = { true },
         onComplete: @escaping () -> Void
@@ -39,7 +38,7 @@ final class FirstRunController: NSObject, NSWindowDelegate {
             selectEngine: selectEngine, permissionsOnly: permissionsOnly,
             resumeOnboarding: resumeOnboarding,
             repository: repository, permits: AIServiceCatalog.permits, saveAPIKey: saveAPIKey,
-            deleteAPIKey: deleteAPIKey, readAPIKey: readAPIKey,
+            deleteAPIKey: deleteAPIKey,
             testConnection: testConnection, onComplete: onComplete)
         super.init()
         model.onReadyToDictate = onReadyToDictate
@@ -180,9 +179,8 @@ final class FirstRunModel: ObservableObject {
     private var supportDir: URL { repository.supportDir }
     private var modesDir: URL { repository.modesDir }
     private let saveAPIKey: (String, String) -> Bool
-    private let deleteAPIKey: (String) -> Void
-    private let readAPIKey: (String) -> String?
-    private let testConnection: (Connection) async -> ConnectionTestState
+    private let deleteAPIKey: (String) -> Bool
+    private let testConnection: (Connection, String?) async -> ConnectionTestState
     private let listModels: (Connection, String?) async throws -> [String]
     let permits: (Connection) -> Bool
     private var pendingConnectionId: String?
@@ -250,9 +248,8 @@ final class FirstRunModel: ObservableObject {
         repository: ConfigRepository,
         permits: @escaping (Connection) -> Bool,
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
-        deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) },
-        readAPIKey: @escaping (String) -> String? = { KeychainStore.get($0) },
-        testConnection: @escaping (Connection) async -> ConnectionTestState = { await ConnectionTester.shared.test($0) },
+        deleteAPIKey: @escaping (String) -> Bool = { KeychainStore.delete($0) },
+        testConnection: @escaping (Connection, String?) async -> ConnectionTestState = { await ConnectionTester.shared.test($0, apiKey: $1) },
         listModels: @escaping (Connection, String?) async throws -> [String] = {
             try await HTTPModelLister().listModels(for: $0, apiKey: $1)
         },
@@ -269,7 +266,6 @@ final class FirstRunModel: ObservableObject {
         self.permits = permits
         self.saveAPIKey = saveAPIKey
         self.deleteAPIKey = deleteAPIKey
-        self.readAPIKey = readAPIKey
         self.testConnection = testConnection
         self.listModels = listModels
         self.onComplete = onComplete
@@ -609,12 +605,12 @@ final class FirstRunModel: ObservableObject {
 
     func createAIService() async {
         aiSetupError = nil
-        // Delegate the test-then-save-with-rollback to the shared connector so onboarding and Settings can
+        // Delegate the test-then-save to the shared connector so onboarding and Settings can
         // never diverge. The FirstRun-specific work (linking the headline rewrite modes, entering the
         // playground) stays here.
         let connector = AIServiceConnector(
             repository: repository, permits: permits, saveAPIKey: saveAPIKey,
-            deleteAPIKey: deleteAPIKey, readAPIKey: readAPIKey, testConnection: testConnection)
+            deleteAPIKey: deleteAPIKey, testConnection: testConnection)
         aiTesting = true
         let result = await connector.connect(draft: aiDraft, reusingId: pendingConnectionId)
         aiTesting = false

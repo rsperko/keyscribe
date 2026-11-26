@@ -249,24 +249,60 @@ public struct HistoryStore: Sendable {
         return .deleted
     }
 
+    private static func listing(_ folder: URL) -> [String]? {
+        do {
+            return try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        } catch {
+            var info = stat()
+            return lstat(folder.path, &info) != 0 && errno == ENOENT ? [] : nil
+        }
+    }
+
+    public struct RetentionSweep: Sendable, Equatable {
+        public var removed: [String]
+        public var failed: [String]
+
+        public var unreadable: [String]
+
+        public init(removed: [String], failed: [String], unreadable: [String] = []) {
+            self.removed = removed
+            self.failed = failed
+            self.unreadable = unreadable
+        }
+
+        public var succeeded: Bool { failed.isEmpty && unreadable.isEmpty }
+    }
+
     // An expired day's kept spoken replies go first; a day whose folder cannot be removed keeps its History file,
-    // so its entries stay visible and the next sweep, or deleting them, tries again.
+    // so its entries stay visible and the next sweep, or deleting them, tries again. A folder that cannot be
+    // listed is reported on its own, and while the replies folder cannot be listed no History day is removed.
     @discardableResult
-    public func applyRetention(today: String = HistoryStore.todayString(), retentionDays: Int) -> [String] {
+    public func applyRetention(today: String = HistoryStore.todayString(), retentionDays: Int) -> RetentionSweep {
         Self.mutationQueue.sync {
-            let evidenceDays = (try? FileManager.default.contentsOfDirectory(atPath: evidence.dir.path)) ?? []
-            let expiredEvidence = HistoryRetention.expired(
-                dayFiles: evidenceDays.map { "\($0).jsonl" }, today: today, retentionDays: retentionDays)
+            guard let historyFiles = Self.listing(dir) else {
+                return RetentionSweep(removed: [], failed: [], unreadable: [dir.lastPathComponent])
+            }
+            let expired = HistoryRetention.expired(
+                dayFiles: historyFiles.filter { $0.hasSuffix(".jsonl") }.sorted(), today: today, retentionDays: retentionDays)
+            guard let evidenceDays = Self.listing(evidence.dir) else {
+                return RetentionSweep(removed: [], failed: expired, unreadable: [evidence.dir.lastPathComponent])
+            }
             var stuck: Set<String> = []
-            for file in expiredEvidence {
+            for file in HistoryRetention.expired(
+                dayFiles: evidenceDays.map { "\($0).jsonl" }, today: today, retentionDays: retentionDays) {
                 do { try evidence.removeDay(String(file.dropLast(".jsonl".count))) } catch { stuck.insert(file) }
             }
-            let expired = HistoryRetention.expired(dayFiles: dayFiles(), today: today, retentionDays: retentionDays)
-                .filter { !stuck.contains($0) }
+            var sweep = RetentionSweep(removed: [], failed: stuck.subtracting(expired).sorted())
             for file in expired {
-                try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
+                if stuck.contains(file) {
+                    sweep.failed.append(file)
+                } else if (try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))) != nil {
+                    sweep.removed.append(file)
+                } else {
+                    sweep.failed.append(file)
+                }
             }
-            return expired
+            return sweep
         }
     }
 }

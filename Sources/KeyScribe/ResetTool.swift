@@ -51,8 +51,9 @@ struct ResetTool {
         actions += eraseCaptureArchive()
         actions += eraseInterruptedRecordings()
         actions += eraseAgentClipboard()
-        for file in [modelLoadDiagFile, requestAdaptationsFile, wireOverridesFile] {
-            try? fileManager.removeItem(at: file)
+        let leftFiles = [modelLoadDiagFile, requestAdaptationsFile, wireOverridesFile].filter { !fileManager.removeIfPresent($0) }
+        if !leftFiles.isEmpty {
+            actions.append("Could not erase \(leftFiles.map(\.path).joined(separator: ", ")).")
         }
         actions += eraseKeychain()
         return actions
@@ -61,10 +62,16 @@ struct ResetTool {
     // The archive lives OUTSIDE supportDir (so a WAV can't fire the config watcher), so no supportDir wipe
     // reaches it. It holds raw speech, so the erase must name it explicitly or "permanently delete" is a lie.
     private func eraseCaptureArchive() -> [String] {
-        let contents = (try? fileManager.contentsOfDirectory(at: captureArchiveDir, includingPropertiesForKeys: nil)) ?? []
-        guard !contents.isEmpty else { return [] }
-        try? fileManager.removeItem(at: captureArchiveDir)
-        return ["Erased \(contents.count) retained recording\(contents.count == 1 ? "" : "s") from \(captureArchiveDir.path)."]
+        guard !fileManager.isMissing(captureArchiveDir) else { return [] }
+        let count = (try? fileManager.contentsOfDirectory(at: captureArchiveDir, includingPropertiesForKeys: nil))?.count
+        guard fileManager.removeIfPresent(captureArchiveDir) else {
+            return ["Could not erase the retained recordings in \(captureArchiveDir.path)."]
+        }
+        switch count {
+        case 0: return []
+        case let count?: return ["Erased \(count) retained recording\(count == 1 ? "" : "s") from \(captureArchiveDir.path)."]
+        case nil: return ["Erased the retained recordings in \(captureArchiveDir.path)."]
+        }
     }
 
     private func eraseInterruptedRecordings() -> [String] {
@@ -75,14 +82,35 @@ struct ResetTool {
 
     private func eraseAgentClipboard() -> [String] {
         let folder = AgentClipboard.folder(in: temporaryDir)
-        let contents = (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        try? fileManager.removeItem(at: folder)
-        guard !contents.isEmpty else { return [] }
-        return ["Erased \(contents.count) clipboard file\(contents.count == 1 ? "" : "s") saved for agents."]
+        guard !fileManager.isMissing(folder) else { return [] }
+        let count = (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil))?.count
+        guard fileManager.removeIfPresent(folder) else {
+            return ["Could not erase the clipboard files saved for agents in \(folder.path)."]
+        }
+        switch count {
+        case 0: return []
+        case let count?: return ["Erased \(count) clipboard file\(count == 1 ? "" : "s") saved for agents."]
+        case nil: return ["Erased the clipboard files saved for agents."]
+        }
+    }
+
+    private func removeChildren(of folder: URL, keeping keep: (URL) -> Bool) -> [String]? {
+        guard let contents = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else {
+            return fileManager.isMissing(folder) ? [] : nil
+        }
+        return contents.filter { !keep($0) && !fileManager.removeIfPresent($0) }.map(\.lastPathComponent)
+    }
+
+    private func leftLine(_ left: [String]?, in folder: URL) -> String? {
+        guard let left else { return "Could not read \(folder.path) to reset it." }
+        guard !left.isEmpty else { return nil }
+        return "Could not remove \(left.sorted().joined(separator: ", ")) from \(folder.path)."
     }
 
     private static func eraseKeychainKeys() -> [String] {
-        let count = KeychainStore.deleteAll()
+        guard let count = KeychainStore.deleteAll() else {
+            return ["Could not confirm that saved AI keys were erased from the Keychain. Check Keychain Access."]
+        }
         return ["Erased \(count) saved AI key\(count == 1 ? "" : "s") from the Keychain."]
     }
 
@@ -95,24 +123,26 @@ struct ResetTool {
 
     private func reseedModes() -> [String] {
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
-        try? fileManager.removeItem(at: modesDir)
-        try? fileManager.createDirectory(at: modesDir, withIntermediateDirectories: true)
         // Drop the last-known-good and seed ledger too, so a re-seed can't resurrect a pre-reset mode.
         let lkgDir = supportDir.appendingPathComponent("lkg", isDirectory: true)
-        try? fileManager.removeItem(at: lkgDir)
+        let left = [modesDir, lkgDir].filter { !fileManager.removeIfPresent($0) }
+        try? fileManager.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        defer { ModeStore.ensureSystemModes(in: modesDir) }
+        guard left.isEmpty else {
+            return ["Could not reset modes: \(left.map(\.path).joined(separator: ", ")) could not be removed."]
+        }
         ModeStore.recordStarterOffersIfFresh(in: modesDir, ledgerDir: lkgDir)
-        ModeStore.ensureSystemModes(in: modesDir)
         return ["Reset modes: recorded \(ModeStore.starterModes().count) starter templates as offers in \(modesDir.path)."]
     }
 
     private func wipeConfig() -> [String] {
         var actions: [String] = []
         let kept = "models"
-        let contents = (try? fileManager.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil)) ?? []
-        for item in contents where item.lastPathComponent != kept && !ConfigWatchFilter.isIgnoredTopLevelFile(item.lastPathComponent) {
-            try? fileManager.removeItem(at: item)
+        let left = removeChildren(of: supportDir) {
+            $0.lastPathComponent == kept || ConfigWatchFilter.isIgnoredTopLevelFile($0.lastPathComponent)
         }
-        actions.append("Wiped config under \(supportDir.path) (kept \(kept)/ and the agent instruction files).")
+        actions.append(leftLine(left, in: supportDir)
+            ?? "Wiped config under \(supportDir.path) (kept \(kept)/ and the agent instruction files).")
         actions += clearOnboarding()
         actions += clearHUDPosition()
         return actions
@@ -124,15 +154,13 @@ struct ResetTool {
         if modelsPath.hasPrefix(supportDir.standardizedFileURL.path + "/") {
             // Production: models cache nested in supportDir — drop every other child so the multi-gigabyte
             // download (shared with the dev variant) survives.
-            let contents = (try? fileManager.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil)) ?? []
-            for item in contents where item.standardizedFileURL.path != modelsPath {
-                try? fileManager.removeItem(at: item)
-            }
-            actions = ["Reset all config under \(supportDir.path); shared downloaded models kept."]
+            let left = removeChildren(of: supportDir) { $0.standardizedFileURL.path == modelsPath }
+            actions = [leftLine(left, in: supportDir) ?? "Reset all config under \(supportDir.path); shared downloaded models kept."]
         } else {
             // Dev: models cache lives outside supportDir, so the whole dir is safe to drop.
-            try? fileManager.removeItem(at: supportDir)
-            actions = ["Removed \(supportDir.path); shared downloaded models kept."]
+            actions = [fileManager.removeIfPresent(supportDir)
+                ? "Removed \(supportDir.path); shared downloaded models kept."
+                : "Could not remove \(supportDir.path)."]
         }
         actions += clearOnboarding()
         actions += clearHUDPosition()

@@ -10,9 +10,8 @@ struct FirstRunAISetupTests {
         modesDir: URL,
         permits: @escaping (Connection) -> Bool = { _ in true },
         saveAPIKey: @escaping (String, String) -> Bool = { _, _ in true },
-        deleteAPIKey: @escaping (String) -> Void = { _ in },
-        readAPIKey: @escaping (String) -> String? = { _ in nil },
-        testConnection: @escaping (Connection) async -> ConnectionTestState = { _ in .passed },
+        deleteAPIKey: @escaping (String) -> Bool = { _ in true },
+        testConnection: @escaping (Connection, String?) async -> ConnectionTestState = { _, _ in .passed },
         listModels: @escaping (Connection, String?) async throws -> [String] = { _, _ in [] },
         onComplete: @escaping () -> Void = {}
     ) -> FirstRunModel {
@@ -22,7 +21,6 @@ struct FirstRunAISetupTests {
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: permits,
             saveAPIKey: saveAPIKey,
             deleteAPIKey: deleteAPIKey,
-            readAPIKey: readAPIKey,
             testConnection: testConnection,
             listModels: listModels,
             onComplete: onComplete)
@@ -220,7 +218,7 @@ struct FirstRunAISetupTests {
             supportDir: supportDir,
             modesDir: modesDir,
             saveAPIKey: { _, _ in saveCalled = true; return true },
-            testConnection: { _ in testCalled = true; return .passed })
+            testConnection: { _, _ in testCalled = true; return .passed })
 
         model.aiDraft = aiDraft(provider: .openai, model: "gpt-5.4-mini", apiKey: "   ")
         await model.createAIService()
@@ -259,17 +257,19 @@ struct FirstRunAISetupTests {
         let started = Signal(), release = Signal()
         var completed = 0
         var deletedKeyRef: String?
+        var savedKeyRef: String?
         let model = makeModel(
             supportDir: supportDir,
             modesDir: modesDir,
-            deleteAPIKey: { deletedKeyRef = $0 },
-            testConnection: { _ in started.fire(); await release.wait(); return .passed },
+            saveAPIKey: { ref, _ in savedKeyRef = ref; return true },
+            deleteAPIKey: { deletedKeyRef = $0; return true },
+            testConnection: { _, _ in started.fire(); await release.wait(); return .passed },
             onComplete: { completed += 1 })
 
         model.aiDraft = aiDraft(name: "Gemini", provider: .gemini, model: "gemini-2.5-flash", apiKey: "secret")
 
         model.connect()
-        await started.wait()      // the connection test is in flight; the key is already saved
+        await started.wait()
         let task = model.setupTask  // capture before stopPolling nils it
         model.stopPolling()       // user closes the wizard → connect task cancelled
         release.fire()            // the test returns .passed after the cancel
@@ -277,7 +277,8 @@ struct FirstRunAISetupTests {
 
         #expect(completed == 0)
         #expect(model.step != .playground)
-        #expect(deletedKeyRef == "keyscribe.llm.gemini")
+        #expect(deletedKeyRef == nil)
+        #expect(savedKeyRef == nil)
         #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
         let modes = ModeStore.loadAll(in: modesDir)
         #expect(modes.filter { $0.seedId != nil && $0.aiRewrite != nil }.allSatisfy { $0.aiRewrite?.connection == "" })
@@ -291,11 +292,13 @@ struct FirstRunAISetupTests {
         ModeStore.seedStarterFilesForTesting(in: modesDir)
         var completed = 0
         var deletedKeyRef: String?
+        var savedKeyRef: String?
         let model = makeModel(
             supportDir: supportDir,
             modesDir: modesDir,
-            deleteAPIKey: { deletedKeyRef = $0 },
-            testConnection: { _ in .failed("401 Unauthorized") },
+            saveAPIKey: { ref, _ in savedKeyRef = ref; return true },
+            deleteAPIKey: { deletedKeyRef = $0; return true },
+            testConnection: { _, _ in .failed("401 Unauthorized") },
             onComplete: { completed += 1 })
 
         model.aiDraft = aiDraft(name: "Gemini", provider: .gemini, model: "gemini-2.5-flash", apiKey: "bad-key")
@@ -303,7 +306,8 @@ struct FirstRunAISetupTests {
 
         #expect(completed == 0)
         #expect(model.aiSetupError == "Connection test failed: 401 Unauthorized")
-        #expect(deletedKeyRef == "keyscribe.llm.gemini")
+        #expect(deletedKeyRef == nil)
+        #expect(savedKeyRef == nil)
         #expect(ConnectionStore.loadOrDefault(supportDir: supportDir).connections.isEmpty)
         let modes = ModeStore.loadAll(in: modesDir)
         #expect(modes.filter { $0.seedId != nil && $0.aiRewrite != nil }.allSatisfy { $0.aiRewrite?.connection == "" })
@@ -369,7 +373,7 @@ struct FirstRunAISetupTests {
             supportDir: supportDir,
             modesDir: modesDir,
             saveAPIKey: { _, _ in saveCalled = true; return false },
-            testConnection: { connection in
+            testConnection: { connection, _ in
                 #expect(connection.authMethod == .none)
                 #expect(connection.baseUrl == "http://127.0.0.1:11234/v1")
                 return .passed
@@ -398,7 +402,7 @@ struct FirstRunAISetupTests {
             supportDir: supportDir,
             modesDir: modesDir,
             saveAPIKey: { _, _ in saveCalled = true; return false },
-            testConnection: { connection in
+            testConnection: { connection, _ in
                 #expect(connection.authMethod == .tokenCommand)
                 #expect(connection.tokenCommand == "print-token")
                 return .passed
@@ -427,7 +431,7 @@ struct FirstRunAISetupTests {
             supportDir: supportDir,
             modesDir: modesDir,
             saveAPIKey: { _, _ in saveCalled = true; return false },
-            testConnection: { connection in
+            testConnection: { connection, _ in
                 #expect(connection.provider == .openai)
                 #expect(connection.authMethod == .tokenCommand)
                 #expect(connection.tokenCommand == "print-token")
@@ -459,9 +463,8 @@ struct FirstRunAISetupTests {
             modesDir: modesDir,
             permits: { _ in false },
             saveAPIKey: { _, _ in keychainTouched = true; return true },
-            deleteAPIKey: { _ in keychainTouched = true },
-            readAPIKey: { _ in keychainTouched = true; return nil },
-            testConnection: { _ in tested = true; return .passed })
+            deleteAPIKey: { _ in keychainTouched = true; return true },
+            testConnection: { _, _ in tested = true; return .passed })
 
         model.aiDraft = aiDraft(name: "Gemini", provider: .gemini, model: "gemini-2.5-flash", apiKey: "secret")
         await model.createAIService()

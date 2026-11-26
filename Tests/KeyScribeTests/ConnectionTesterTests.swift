@@ -32,6 +32,20 @@ private final class Asked: @unchecked Sendable {
     func record(_ connection: Connection) { lock.withLock { seen.append(connection) } }
 }
 
+private final class CallCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func add() { lock.withLock { count += 1 } }
+}
+
+private final class KeyRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen: [String?] = []
+    var keys: [String?] { lock.withLock { seen } }
+    func record(_ key: String?) { lock.withLock { seen.append(key) } }
+}
+
 private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
@@ -99,7 +113,7 @@ struct ConnectionTesterTests {
             baseUrl: "http://127.0.0.1:11234/v1")
         let body = #"{"error":{"message":"The model `bogus-model` does not exist","type":"invalid_request_error","param":null,"code":"model_not_found"}}"#
         let tester = ConnectionTester(
-            client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))), listModels: { _ in ["other-model"] })
+            client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))), listModels: { _, _ in ["other-model"] })
         guard case .failed(let message) = await tester.test(compat) else {
             Issue.record("expected a 404 to be a failure")
             return
@@ -115,7 +129,7 @@ struct ConnectionTesterTests {
             ProviderTransportError.http(500, body: nil), ProviderTransportError.missingKey("k"), URLError(.cannotConnectToHost),
         ]
         for error in failures {
-            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error)), listModels: { _ in nil }).test(connection) else {
+            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error)), listModels: { _, _ in nil }).test(connection) else {
                 Issue.record("expected \(error) to fail")
                 continue
             }
@@ -125,7 +139,7 @@ struct ConnectionTesterTests {
 
     @Test func theModelSentenceFollowsAProviderMessageWithoutClosingPunctuation() async {
         let body = "Invalid request"
-        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(400, body: body))), listModels: { _ in nil })
+        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(400, body: body))), listModels: { _, _ in nil })
         guard case .failed(let message) = await tester.test(connection) else {
             Issue.record("expected a 400 to fail")
             return
@@ -140,7 +154,7 @@ struct ConnectionTesterTests {
         let asked = Asked()
         let tester = ConnectionTester(
             client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))),
-            listModels: { asked.record($0); return ["model-x", "vendor/model-x"] })
+            listModels: { connection, _ in asked.record(connection); return ["model-x", "vendor/model-x"] })
         #expect(await tester.test(compat) == .failed(
             "The service lists “model-x” among its models but refused to run it. Some services expect another form of the ID, such as one with a provider name in front. Check the service's documentation for the ID to use."))
         #expect(asked.connections == [compat])
@@ -151,7 +165,7 @@ struct ConnectionTesterTests {
             id: "c", name: "C", provider: .openaiCompatible, model: "model-x", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
         let body = #"{"error":{"message":"no such model","code":"model_not_found"}}"#
         let tester = ConnectionTester(
-            client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))), listModels: { _ in nil })
+            client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))), listModels: { _, _ in nil })
         guard case .failed(let message) = await tester.test(compat) else {
             Issue.record("expected a 404 to be a failure")
             return
@@ -164,7 +178,7 @@ struct ConnectionTesterTests {
             id: "c", name: "C", provider: .openaiCompatible, model: "model-x", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
         let asked = Asked()
         for error in [ProviderTransportError.http(401, body: nil), .http(404, body: nil), .http(500, body: nil)] {
-            _ = await ConnectionTester(client: FakeClient(result: .failure(error)), listModels: { asked.record($0); return [] }).test(compat)
+            _ = await ConnectionTester(client: FakeClient(result: .failure(error)), listModels: { connection, _ in asked.record(connection); return [] }).test(compat)
         }
         #expect(asked.connections.isEmpty)
     }
@@ -188,7 +202,7 @@ struct ConnectionTesterTests {
             baseUrl: "http://127.0.0.1:11234/v1")
         let missing = #"{"error":{"message":"no such model","code":"model_not_found"}}"#
         for error in [ProviderTransportError.http(400, body: nil), .http(404, body: nil), .http(404, body: missing), .http(422, body: nil)] {
-            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error)), listModels: { _ in nil }).test(compat) else {
+            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error)), listModels: { _, _ in nil }).test(compat) else {
                 Issue.record("expected \(error) to fail")
                 continue
             }
@@ -212,6 +226,56 @@ struct ConnectionTesterTests {
             model: "qwen", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
 
         #expect(await tester.test(connection) == .passed)
+    }
+
+    @Test func aTestWithAKeyInHandSendsThatKeyAndNeverReadsTheKeychain() async {
+        StubURLProtocol.handler = { request in
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer typed-key")
+            let body = #"{"choices":[{"message":{"content":"OK"}}]}"#.data(using: .utf8)!
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let client = HTTPLLMClient(session: URLSession(configuration: config), keyProvider: { _ in .denied(status: -128) })
+        let tester = ConnectionTester(client: client)
+        let connection = Connection(
+            id: "local", name: "Local", provider: .openaiCompatible,
+            model: "qwen", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
+
+        #expect(await tester.test(connection, apiKey: "typed-key") == .passed)
+    }
+
+    @Test func aMissingModelIsCheckedAgainstTheListWithTheKeyInHand() async {
+        StubURLProtocol.handler = { request in
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer typed-key")
+            let body = #"{"error":{"message":"The model `qwen` does not exist","type":"invalid_request_error","param":null,"code":"model_not_found"}}"#
+            return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data(body.utf8))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let keychainRead = CallCount()
+        let client = HTTPLLMClient(
+            session: URLSession(configuration: config), keyProvider: { _ in keychainRead.add(); return .absent })
+        let listedWith = KeyRecorder()
+        let tester = ConnectionTester(client: client, listModels: { _, key in listedWith.record(key); return ["qwen"] })
+        let connection = Connection(
+            id: "local", name: "Local", provider: .openaiCompatible,
+            model: "qwen", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
+
+        #expect(await tester.test(connection, apiKey: "typed-key") == .failed(ConnectionTester.listedButRefused("qwen")))
+        #expect(listedWith.keys == ["typed-key"])
+        #expect(keychainRead.value == 0)
+    }
+
+    @Test func aKeyInHandThatTheClientCannotUseFailsInsteadOfTestingWithoutIt() async {
+        let tester = ConnectionTester(client: FakeClient(result: .success("OK")), listModels: { _, _ in nil })
+        let connection = Connection(
+            id: "local", name: "Local", provider: .openaiCompatible,
+            model: "qwen", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
+
+        guard case .failed = await tester.test(connection, apiKey: "typed-key") else {
+            Issue.record("expected a failure"); return
+        }
     }
 
     @Test func openAICompatibleNoAuthDoesNotSendStoredKey() async {

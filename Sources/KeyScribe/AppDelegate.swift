@@ -231,7 +231,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         configProblemAnnouncement = ConfigProblemAnnouncement(baseline: configProblems)
         history = HistoryStore(supportDir: KeyScribePaths.supportDir)
-        history.applyRetention(retentionDays: settings.history.retentionDays)
+        history.applyRetention(retentionDays: settings.history.retentionDays).logFailures()
         excludeHistoryFromBackups(settings.history)
         Task {
             await RequestAdaptationCache.shared.persist(to: KeyScribePaths.requestAdaptationsFile)
@@ -1150,7 +1150,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if !updated.agents.spokenResult.enabled { agentRuntime?.hub.speechTurnedOff() }
         if hostsChanged, let hub = agentRuntime?.hub { Task { await hub.rescan(wantingHosts: true) } }
         if updated.history != previousHistory {
-            history?.applyRetention(retentionDays: updated.history.retentionDays)
+            history?.applyRetention(retentionDays: updated.history.retentionDays).logFailures()
             excludeHistoryFromBackups(updated.history)
         }
         // Sweep on change too, so a lowered budget reclaims now rather than after the next dictation.

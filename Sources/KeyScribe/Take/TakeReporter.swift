@@ -56,7 +56,7 @@ final class TakeReporter {
         let write: @Sendable () -> Bool = { [log] in
             do {
                 try history.append(entry, today: today)
-                if sweepRetention { history.applyRetention(today: today, retentionDays: retentionDays) }
+                if sweepRetention { history.applyRetention(today: today, retentionDays: retentionDays).logFailures() }
                 return true
             } catch {
                 log.error("history append failed: \(error.localizedDescription, privacy: .public)")

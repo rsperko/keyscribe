@@ -2241,7 +2241,7 @@ final class AgentHub {
             Log.agents.notice(
                 "a turn in \(handle, privacy: .private) ended without its host's record of what it took, so \(claimed.count) of the \(waiting) dictations waiting on it were matched by the prompt it started with")
         }
-        if let continued, claimed.isEmpty {
+        if continued != nil, claimed.isEmpty {
             Log.agents.info("a turn in \(handle, privacy: .private) that the agent started without a message continues the dictation its last dictated turn took")
         }
         let origin = claimed.last ?? continued

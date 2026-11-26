@@ -41,13 +41,14 @@ enum KeychainStore {
         cache.lookup(keyRef)
     }
 
-    static func delete(_ keyRef: String) {
+    @discardableResult
+    static func delete(_ keyRef: String) -> Bool {
         cache.delete(keyRef)
     }
 
-    // Erase every BYOK secret under this variant's service.
+    // Erase every BYOK secret under this variant's service. Nil when the erase could not be confirmed.
     @discardableResult
-    static func deleteAll() -> Int {
+    static func deleteAll() -> Int? {
         cache.deleteAll()
     }
 
@@ -96,11 +97,22 @@ enum KeychainStore {
         }
     }
 
-    private static func rawDelete(_ keyRef: String) {
-        SecItemDelete(baseQuery(keyRef) as CFDictionary)
+    private static func rawDelete(_ keyRef: String) -> Bool {
+        let status = SecItemDelete(baseQuery(keyRef) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 
-    private static func rawDeleteAll() -> Int {
+    private static func rawDeleteAll() -> Int? {
+        guard let before = storedCount() else { return nil }
+        let status = SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+        ] as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound, storedCount() == 0 else { return nil }
+        return before
+    }
+
+    private static func storedCount() -> Int? {
         let countQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -108,12 +120,10 @@ enum KeychainStore {
             kSecReturnAttributes as String: true,
         ]
         var result: CFTypeRef?
-        let count = SecItemCopyMatching(countQuery as CFDictionary, &result) == errSecSuccess
-            ? ((result as? [[String: Any]])?.count ?? 0) : 0
-        SecItemDelete([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-        ] as CFDictionary)
-        return count
+        switch SecItemCopyMatching(countQuery as CFDictionary, &result) {
+        case errSecSuccess: return (result as? [[String: Any]])?.count ?? 0
+        case errSecItemNotFound: return 0
+        default: return nil
+        }
     }
 }

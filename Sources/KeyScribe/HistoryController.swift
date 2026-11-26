@@ -70,6 +70,7 @@ final class HistoryPaneModel: ObservableObject {
     var listIsCapped: Bool { rows.count >= Self.loadLimit }
     static var loadLimitText: String { Self.loadLimit.formatted() }
     @Published private(set) var hasStoredHistory = false
+    @Published private(set) var retentionFailure: String?
 
     private static let loadLimit = 1000
     private var rows: [HistoryRow] = []
@@ -366,8 +367,13 @@ final class HistoryPaneModel: ObservableObject {
     // from the visible list immediately instead of leaving them until the next pane switch. Idempotent
     // with the AppDelegate's settings-driven prune (deletes already-gone files → no-op).
     func applyRetention(days: Int) {
-        _ = store.applyRetention(retentionDays: days)
+        sweepRetention(days: days)
         reload()
+    }
+
+    func sweepRetention(days: Int) {
+        retentionFailure = store.applyRetention(retentionDays: days).succeeded ? nil
+            : "Some history older than this could not be deleted and is still on this Mac. It is tried again the next time you open History."
     }
 
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
@@ -888,6 +894,7 @@ struct HistoryPaneView: View {
                     .fixedSize()
                     .accessibilityIdentifier(AccessibilityID.Settings.General.retentionDays)
                 }
+                if let failure = model.retentionFailure { IssueText(failure) }
             }
         }
         .padding(10)

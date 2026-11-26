@@ -82,7 +82,12 @@ enum CaptureArchive {
             let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
             guard let entries = try? fm.contentsOfDirectory(
                 at: config.dir, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])
-            else { return }
+            else {
+                if !fm.isMissing(config.dir) {
+                    Log.audio.error("capture archive retention could not read its folder")
+                }
+                return
+            }
             let files: [CaptureRetention.File] = entries.compactMap { url in
                 guard url.pathExtension == "wav",
                       let values = try? url.resourceValues(forKeys: Set(keys)),
@@ -91,8 +96,11 @@ enum CaptureArchive {
                 else { return nil }
                 return CaptureRetention.File(name: url.lastPathComponent, bytes: Int64(bytes), modified: modified)
             }
-            for name in CaptureRetention.expired(files: files, maxBytes: config.maxBytes) {
-                try? fm.removeItem(at: config.dir.appendingPathComponent(name))
+            let stuck = CaptureRetention.expired(files: files, maxBytes: config.maxBytes).filter { name in
+                !fm.removeIfPresent(config.dir.appendingPathComponent(name))
+            }
+            if !stuck.isEmpty {
+                Log.audio.error("capture archive retention could not delete \(stuck.count, privacy: .public) recording(s)")
             }
         }
     }

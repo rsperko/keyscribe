@@ -402,6 +402,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             // re-captured here, where the frontmost app is already KeyScribe. It must also survive an
             // in-window pane switch away and back, so it is cleared only on window close, not here.
             registerHistoryActivationObserver()
+            history.sweepRetention(days: model.retentionDays)
             reloadHistoryIfNeeded()
         } else {
             removeHistoryActivationObserver()

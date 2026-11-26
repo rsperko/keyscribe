@@ -7,7 +7,9 @@ struct ConnectionTester {
     static let shared = ConnectionTester()
 
     var client: any LLMClient = HTTPLLMClient(session: HTTPLLMClient.settingsSession())
-    var listModels: @Sendable (Connection) async -> [String]? = { try? await firstPageLister.listModels(for: $0, apiKey: nil) }
+    var listModels: @Sendable (Connection, String?) async -> [String]? = {
+        try? await firstPageLister.listModels(for: $0, apiKey: $1)
+    }
     private static let firstPageLister = HTTPModelLister(
         session: ProviderTransport.makeSession(requestTimeout: 5, resourceTimeout: 5), pageLimit: 1)
 
@@ -15,7 +17,11 @@ struct ConnectionTester {
         await client.reasoningOutcome(for: connection).map { "Reasoning: \($0.summary)" }
     }
 
-    func test(_ connection: Connection) async -> ConnectionTestState {
+    func test(_ connection: Connection, apiKey: String? = nil) async -> ConnectionTestState {
+        let apiKey = apiKey.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+        guard let client = keyed(apiKey) else {
+            return .failed("This connection test cannot use a key that is not saved yet.")
+        }
         do {
             let reply = try await client.complete(
                 system: "You are a connection test. Reply with the single word OK.",
@@ -25,12 +31,19 @@ struct ConnectionTester {
                 : .passed
         } catch {
             if Self.isMissingModel(error, connection: connection), !Task.isCancelled,
-               await listModels(connection)?.contains(connection.model) == true {
+               await listModels(connection, apiKey)?.contains(connection.model) == true {
                 return .failed(Self.listedButRefused(connection.model))
             }
             let message = Self.failureMessage(for: error, connection: connection)
             return .failed(Self.modelMatters(error) ? Self.naming(connection.model, in: message) : message)
         }
+    }
+
+    private func keyed(_ apiKey: String?) -> (any LLMClient)? {
+        guard let apiKey else { return client }
+        guard var http = client as? HTTPLLMClient else { return nil }
+        http.keyProvider = { _ in .found(apiKey) }
+        return http
     }
 
     static func modelMatters(_ error: Error) -> Bool {
@@ -99,7 +112,7 @@ final class AIServiceSettingsModel: ObservableObject {
     private let tester: ConnectionTester
     private let listModels: (Connection, String?) async throws -> [ModelListing]
     private let saveAPIKey: (String, String) -> Bool
-    private let deleteAPIKey: (String) -> Void
+    private let deleteAPIKey: (String) -> Bool
     private(set) var testTask: Task<Void, Never>?
     // Monotonic per-connection token: a post-test edit bumps it so a slow verdict landing after the reset
     // can't resurrect a stale error badge.
@@ -115,7 +128,7 @@ final class AIServiceSettingsModel: ObservableObject {
             try await HTTPModelLister().listModelDetails(for: $0, apiKey: $1)
         },
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
-        deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) }
+        deleteAPIKey: @escaping (String) -> Bool = { KeychainStore.delete($0) }
     ) {
         self.repository = repository
         self.permits = permits
@@ -302,7 +315,9 @@ final class AIServiceSettingsModel: ObservableObject {
         recomputeDependents()
     }
 
-    func update(_ connection: Connection, apiKey: String?) {
+    @discardableResult
+    func update(_ connection: Connection, apiKey: String?) -> Bool {
+        guard save(connection) else { return false }
         if pendingConnectOffer?.connectionId == connection.id { pendingConnectOffer = nil }
         if let catalog = modelReasoningByConnection[connection.id],
            catalog.endpoint != ModelReasoningCatalog(for: connection, models: [:]).endpoint {
@@ -310,40 +325,35 @@ final class AIServiceSettingsModel: ObservableObject {
         }
         testStates[connection.id] = nil
         testGeneration[connection.id, default: 0] += 1
-        save(connection)
-        guard let apiKey, !apiKey.isEmpty else { return }
-        if saveAPIKey(connection.keyRef, apiKey) {
-            keyedRefs.insert(connection.keyRef)
-        } else {
+        guard let apiKey, !apiKey.isEmpty else { return true }
+        guard saveAPIKey(connection.keyRef, apiKey) else {
             error = "Could not save the API key for \(connection.name)."
+            return false
         }
+        keyedRefs.insert(connection.keyRef)
+        return true
     }
 
-    // Strips any UUID a prior rotation already appended, so repeated boundary crossings can't grow the ref
-    // unboundedly (base.uuid1.uuid2…) — it stays base + exactly one UUID.
-    private func rotationBase(_ keyRef: String) -> String {
-        let parts = keyRef.split(separator: ".", omittingEmptySubsequences: false)
-        if let last = parts.last, UUID(uuidString: String(last)) != nil {
-            return parts.dropLast().joined(separator: ".")
-        }
-        return keyRef
-    }
-
-    func updateAcrossCredentialBoundary(_ connection: Connection) {
-        deleteAPIKey(connection.keyRef)
-        keyedRefs.remove(connection.keyRef)
+    @discardableResult
+    func updateAcrossCredentialBoundary(_ connection: Connection) -> Bool {
+        let retiredRef = connection.keyRef
+        var rotated = connection
+        rotated.keyRef = AIServiceConnector.freshKeyRef(replacing: retiredRef)
+        guard update(rotated, apiKey: nil) else { return false }
+        keyedRefs.remove(retiredRef)
         modelDiscoveryStates[connection.id] = nil
         modelSuggestionsByConnection[connection.id] = nil
         modelReasoningByConnection[connection.id] = nil
-        var connection = connection
-        connection.keyRef = "\(rotationBase(connection.keyRef)).\(UUID().uuidString)"
-        update(connection, apiKey: nil)
+        if !deleteAPIKey(retiredRef) {
+            error = "\(connection.name) no longer uses its previous API key, but it could not be removed from the Keychain. You can delete it in Keychain Access."
+        }
+        return true
     }
 
     func delete(_ connection: Connection) {
         do {
             let updated = try repository.deleteConnection(id: connection.id).connections
-            deleteAPIKey(connection.keyRef)
+            let keyRemoved = deleteAPIKey(connection.keyRef)
             keyedRefs.remove(connection.keyRef)
             testStates[connection.id] = nil
             // Bump so an in-flight test for the deleted connection can't land on a freshly created one
@@ -356,7 +366,8 @@ final class AIServiceSettingsModel: ObservableObject {
             if pendingConnectOffer?.connectionId == connection.id { pendingConnectOffer = nil }
             connections = updated
             selectedID = updated.first?.id
-            error = nil
+            error = keyRemoved ? nil
+                : "Removed \(connection.name), but could not remove its API key from the Keychain."
         } catch {
             self.error = "Could not delete \(connection.name): \(error.localizedDescription)"
         }
@@ -366,12 +377,15 @@ final class AIServiceSettingsModel: ObservableObject {
 
     func hasKey(_ connection: Connection) -> Bool { keyedRefs.contains(connection.keyRef) }
 
-    private func save(_ connection: Connection) {
+    @discardableResult
+    private func save(_ connection: Connection) -> Bool {
         do {
             connections = try repository.upsertConnection(connection).connections
             error = nil
+            return true
         } catch {
             self.error = "Could not save \(connection.name): \(error.localizedDescription)"
+            return false
         }
     }
 }
@@ -487,7 +501,7 @@ struct AIServiceSettingsView: View {
                 modelDiscoveryState: model.modelDiscoveryState(for: connection.id),
                 modelReasoning: model.modelReasoning(for: connection.id),
                 reasoningSummary: model.reasoningSummary(for: connection.id),
-                onUpdate: model.update,
+                onUpdate: { model.update($0, apiKey: $1) },
                 onBoundaryUpdate: model.updateAcrossCredentialBoundary,
                 onFetchModels: { connection, apiKey in
                     Task { await model.fetchModels(for: connection, apiKey: apiKey) }
@@ -620,7 +634,7 @@ private struct AIServiceEditor: View {
     var reasoningSummary: String? = nil
     var autofocusName = false
     let onUpdate: (Connection, String?) -> Void
-    let onBoundaryUpdate: (Connection) -> Void
+    let onBoundaryUpdate: (Connection) -> Bool
     let onFetchModels: (Connection, String?) -> Void
     let onTest: () -> Void
     var onConsumeFocus: () -> Void = {}
@@ -641,7 +655,7 @@ private struct AIServiceEditor: View {
         reasoningSummary: String? = nil,
         autofocusName: Bool = false,
         onUpdate: @escaping (Connection, String?) -> Void,
-        onBoundaryUpdate: @escaping (Connection) -> Void,
+        onBoundaryUpdate: @escaping (Connection) -> Bool,
         onFetchModels: @escaping (Connection, String?) -> Void,
         onTest: @escaping () -> Void,
         onConsumeFocus: @escaping () -> Void = {},
@@ -758,8 +772,8 @@ private struct AIServiceEditor: View {
 
     private func confirmCredentialBoundary() {
         guard let pendingBoundaryConnection else { return }
+        if !onBoundaryUpdate(pendingBoundaryConnection) { cancelCredentialBoundary() }
         self.pendingBoundaryConnection = nil
-        onBoundaryUpdate(pendingBoundaryConnection)
     }
 
     // Unlike refreshDraft, this re-derives presetId and stashed values from what's actually stored rather

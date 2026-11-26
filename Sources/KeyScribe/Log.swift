@@ -1,3 +1,4 @@
+import KeyScribeKit
 import os
 
 enum Log {
@@ -8,4 +9,13 @@ enum Log {
     static let insertion = Logger(subsystem: "com.keyscribe.app", category: "insertion")
     static let config = Logger(subsystem: "com.keyscribe.app", category: "config")
     static let agents = Logger(subsystem: "com.keyscribe.app", category: "agents")
+    static let history = Logger(subsystem: "com.keyscribe.app", category: "history")
+}
+
+extension HistoryStore.RetentionSweep {
+    func logFailures() {
+        guard !succeeded else { return }
+        Log.history.error(
+            "history retention could not delete \(failed.count, privacy: .public) expired day(s) and could not list \(unreadable.count, privacy: .public) folder(s)")
+    }
 }

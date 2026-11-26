@@ -19,7 +19,7 @@ struct FirstRunPlaygroundTests {
             selectEngine: { _ in },
             repository: ConfigRepository(supportDir: supportDir, config: ConfigCache(supportDir: supportDir)), permits: { _ in true },
             saveAPIKey: { _, _ in true },
-            testConnection: { _ in .passed },
+            testConnection: { _, _ in .passed },
             listModels: { _, _ in [] },
             onComplete: {})
         model.aiDraft = AIConnectionDraft(

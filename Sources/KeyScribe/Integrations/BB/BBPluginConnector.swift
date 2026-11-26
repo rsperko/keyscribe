@@ -230,7 +230,7 @@ final class BBPluginConnector: AgentConnector {
         let installed = config["version"] as? String ?? ""
         let listing = try? await output(tool, ["plugin", "list", "--json"], subcommand: "plugin list", target: target)
         guard let listing, listing.status == 0, let found = BBPluginFiles.listed(listing.stdout, id: id, folder: plugin.path) else {
-            return await reachable(target.folder) ? .status(.unknown) : .status(.notOpen)
+            return reachable(target.folder) ? .status(.unknown) : .status(.notOpen)
         }
         guard let plugin = found else { return .status(.notInstalled) }
         if !plugin.enabled || plugin.status == "disabled" { return .status(.disabled) }
@@ -243,7 +243,7 @@ final class BBPluginConnector: AgentConnector {
         return filesCurrent(sources, target: target, installation: installation) ? .status(.ready) : .status(.outdated(installed: installed))
     }
 
-    @MainActor private func reachable(_ folder: URL) -> Bool {
+    private func reachable(_ folder: URL) -> Bool {
         let build = builds.first { $0.folder == folder.path } ?? added[folder.path] ?? BBBuild(folder: folder.path, name: BBBuilds.fallbackName)
         return isOpen(build) || serving(build)
     }

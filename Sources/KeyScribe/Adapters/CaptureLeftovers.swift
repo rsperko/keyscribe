@@ -20,6 +20,7 @@ enum CaptureLeftovers {
         let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys)) ?? []
         var removed = 0
+        var stuck = 0
         for file in files {
             guard let owner = owner(of: file.lastPathComponent),
                   let values = try? file.resourceValues(forKeys: Set(keys)), values.isRegularFile == true
@@ -30,9 +31,10 @@ enum CaptureLeftovers {
                 guard let modified = values.contentModificationDate,
                       now.timeIntervalSince(modified) >= legacyMinimumAge else { continue }
             }
-            guard (try? FileManager.default.removeItem(at: file)) != nil else { continue }
+            guard FileManager.default.removeIfPresent(file) else { stuck += 1; continue }
             removed += 1
         }
+        if stuck > 0 { Log.audio.error("could not delete \(stuck, privacy: .public) leftover capture file(s)") }
         return removed
     }
 

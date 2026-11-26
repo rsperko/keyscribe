@@ -45,9 +45,8 @@ struct AIServiceConnectorTests {
         let connector = AIServiceConnector(
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { ref, _ in savedRef = ref; return true },
-            deleteAPIKey: { _ in },
-            readAPIKey: { _ in nil },
-            testConnection: { _ in .passed })
+            deleteAPIKey: { _ in true },
+            testConnection: { _, _ in .passed })
 
         let result = await connector.connect(draft: draft(), reusingId: nil)
 
@@ -71,9 +70,8 @@ struct AIServiceConnectorTests {
         let connector = AIServiceConnector(
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { _, _ in keychainTouched = true; return true },
-            deleteAPIKey: { _ in keychainTouched = true },
-            readAPIKey: { _ in keychainTouched = true; return nil },
-            testConnection: { _ in .passed })
+            deleteAPIKey: { _ in keychainTouched = true; return true },
+            testConnection: { _, _ in .passed })
 
         let result = await connector.connect(draft: noAuthDraft(), reusingId: nil)
 
@@ -90,9 +88,8 @@ struct AIServiceConnectorTests {
         let connector = AIServiceConnector(
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { _, _ in keychainTouched = true; return true },
-            deleteAPIKey: { _ in keychainTouched = true },
-            readAPIKey: { _ in keychainTouched = true; return nil },
-            testConnection: { _ in .failed("503 Service Unavailable") })
+            deleteAPIKey: { _ in keychainTouched = true; return true },
+            testConnection: { _, _ in .failed("503 Service Unavailable") })
 
         let result = await connector.connect(draft: noAuthDraft(), reusingId: nil)
 
@@ -109,9 +106,8 @@ struct AIServiceConnectorTests {
         let connector = AIServiceConnector(
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in false },
             saveAPIKey: { _, _ in keychainTouched = true; return true },
-            deleteAPIKey: { _ in keychainTouched = true },
-            readAPIKey: { _ in keychainTouched = true; return nil },
-            testConnection: { _ in tested = true; return .passed })
+            deleteAPIKey: { _ in keychainTouched = true; return true },
+            testConnection: { _, _ in tested = true; return .passed })
 
         let result = await connector.connect(draft: draft(), reusingId: nil)
 
@@ -121,42 +117,139 @@ struct AIServiceConnectorTests {
         #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
     }
 
-    @Test func failedTestRollsBackTheKeyAndPersistsNothing() async {
-        let support = tempSupport()
-        defer { try? FileManager.default.removeItem(at: support) }
-        var deletedRef: String?
-        let connector = AIServiceConnector(
+    private func connector(
+        _ support: URL,
+        save: @escaping (String, String) -> Bool = { _, _ in true },
+        delete: @escaping (String) -> Bool = { _ in true },
+        test: @escaping (Connection, String?) async -> ConnectionTestState = { _, _ in .passed }
+    ) -> AIServiceConnector {
+        AIServiceConnector(
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
-            saveAPIKey: { _, _ in true },
-            deleteAPIKey: { deletedRef = $0 },
-            readAPIKey: { _ in nil },
-            testConnection: { _ in .failed("401 Unauthorized") })
-
-        let result = await connector.connect(draft: draft(), reusingId: nil)
-
-        #expect(result.outcome == .failed("Connection test failed: 401 Unauthorized"))
-        #expect(deletedRef == "keyscribe.llm.gemini")
-        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
+            saveAPIKey: save, deleteAPIKey: delete, testConnection: test)
     }
 
-    @Test func failedRetestRestoresAPreExistingKeyInsteadOfDeletingIt() async {
+    @Test func theTestUsesTheTypedKeyBeforeAnythingIsStored() async {
         let support = tempSupport()
         defer { try? FileManager.default.removeItem(at: support) }
-        var saves: [(ref: String, value: String)] = []
-        var deletedRef: String?
-        let connector = AIServiceConnector(
-            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
-            saveAPIKey: { ref, value in saves.append((ref, value)); return true },
-            deleteAPIKey: { deletedRef = $0 },
-            readAPIKey: { _ in "existing-good-key" },
-            testConnection: { _ in .failed("401 Unauthorized") })
+        var events: [String] = []
+        let connector = connector(
+            support,
+            save: { _, value in events.append("save \(value)"); return true },
+            test: { _, key in events.append("test \(key ?? "nil")"); return .passed })
+
+        _ = await connector.connect(draft: draft(), reusingId: nil)
+
+        #expect(events == ["test secret", "save secret"])
+    }
+
+    @Test func aFailedTestNeverTouchesTheKeychain() async {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var keychainTouched = false
+        let connector = connector(
+            support,
+            save: { _, _ in keychainTouched = true; return true },
+            delete: { _ in keychainTouched = true; return true },
+            test: { _, _ in .failed("401 Unauthorized") })
 
         let result = await connector.connect(draft: draft(), reusingId: "gemini")
 
         #expect(result.outcome == .failed("Connection test failed: 401 Unauthorized"))
-        #expect(deletedRef == nil)
-        #expect(saves.last?.ref == "keyscribe.llm.gemini")
-        #expect(saves.last?.value == "existing-good-key")
+        #expect(!keychainTouched)
+        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
+    }
+
+    @Test func aKeyThatCannotBeSavedPersistsNothing() async {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let connector = connector(support, save: { _, _ in false })
+
+        let result = await connector.connect(draft: draft(), reusingId: nil)
+
+        #expect(result.outcome == .failed("Could not save the API key."))
+        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
+    }
+
+    @Test func aNewServiceThatCannotBeSavedRemovesTheKeyItJustStored() async throws {
+        let support = tempSupport()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: support.path)
+            try? FileManager.default.removeItem(at: support)
+        }
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: support.path)
+        var deleted: [String] = []
+        let connector = connector(support, delete: { deleted.append($0); return true })
+
+        let result = await connector.connect(draft: draft(), reusingId: nil)
+
+        guard case .failed(let message) = result.outcome else { Issue.record("expected failed"); return }
+        #expect(message.hasPrefix("Could not save the AI service"))
+        #expect(deleted == ["keyscribe.llm.gemini"])
+    }
+
+    @Test func aStoredKeyThatCannotBeRemovedAfterAFailedSaveIsReported() async throws {
+        let support = tempSupport()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: support.path)
+            try? FileManager.default.removeItem(at: support)
+        }
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: support.path)
+        let connector = connector(support, delete: { _ in false })
+
+        let result = await connector.connect(draft: draft(), reusingId: nil)
+
+        guard case .failed(let message) = result.outcome else { Issue.record("expected failed"); return }
+        #expect(message.contains("Keychain"))
+    }
+
+    private func savedService(_ support: URL) throws -> Connection {
+        let connection = draft().connection(id: "gemini", keyRef: "keyscribe.llm.gemini")
+        try ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)).upsertConnection(connection)
+        return connection
+    }
+
+    @Test func aPassingRetestOfASavedServiceStoresTheKeyUnderANewReferenceAndRetiresTheOld() async throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let saved = try savedService(support)
+        var savedRefs: [String] = []
+        var deletedRefs: [String] = []
+        let connector = connector(
+            support, save: { ref, _ in savedRefs.append(ref); return true },
+            delete: { deletedRefs.append($0); return true })
+
+        let result = await connector.connect(draft: draft(), reusingId: saved.id)
+
+        guard case .connected(let connection) = result.outcome else { Issue.record("expected connected"); return }
+        #expect(connection.keyRef != saved.keyRef)
+        #expect(savedRefs == [connection.keyRef])
+        #expect(deletedRefs == [saved.keyRef])
+        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.map(\.keyRef) == [connection.keyRef])
+    }
+
+    @Test func aPassingRetestWhoseServiceCannotBeSavedLeavesTheWorkingKeyAlone() async throws {
+        let support = tempSupport()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: support.path)
+            try? FileManager.default.removeItem(at: support)
+        }
+        let saved = try savedService(support)
+        var savedRefs: [String] = []
+        var deletedRefs: [String] = []
+        let connector = connector(
+            support, save: { ref, _ in savedRefs.append(ref); return true },
+            delete: { deletedRefs.append($0); return true })
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: support.path)
+
+        let result = await connector.connect(draft: draft(), reusingId: saved.id)
+
+        guard case .failed = result.outcome else { Issue.record("expected failed"); return }
+        #expect(savedRefs.count == 1)
+        #expect(savedRefs.first != saved.keyRef)
+        #expect(deletedRefs == savedRefs)
+        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.map(\.keyRef) == [saved.keyRef])
     }
 
     @Test func emptyAPIKeyFailsBeforeSavingOrTesting() async {
@@ -167,9 +260,8 @@ struct AIServiceConnectorTests {
         let connector = AIServiceConnector(
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
             saveAPIKey: { _, _ in saved = true; return true },
-            deleteAPIKey: { _ in },
-            readAPIKey: { _ in nil },
-            testConnection: { _ in tested = true; return .passed })
+            deleteAPIKey: { _ in true },
+            testConnection: { _, _ in tested = true; return .passed })
 
         let result = await connector.connect(draft: d, reusingId: nil)
 
@@ -183,9 +275,8 @@ struct AIServiceConnectorTests {
         defer { try? FileManager.default.removeItem(at: support) }
         let connector = AIServiceConnector(
             repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)), permits: { _ in true },
-            saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in },
-            readAPIKey: { _ in nil },
-            testConnection: { _ in .failed("nope") })
+            saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in true },
+            testConnection: { _, _ in .failed("nope") })
 
         let first = await connector.connect(draft: draft(), reusingId: nil)
         let second = await connector.connect(draft: draft(), reusingId: first.allocatedId)
@@ -208,7 +299,7 @@ struct AIServiceConnectorTests {
             repository: repository, permits: permits,
             tester: ConnectionTester(client: StubLLMClient(testConnection: testConnection)),
             listModels: listModels,
-            saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in })
+            saveAPIKey: { _, _ in true }, deleteAPIKey: { _ in true })
     }
 
     @Test func addServicePersistsASeededConnectionAndSelectsIt() {
@@ -271,7 +362,7 @@ struct AIServiceConnectorTests {
             repository: repository, permits: { _ in true },
             tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
             saveAPIKey: { ref, value in saved = (ref, value); return true },
-            deleteAPIKey: { _ in })
+            deleteAPIKey: { _ in true })
         model.addService(preset: starterPreset)
         let connection = try! #require(model.selected)
 
@@ -293,7 +384,7 @@ struct AIServiceConnectorTests {
             repository: repository, permits: { _ in true },
             tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
             saveAPIKey: { _, _ in true },
-            deleteAPIKey: { deletedRef = $0 })
+            deleteAPIKey: { deletedRef = $0; return true })
         model.addService(preset: starterPreset)
         let connection = try! #require(model.selected)
 
@@ -314,6 +405,138 @@ struct AIServiceConnectorTests {
         model.updateAcrossCredentialBoundary(updated)
 
         #expect(model.selected?.keyRef != connection.keyRef)
+    }
+
+    private func readOnly(_ support: URL, _ body: () -> Void) {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: support.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: support.path) }
+        body()
+    }
+
+    private func keyedModel(support: URL, deleted: @escaping (String) -> Bool) -> AIServiceSettingsModel {
+        try? FileManager.default.createDirectory(
+            at: support.appendingPathComponent("modes"), withIntermediateDirectories: true)
+        let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
+        return AIServiceSettingsModel(
+            repository: repository, permits: { _ in true },
+            tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
+            saveAPIKey: { _, _ in true }, deleteAPIKey: deleted)
+    }
+
+    @Test func anUpdateThatCannotBeSavedStoresNoKeyAndKeepsTheLastVerdict() async throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var savedKeys: [String] = []
+        try? FileManager.default.createDirectory(
+            at: support.appendingPathComponent("modes"), withIntermediateDirectories: true)
+        let model = AIServiceSettingsModel(
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            permits: { _ in true },
+            tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
+            saveAPIKey: { _, value in savedKeys.append(value); return true }, deleteAPIKey: { _ in true })
+        model.addService(preset: starterPreset)
+        let connection = try #require(model.selected)
+        model.test(connection)
+        await model.testTask?.value
+        #expect(model.testState(for: connection.id) == .passed)
+        var renamed = connection
+        renamed.name = "Renamed"
+
+        var updated = true
+        readOnly(support) { updated = model.update(renamed, apiKey: "new-key") }
+
+        #expect(!updated)
+        #expect(savedKeys.isEmpty)
+        #expect(model.testState(for: connection.id) == .passed)
+        #expect(model.error != nil)
+    }
+
+    @Test func anUpdateWhoseKeyCannotBeSavedReportsFailure() throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try? FileManager.default.createDirectory(
+            at: support.appendingPathComponent("modes"), withIntermediateDirectories: true)
+        let model = AIServiceSettingsModel(
+            repository: ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support)),
+            permits: { _ in true },
+            tester: ConnectionTester(client: StubLLMClient(testConnection: { _ in .passed })),
+            saveAPIKey: { _, _ in false }, deleteAPIKey: { _ in true })
+        model.addService(preset: starterPreset)
+        let connection = try #require(model.selected)
+
+        #expect(!model.update(connection, apiKey: "new-key"))
+        #expect(model.error != nil)
+    }
+
+    @Test func credentialBoundaryKeepsTheWorkingKeyWhenTheRotatedReferenceCannotBeSaved() throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var deletedRefs: [String] = []
+        let model = keyedModel(support: support) { deletedRefs.append($0); return true }
+        model.addService(preset: starterPreset)
+        let connection = try #require(model.selected)
+        model.update(connection, apiKey: "working-key")
+        var updated = connection
+        updated.provider = .openai
+
+        var crossed = true
+        readOnly(support) { crossed = model.updateAcrossCredentialBoundary(updated) }
+
+        #expect(!crossed)
+        #expect(deletedRefs.isEmpty)
+        #expect(model.hasKey(connection))
+        #expect(model.error != nil)
+        let stored = try #require(ConnectionStore.loadOrDefault(supportDir: support).connections.first)
+        #expect(stored.keyRef == connection.keyRef)
+    }
+
+    @Test func credentialBoundaryRemovesTheOldKeyOnlyAfterTheRotatedReferenceIsSaved() throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var storedRefAtDelete: String?
+        let model = keyedModel(support: support) { _ in
+            storedRefAtDelete = ConnectionStore.loadOrDefault(supportDir: support).connections.first?.keyRef
+            return true
+        }
+        model.addService(preset: starterPreset)
+        let connection = try #require(model.selected)
+        var updated = connection
+        updated.provider = .openai
+
+        model.updateAcrossCredentialBoundary(updated)
+
+        let rotated = try #require(model.selected?.keyRef)
+        #expect(rotated != connection.keyRef)
+        #expect(storedRefAtDelete == rotated)
+        #expect(model.error == nil)
+    }
+
+    @Test func credentialBoundaryReportsAnOldKeyItCouldNotRemove() throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let model = keyedModel(support: support) { _ in false }
+        model.addService(preset: starterPreset)
+        let connection = try #require(model.selected)
+        var updated = connection
+        updated.provider = .openai
+
+        model.updateAcrossCredentialBoundary(updated)
+
+        #expect(model.selected?.keyRef != connection.keyRef)
+        #expect(model.error != nil)
+    }
+
+    @Test func deleteReportsAKeyItCouldNotRemove() throws {
+        let support = tempSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let model = keyedModel(support: support) { _ in false }
+        model.addService(preset: starterPreset)
+        let connection = try #require(model.selected)
+
+        model.delete(connection)
+
+        #expect(ConnectionStore.loadOrDefault(supportDir: support).connections.isEmpty)
+        #expect(model.error != nil)
     }
 
     @Test func repeatedCredentialBoundaryRotationsStayBounded() throws {

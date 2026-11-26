@@ -256,6 +256,56 @@ struct SpokenReplyEvidenceTests {
         #expect(!store.evidence.isKept(entry: "e1", at: at))
     }
 
+    @Test func retentionReportsAnExpiredEvidenceDayItCouldNotRemoveEvenWithoutItsHistoryFile() throws {
+        let store = try store()
+        try store.evidence.save(entry: "e1", at: at, files: [.init(name: "reply.wav", data: Data([1]))])
+        let folder = store.evidence.folder(entry: "e1", at: at)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
+
+        let sweep = store.applyRetention(today: HistoryStore.todayString(date: at + 30 * 86_400), retentionDays: 7)
+
+        #expect(sweep.failed == ["\(HistoryStore.todayString(date: at)).jsonl"])
+        #expect(store.evidence.isKept(entry: "e1", at: at))
+    }
+
+    @Test func retentionKeepsExpiredHistoryWhenItCannotCheckForKeptReplies() throws {
+        let store = try store()
+        _ = try reply(in: store)
+        #expect(store.keepSpokenReply(id: "e1", near: at, files: [.init(name: "reply.wav", data: Data([1]))]) == .saved)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: store.evidence.dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: store.evidence.dir.path) }
+
+        let sweep = store.applyRetention(today: HistoryStore.todayString(date: at + 30 * 86_400), retentionDays: 7)
+
+        #expect(sweep == HistoryStore.RetentionSweep(
+            removed: [], failed: ["\(HistoryStore.todayString(date: at)).jsonl"],
+            unreadable: [store.evidence.dir.lastPathComponent]))
+        #expect(store.entries().map(\.id) == ["e1"])
+    }
+
+    @Test func retentionReportsAnUnreadableRepliesFolderWithNoExpiredHistory() throws {
+        let store = try store()
+        try store.evidence.save(entry: "e1", at: at, files: [.init(name: "reply.wav", data: Data([1]))])
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: store.evidence.dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: store.evidence.dir.path) }
+
+        let sweep = store.applyRetention(today: HistoryStore.todayString(date: at + 30 * 86_400), retentionDays: 7)
+
+        #expect(!sweep.succeeded)
+    }
+
+    @Test func retentionWithNoKeptRepliesFolderStillDeletesExpiredHistory() throws {
+        let store = try store()
+        _ = try reply(in: store)
+        #expect(!FileManager.default.fileExists(atPath: store.evidence.dir.path))
+
+        let sweep = store.applyRetention(today: HistoryStore.todayString(date: at + 30 * 86_400), retentionDays: 7)
+
+        #expect(sweep.succeeded)
+        #expect(store.entries().isEmpty)
+    }
+
     private func reply(in store: HistoryStore) throws -> HistoryEntry {
         var entry = HistoryEntry(
             id: "e1", timestamp: at, modeName: "Agent", heard: "", result: "", outcome: .inserted, cloudInvolved: false,
@@ -299,11 +349,12 @@ struct SpokenReplyEvidenceTests {
         let folder = store.evidence.folder(entry: "e1", at: at)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
-        #expect(store.applyRetention(today: later, retentionDays: 7).isEmpty)
+        #expect(store.applyRetention(today: later, retentionDays: 7)
+            == HistoryStore.RetentionSweep(removed: [], failed: ["\(HistoryStore.todayString(date: at)).jsonl"]))
         #expect(store.entries().map(\.id) == ["e1"])
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("reply.wav").path))
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
-        #expect(store.applyRetention(today: later, retentionDays: 7) == ["\(HistoryStore.todayString(date: at)).jsonl"])
+        #expect(store.applyRetention(today: later, retentionDays: 7).removed == ["\(HistoryStore.todayString(date: at)).jsonl"])
         #expect(store.entries().isEmpty)
         #expect(!store.evidence.isKept(entry: "e1", at: at))
     }

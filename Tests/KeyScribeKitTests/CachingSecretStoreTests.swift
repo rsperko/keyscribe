@@ -10,6 +10,7 @@ private final class FakeSecretBackend: @unchecked Sendable {
     private(set) var removeCalls: [String] = []
     private(set) var removeAllCalls = 0
     var saveShouldSucceed = true
+    var removeShouldSucceed = true
 
     init(_ seed: [String: String] = [:]) { store = seed }
 
@@ -35,7 +36,9 @@ private final class FakeSecretBackend: @unchecked Sendable {
             remove: { [self] keyRef in
                 lock.withLock {
                     removeCalls.append(keyRef)
+                    guard removeShouldSucceed else { return false }
                     store[keyRef] = nil
+                    return true
                 }
             },
             removeAll: { [self] in
@@ -92,7 +95,7 @@ private final class RaceHarness: @unchecked Sendable {
                 return snapshot.map(SecretLookup.found) ?? .absent
             },
             save: { [self] secret, _, _ in lock.withLock { value = secret }; return true },
-            remove: { [self] _ in lock.withLock { value = nil } },
+            remove: { [self] _ in lock.withLock { value = nil }; return true },
             removeAll: { [self] in lock.withLock { let n = value == nil ? 0 : 1; value = nil; return n } }
         )
     }
@@ -162,6 +165,21 @@ private final class RaceHarness: @unchecked Sendable {
         #expect(fake.loadCalls == ["k", "k"])
     }
 
+    @Test func deleteReportsWhetherTheBackendRemovedTheSecret() {
+        let fake = FakeSecretBackend(["k": "old"])
+        let store = CachingSecretStore(backend: fake.backend())
+        #expect(store.get("k") == "old")
+
+        fake.removeShouldSucceed = false
+        #expect(!store.delete("k"))
+        #expect(store.get("k") == "old")
+        #expect(fake.loadCalls == ["k", "k"])
+
+        fake.removeShouldSucceed = true
+        #expect(store.delete("k"))
+        #expect(store.get("k") == nil)
+    }
+
     @Test func deleteInvalidatesTheCache() {
         let fake = FakeSecretBackend(["k": "v"])
         let store = CachingSecretStore(backend: fake.backend())
@@ -188,7 +206,7 @@ private final class RaceHarness: @unchecked Sendable {
                 return .found("sk-secret")
             },
             save: { _, _, _ in true },
-            remove: { _ in },
+            remove: { _ in true },
             removeAll: { 0 }
         ))
 

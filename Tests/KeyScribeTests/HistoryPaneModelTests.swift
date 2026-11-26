@@ -5,6 +5,26 @@ import Testing
 
 @MainActor
 struct HistoryPaneModelTests {
+    @Test func aRetentionSweepThatCouldNotDeleteStaysReportedUntilOneSucceeds() throws {
+        let (store, dir) = tempStore()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: store.dir.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        try store.append(entry("old"), today: "2020-01-01")
+        let model = model(store)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: store.dir.path)
+
+        model.sweepRetention(days: 7)
+        #expect(model.retentionFailure != nil)
+        #expect(store.dayFiles() == ["2020-01-01.jsonl"])
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: store.dir.path)
+        model.sweepRetention(days: 7)
+        #expect(model.retentionFailure == nil)
+        #expect(store.dayFiles().isEmpty)
+    }
+
     @Test func storedHistoryAvailabilityFollowsTheFirstSaveAndLastDeletion() async throws {
         let (store, dir) = tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }

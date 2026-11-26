@@ -14,13 +14,19 @@ final class AgentClipboard {
     @discardableResult
     nonisolated static func removeExpired(in folder: URL, now: Date = Date()) -> Int {
         let files = FileManager.default
-        let entries = (try? files.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        guard let entries = try? files.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) else {
+            if !files.isMissing(folder) { Log.agents.error("could not read the agent clipboard folder to remove expired files") }
+            return 0
+        }
         var removed = 0
+        var stuck = 0
         for entry in entries {
             guard let modified = try? entry.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-                  now.timeIntervalSince(modified) > keptFor, (try? files.removeItem(at: entry)) != nil else { continue }
+                  now.timeIntervalSince(modified) > keptFor else { continue }
+            guard files.removeIfPresent(entry) else { stuck += 1; continue }
             removed += 1
         }
+        if stuck > 0 { Log.agents.error("could not delete \(stuck, privacy: .public) expired agent clipboard file(s)") }
         return removed
     }
     private static let rememberedFiles = 16

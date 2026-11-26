@@ -556,9 +556,55 @@ struct HistoryStoreTests {
         defer { try? FileManager.default.removeItem(at: store.dir) }
         try store.append(sampleEntry(at: 0), today: "2026-06-01")
         try store.append(sampleEntry(at: 0), today: "2026-06-20")
-        let deleted = store.applyRetention(today: "2026-06-20", retentionDays: 7)
-        #expect(deleted == ["2026-06-01.jsonl"])
+        let sweep = store.applyRetention(today: "2026-06-20", retentionDays: 7)
+        #expect(sweep == HistoryStore.RetentionSweep(removed: ["2026-06-01.jsonl"], failed: []))
         #expect(store.dayFiles() == ["2026-06-20.jsonl"])
+    }
+
+    @Test func applyRetentionReportsDayFilesItCouldNotDelete() throws {
+        let store = tempStore()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: store.dir.path)
+            try? FileManager.default.removeItem(at: store.dir)
+        }
+        try store.append(sampleEntry(at: 0), today: "2026-06-01")
+        try store.append(sampleEntry(at: 0), today: "2026-06-20")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: store.dir.path)
+
+        let sweep = store.applyRetention(today: "2026-06-20", retentionDays: 7)
+
+        #expect(sweep == HistoryStore.RetentionSweep(removed: [], failed: ["2026-06-01.jsonl"]))
+        #expect(store.dayFiles() == ["2026-06-01.jsonl", "2026-06-20.jsonl"])
+    }
+
+    @Test func applyRetentionReportsAHistoryFolderItCannotList() throws {
+        let store = tempStore()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: store.dir.path)
+            try? FileManager.default.removeItem(at: store.dir)
+        }
+        try store.append(sampleEntry(at: 0), today: "2026-06-01")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: store.dir.path)
+
+        let sweep = store.applyRetention(today: "2026-06-20", retentionDays: 7)
+
+        #expect(!sweep.succeeded)
+    }
+
+    @Test func applyRetentionReportsAHistoryFolderBehindAnInaccessibleParent() throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-history-parent-\(UUID().uuidString)", isDirectory: true)
+        let store = HistoryStore(supportDir: support)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: support.path)
+            try? FileManager.default.removeItem(at: support)
+        }
+        try store.append(sampleEntry(at: 0), today: "2026-06-01")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: support.path)
+
+        let sweep = store.applyRetention(today: "2026-06-20", retentionDays: 7)
+
+        #expect(!sweep.succeeded)
     }
 
     @Test func replaceRewritesTheMatchingEntryInPlace() throws {

@@ -1780,8 +1780,8 @@ pasted and the connection is Tested. The service is never presented as usable un
 and a failed Test surfaces in the editor rather than removing the row.
 
 Onboarding keeps the stricter **test-then-save** flow (`AIServiceConnector`): its **Connect** button
-tests the endpoint and only then saves, rolling the Keychain key back on failure or cancel — that
-surface has one shot to produce a working service. The Settings pane deliberately relaxes this so
+tests the endpoint with the key as typed and only then stores the key and the service, so a failed or
+cancelled test leaves the Keychain untouched — that surface has one shot to produce a working service. The Settings pane deliberately relaxes this so
 `Add Service` behaves like `Download`/`Add Mode`. The status vocabulary and error strings are shared
 across both surfaces via one helper.
 
@@ -2796,7 +2796,9 @@ History uses the standard immediate-apply Settings model. Retention is a menu of
 days through one year, so common choices such as two weeks or two months do not require repeated stepper
 clicks. A shorter period confirms once only when it would remove existing day files; canceling keeps the
 previous period selected. A longer period, an empty history, or a change that removes nothing applies
-immediately without confirmation.
+immediately without confirmation. Opening History and changing the period each delete what the period has
+expired; when that leaves expired history on this Mac, an issue line under **Keep for** says so until a later
+attempt deletes it.
 
 ### List view
 

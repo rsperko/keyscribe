@@ -21,13 +21,14 @@ final class EventTapThread: @unchecked Sendable {
     func start(port: CFMachPort) {
         CGEvent.tapEnable(tap: port, enable: false)
         self.port = port
-        let thread = Thread { self.run(port) }
+        let thread = Thread { self.run() }
         thread.name = name
         thread.qualityOfService = .userInteractive
         thread.start()
     }
 
-    private func run(_ port: CFMachPort) {
+    private func run() {
+        guard let port else { return }
         let source = CFMachPortCreateRunLoopSource(nil, port, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         CGEvent.tapEnable(tap: port, enable: true)

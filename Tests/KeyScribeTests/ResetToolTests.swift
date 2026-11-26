@@ -201,6 +201,130 @@ struct ResetToolTests {
         #expect(files.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
     }
 
+    @Test func eraseAllReportsRecordingsItCouldNotErase() throws {
+        let dir = try makeSupportDir()
+        let captures = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KeyScribeTest-captures-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: captures.path)
+            try? FileManager.default.removeItem(at: dir)
+            try? FileManager.default.removeItem(at: captures)
+        }
+        let fm = FileManager.default
+        try fm.createDirectory(at: captures, withIntermediateDirectories: true)
+        try Data("wav".utf8).write(to: captures.appendingPathComponent("commit-a.wav"))
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: captures.path)
+
+        var tool = isolatedTool(dir, ephemeralDefaults())
+        tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
+        tool.captureArchiveDir = captures
+        tool.eraseKeychain = { [] }
+        tool.resetTCCService = { _, _ in "" }
+        let actions = tool.run(.eraseAll)
+
+        #expect(fm.fileExists(atPath: captures.appendingPathComponent("commit-a.wav").path))
+        #expect(!actions.contains { $0.hasPrefix("Erased") && $0.contains("retained recording") })
+        #expect(actions.contains { $0.hasPrefix("Could not erase") && $0.contains("retained recording") })
+    }
+
+    enum StuckStep: CaseIterable {
+        case supportChild, wholeSupportDir, captureArchive, agentClipboard, cachedFiles, modes, config
+    }
+
+    @Test(arguments: StuckStep.allCases)
+    func aStepThatCannotDeleteReportsFailureInsteadOfSuccess(_ step: StuckStep) throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("keyscribe-reset-stuck-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("support", isDirectory: true)
+        try fm.createDirectory(at: dir.appendingPathComponent("modes"), withIntermediateDirectories: true)
+        try "x".write(to: dir.appendingPathComponent("modes/custom-junk.toml"), atomically: true, encoding: .utf8)
+        try "schema_version = 1\n".write(to: dir.appendingPathComponent("settings.toml"), atomically: true, encoding: .utf8)
+        var locked: [URL] = []
+        defer {
+            for url in locked { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path) }
+            try? fm.removeItem(at: root)
+        }
+        func lock(_ url: URL, _ mode: Int) throws {
+            try fm.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
+            locked.append(url)
+        }
+        var tool = ResetTool(supportDir: dir, defaults: ephemeralDefaults())
+        tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
+        let cached = root.appendingPathComponent("cached", isDirectory: true)
+        try fm.createDirectory(at: cached, withIntermediateDirectories: true)
+        tool.modelLoadDiagFile = cached.appendingPathComponent("model-load.log")
+        tool.requestAdaptationsFile = cached.appendingPathComponent("request-adaptations.json")
+        tool.wireOverridesFile = cached.appendingPathComponent("wire-overrides.json")
+        tool.captureArchiveDir = root.appendingPathComponent("captures", isDirectory: true)
+        tool.temporaryDir = root.appendingPathComponent("tmp", isDirectory: true)
+        tool.eraseKeychain = { [] }
+        tool.resetTCCService = { _, _ in "" }
+
+        let target: ResetTarget
+        let success: String
+        switch step {
+        case .supportChild:
+            try lock(dir, 0o555)
+            (target, success) = (.eraseAll, "Reset all config")
+        case .wholeSupportDir:
+            tool.modelsDir = root.appendingPathComponent("models", isDirectory: true)
+            try lock(dir, 0o555)
+            (target, success) = (.eraseAll, "Removed \(dir.path)")
+        case .captureArchive:
+            try fm.createDirectory(at: tool.captureArchiveDir, withIntermediateDirectories: true)
+            try Data("wav".utf8).write(to: tool.captureArchiveDir.appendingPathComponent("commit-a.wav"))
+            try lock(tool.captureArchiveDir, 0o000)
+            (target, success) = (.eraseAll, "retained recording")
+        case .agentClipboard:
+            let folder = AgentClipboard.folder(in: tool.temporaryDir)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            try "clip".write(to: folder.appendingPathComponent("clip.txt"), atomically: true, encoding: .utf8)
+            try lock(folder, 0o000)
+            (target, success) = (.eraseAll, "clipboard file")
+        case .cachedFiles:
+            for file in [tool.modelLoadDiagFile, tool.requestAdaptationsFile, tool.wireOverridesFile] {
+                try "x".write(to: file, atomically: true, encoding: .utf8)
+            }
+            try lock(cached, 0o555)
+            (target, success) = (.eraseAll, tool.modelLoadDiagFile.path)
+        case .modes:
+            try lock(dir.appendingPathComponent("modes"), 0o555)
+            (target, success) = (.modes, "Reset modes")
+        case .config:
+            try lock(dir, 0o555)
+            (target, success) = (.config, "Wiped config")
+        }
+
+        let actions = tool.run(target)
+
+        #expect(!actions.contains { $0.contains(success) && !$0.hasPrefix("Could not") }, "\(actions)")
+        #expect(actions.contains { $0.hasPrefix("Could not") }, "\(actions)")
+        if step == .cachedFiles {
+            let named = [tool.modelLoadDiagFile, tool.requestAdaptationsFile, tool.wireOverridesFile].map(\.path)
+            #expect(actions.contains { line in line.hasPrefix("Could not erase") && named.allSatisfy { line.contains($0) } })
+        }
+    }
+
+    @Test func aModesResetThatCannotRemoveTheLedgerStillLeavesTheSystemModes() throws {
+        let dir = try makeSupportDir()
+        let lkg = dir.appendingPathComponent("lkg", isDirectory: true)
+        try FileManager.default.createDirectory(at: lkg, withIntermediateDirectories: true)
+        try "x".write(to: lkg.appendingPathComponent("ledger.json"), atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: lkg.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: lkg.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        let modesDir = dir.appendingPathComponent("modes", isDirectory: true)
+
+        let actions = isolatedTool(dir, ephemeralDefaults()).run(.modes)
+
+        #expect(actions.contains { $0.hasPrefix("Could not reset modes") })
+        let modes = ModeStore.loadAll(in: modesDir)
+        #expect(!modes.isEmpty)
+        #expect(!modes.contains { $0.id == "custom-junk" })
+    }
+
     @Test func eraseAllReportsNoRecordingsWhenTheArchiveIsAbsent() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }
