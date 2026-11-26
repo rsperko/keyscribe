@@ -242,9 +242,11 @@ so a slow main thread delays matching but never disables the tap. The rules that
   afterwards, because no release can reach a stopped tap to end it, and every engage it discards must
   still end in `onEngageDropped` so the early capture closes. Also, `CFRunLoopStop` does nothing to a
   loop that has not yet entered its mode.
-- **Created on main, served by the thread.** The tap is created on main behind the Accessibility gate,
-  so `start()` and `isTapActive` answer synchronously, and is disabled until the thread has added its
-  source, so the consuming mouse tap never holds input before anything serves it.
+- **Created by the thread that serves it, never turned off.** The Accessibility gate is checked on main;
+  the tap is then created on its own thread, which adds its source before main goes on, so `start()` and
+  `isTapActive` still answer synchronously and the consuming mouse tap never holds input before anything
+  serves it. No tap is ever disabled (`SourceInvariantsTests`): macOS reports a tap the app turns off itself
+  as disabled by user input, which read in the log as an unexplained disable a few seconds after each launch.
 
 The thread cannot make handling happen sooner than main allows: a wedged main thread still delays a
 take's start. It guarantees the events arrive, in order and with the time they happened.

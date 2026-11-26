@@ -190,14 +190,15 @@ final class HotkeyMonitor {
             self?.received(type: type, event: event)
             return Unmanaged.passUnretained(event)
         }
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
-            eventsOfInterest: mask, callback: eventTapThreadCallback, userInfo: thread.userInfo)
-        else {
+        let created = thread.start { userInfo in
+            CGEvent.tapCreate(
+                tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
+                eventsOfInterest: mask, callback: eventTapThreadCallback, userInfo: userInfo)
+        }
+        guard created else {
             hotkeyLog.error("modifier-key event tap not created despite Accessibility granted; a denied ListenEvent record may be suppressing it — relaunch to repair")
             return false
         }
-        thread.start(port: tap)
         tapThread = thread
         activeHotkeyMonitor = self
         hotkeyLog.info("modifier-key event tap active on dedicated thread")

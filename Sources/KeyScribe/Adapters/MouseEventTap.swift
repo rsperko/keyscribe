@@ -49,14 +49,15 @@ final class MouseEventTap: MouseTapping {
         }
         let mask = CGEventMask(
             (1 << CGEventType.otherMouseDown.rawValue) | (1 << CGEventType.otherMouseUp.rawValue))
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-            eventsOfInterest: mask, callback: eventTapThreadCallback, userInfo: thread.userInfo)
-        else {
+        let created = thread.start { userInfo in
+            CGEvent.tapCreate(
+                tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+                eventsOfInterest: mask, callback: eventTapThreadCallback, userInfo: userInfo)
+        }
+        guard created else {
             mouseLog.error("mouse event tap not created; Accessibility verdict is likely cached as denied from launch — relaunch needed")
             return
         }
-        thread.start(port: tap)
         self.thread = thread
         mouseLog.info("mouse event tap active on dedicated thread")
     }

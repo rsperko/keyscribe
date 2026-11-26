@@ -18,21 +18,23 @@ final class EventTapThread: @unchecked Sendable {
 
     var userInfo: UnsafeMutableRawPointer { Unmanaged.passUnretained(self).toOpaque() }
 
-    func start(port: CFMachPort) {
-        CGEvent.tapEnable(tap: port, enable: false)
-        self.port = port
-        let thread = Thread { self.run() }
+    func start(creating create: @escaping @Sendable (_ userInfo: UnsafeMutableRawPointer) -> CFMachPort?) -> Bool {
+        let created = DispatchSemaphore(value: 0)
+        let thread = Thread {
+            guard let port = create(self.userInfo) else {
+                created.signal()
+                return
+            }
+            self.port = port
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(nil, port, 0), .commonModes)
+            created.signal()
+            CFRunLoopRun()
+        }
         thread.name = name
         thread.qualityOfService = .userInteractive
         thread.start()
-    }
-
-    private func run() {
-        guard let port else { return }
-        let source = CFMachPortCreateRunLoopSource(nil, port, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-        CGEvent.tapEnable(tap: port, enable: true)
-        CFRunLoopRun()
+        created.wait()
+        return port != nil
     }
 
     fileprivate func reEnable(reason: CGEventType) {

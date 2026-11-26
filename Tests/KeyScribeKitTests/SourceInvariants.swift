@@ -24,6 +24,12 @@ struct SourceRule: Sendable {
 enum SourceInvariants {
     static let rules = [
         SourceRule(
+            pattern: #"tapEnable\([^)]*enable:\s*false"#,
+            allowed: [:],
+            reason: "No event tap is ever turned off: macOS reports a disable the app makes itself as one by user input, and "
+                + "a tap created on the thread that serves it needs no off/on pair to hold input until it is served "
+                + "(docs/development/areas/hotkeys-and-permissions.md)."),
+        SourceRule(
             pattern: #"\b(ReplacementsStage|FuzzyStage|NumbersStage|LiveEditsStage)\(|TokenizingStage\.(verbatim|clipboard|redaction)\("#,
             allowed: [
                 "Sources/KeyScribeKit/TakeStages.swift": 9,
