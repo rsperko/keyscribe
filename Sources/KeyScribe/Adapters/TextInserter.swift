@@ -686,6 +686,8 @@ enum TextInserter {
             PasteboardSnapshot(changeCount: changeCount, storage: storage, readInChild: readInChild)
         }
         private static let maxSnapshotBytes = 8 * 1024 * 1024
+        // The child's read never blocks the app, so it is bounded by memory, not by what main can stand.
+        static let maxChildSnapshotBytes = 256 * 1024 * 1024
         // Bounds the render ACROSS flavors, checked between them (see capture): eager images render fully, a
         // clipboard whose lazy/promised payloads blow through it falls back to plain text.
         static let renderBudgetSeconds = 0.25
@@ -711,7 +713,7 @@ enum TextInserter {
         ) async -> PasteboardSnapshot? {
             guard ContinuousClock.now < deadline else { return nil }
             guard let helper else { return capture(from: pb, renderDeadline: min(deadline, renderDeadline())) }
-            switch await PasteboardReader.read(pb.name, maxBytes: maxSnapshotBytes, deadline: deadline, helper: helper) {
+            switch await PasteboardReader.read(pb.name, maxBytes: maxChildSnapshotBytes, deadline: deadline, helper: helper) {
             case .read(let reading):
                 return PasteboardSnapshot(
                     changeCount: reading.changeCount, storage: reading.items.map { .full($0) } ?? .plainText(reading.text),

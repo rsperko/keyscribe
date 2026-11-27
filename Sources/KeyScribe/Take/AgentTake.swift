@@ -4,21 +4,45 @@ import KeyScribeKit
 struct AgentSnapshot {
     let names: [String: String]
     let conversations: [AgentConversation]
-    var namesAvailable = true
-    var disconnected: [String: String] = [:]
-    var former: [String: String] = [:]
-    var shared: [String: AgentRecipient.SharedName] = [:]
-    var late: [String: String] = [:]
-    var lateShared: [String: AgentRecipient.SharedName] = [:]
-    var natives = AgentNativeRoster()
+    let namesAvailable: Bool
+    let disconnected: [String: String]
+    let former: [String: String]
+    let shared: [String: AgentRecipient.SharedName]
+    private(set) var natives: AgentNativeRoster
+    private(set) var addressable: [String: String] = [:]
+    private(set) var sharedNames: [String: AgentRecipient.SharedName] = [:]
+    private(set) var spokenNames: [String] = []
+    private(set) var afterVerbNames: [String] = []
     var rows: [String] { conversations.map(\.id) }
-    private var merged: (names: [String: String], shared: [String: AgentRecipient.SharedName]) {
-        AgentRecipient.addingLate(late, sharing: lateShared, to: names.merging(disconnected) { kept, _ in kept }.merging(former) { kept, _ in kept }, sharing: shared)
+
+    init(
+        names: [String: String], conversations: [AgentConversation], namesAvailable: Bool = true,
+        disconnected: [String: String] = [:], former: [String: String] = [:], shared: [String: AgentRecipient.SharedName] = [:],
+        natives: AgentNativeRoster = AgentNativeRoster()
+    ) {
+        self.names = names
+        self.conversations = conversations
+        self.namesAvailable = namesAvailable
+        self.disconnected = disconnected
+        self.former = former
+        self.shared = shared
+        self.natives = natives
+        settle(late: [:], lateShared: [:])
     }
-    var addressable: [String: String] { merged.names }
-    var sharedNames: [String: AgentRecipient.SharedName] { merged.shared }
-    var spokenNames: [String] { AgentRecipient.spokenNames(addressable, shared: sharedNames) }
-    var afterVerbNames: [String] { AgentRecipient.afterVerbNames(sharedNames) }
+
+    mutating func addLate(names late: [String: String], shared lateShared: [String: AgentRecipient.SharedName], natives lateNatives: AgentNativeRoster) {
+        natives = natives.addingLate(lateNatives)
+        settle(late: late, lateShared: lateShared)
+    }
+
+    private mutating func settle(late: [String: String], lateShared: [String: AgentRecipient.SharedName]) {
+        let frozen = names.merging(disconnected) { kept, _ in kept }.merging(former) { kept, _ in kept }
+        (addressable, sharedNames) = AgentRecipient.addingLate(late, sharing: lateShared, to: frozen, sharing: shared)
+        spokenNames = AgentRecipient.spokenNames(addressable, shared: sharedNames)
+        afterVerbNames = AgentRecipient.afterVerbNames(sharedNames)
+    }
+
+    var addresses: AgentAddress.Names { AgentAddress.Names(names: spokenNames, afterVerb: afterVerbNames) }
 }
 
 struct CapturedFocus: Equatable {
@@ -312,9 +336,9 @@ final class AgentTake {
         let snapshot = {
             var frozen = pressed
             if frozen.namesAvailable, agents.namesProblem == nil {
-                frozen.late = agents.names.merging(agents.disconnectedNames) { kept, _ in kept }.merging(agents.formerNames) { kept, _ in kept }
-                frozen.lateShared = agents.sharedNames
-                frozen.natives = frozen.natives.addingLate(agents.nativeRoster)
+                frozen.addLate(
+                    names: agents.names.merging(agents.disconnectedNames) { kept, _ in kept }.merging(agents.formerNames) { kept, _ in kept },
+                    shared: agents.sharedNames, natives: agents.nativeRoster)
             }
             return frozen
         }()
@@ -330,8 +354,7 @@ final class AgentTake {
             return
         }
         let address = AgentAddress.parse(
-            routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
-            read: read, afterVerb: snapshot.afterVerbNames, natives: snapshot.natives)
+            routed.transcript, among: snapshot.addresses, namesKnown: snapshot.namesAvailable, read: read, natives: snapshot.natives)
         if AgentRecipient.usesFocus(address) {
             await settleAgentInFront()
             if Task.isCancelled { return }
@@ -794,9 +817,10 @@ final class AgentTake {
 
     private func reachable(_ snapshot: AgentSnapshot, _ agents: AgentHub, for retry: AgentOutput.Retry) -> [String: String] {
         let frozen = Set(snapshot.addressable.values)
-        let listed = agents.recordingOrder.filter { retry == .open || AgentRoster.isAvailable($0) }.map(\.id)
+        let listed = Set(agents.recordingOrder.filter { retry == .open || AgentRoster.isAvailable($0) }.map(\.id))
+        let disconnected = Set(snapshot.disconnected.values)
         return agents.names.filter {
-            frozen.contains($0.value) && listed.contains($0.value) && !snapshot.disconnected.values.contains($0.value) && !agents.isExcluded($0.value)
+            frozen.contains($0.value) && listed.contains($0.value) && !disconnected.contains($0.value) && !agents.isExcluded($0.value)
         }
     }
 

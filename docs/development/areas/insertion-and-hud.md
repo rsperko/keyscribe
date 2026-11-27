@@ -36,7 +36,10 @@ Read before changing text insertion, pasteboard capture or restore, selection ca
   whole render. `PasteboardSnapshot.read` runs `PasteboardReader`: a copy of the app binary started with
   `--read-pasteboard`, which reads the named pasteboard, sends its `changeCount` and plain text first and then
   every flavor, and is killed at the deadline (`readBudgetSeconds`, 1 s: it overlaps transcription for a take;
-  a paste whose prefetch got nothing reads once more, so a declined paste waits at most two budgets). A read cut short, or one over `maxSnapshotBytes`, keeps
+  a paste whose prefetch got nothing reads once more, so a declined paste waits at most two budgets). The child's read is bounded by memory (`maxChildSnapshotBytes`), not by
+  `maxSnapshotBytes`, which exists only to keep the in-process read from stalling the main thread: a 26.6 MB TIFF
+  alone on the clipboard was emptied by a paste while the child kept the in-process cap (downstream, 2026-11-27), and is
+  restored whole now (`aLargeImageIsRestoredWhole`). A read cut short, or one over its cap, keeps
   the plain text. A read that got nothing in time (the owner is slow to render even its plain text) returns
   nil and the paste is declined, keeping the user's clipboard; the words stay for Paste last dictation. Even a
   plain-text-only clipboard goes to the child: its types say nothing about whether its text is already rendered

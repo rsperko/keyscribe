@@ -101,6 +101,16 @@ struct VoiceCommandGrammarTests {
         #expect(VoiceCommandText.compact("VS Code") == "vscode")
     }
 
+    @Test func aPlainASCIIKeyIsTheFoldedKey() {
+        var generator = SystemRandomNumberGenerator()
+        let samples = (0..<2000).map { _ in
+            String((0..<Int.random(in: 0...12, using: &generator)).map { _ in Character(UnicodeScalar(UInt8.random(in: 0...127, using: &generator))) })
+        } + ["", " ", "  a  b  ", "-x-", "A1 b2", "\t\nTab\u{7F}"]
+        for text in samples {
+            #expect(VoiceCommandText.key(text) == VoiceCommandText.foldedKey(text), "\(text.debugDescription)")
+        }
+    }
+
     @Test(arguments: VoiceCommandPhrase.allCases)
     func everyTaughtPhraseIsOneTheGrammarAccepts(_ phrase: VoiceCommandPhrase) {
         for words in phrase.words {

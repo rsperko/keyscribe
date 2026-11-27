@@ -34,8 +34,8 @@ public enum AgentRecipient {
     }
 
     public static func spokenNames(_ names: [String: String], shared: [String: SharedName]) -> [String] {
-        Array(names.keys) + shared.filter(\.value.kind.spokenBare).keys
-            .filter { key in !names.keys.contains { AgentHandles.matchKey($0) == AgentHandles.matchKey(key) } }
+        let named = Set(names.keys.map(AgentHandles.matchKey))
+        return Array(names.keys) + shared.filter(\.value.kind.spokenBare).keys.filter { !named.contains(AgentHandles.matchKey($0)) }
     }
 
     public static func afterVerbNames(_ shared: [String: SharedName]) -> [String] {
@@ -45,19 +45,26 @@ public enum AgentRecipient {
     public static func addingLate(
         _ late: [String: String], sharing lateShared: [String: SharedName], to frozen: [String: String], sharing frozenShared: [String: SharedName]
     ) -> (names: [String: String], shared: [String: SharedName]) {
-        func taken(_ name: String, _ names: [String: String], _ shared: [String: SharedName]) -> Bool {
-            let key = AgentHandles.matchKey(name)
-            return names.keys.contains { AgentHandles.matchKey($0) == key } || shared.keys.contains { AgentHandles.matchKey($0) == key }
-        }
+        guard !late.isEmpty || !lateShared.isEmpty else { return (frozen, frozenShared) }
         let frozenIds = Set(frozen.values)
         var names = frozen
-        for (name, id) in late.sorted(by: { $0.key < $1.key }) where frozenIds.contains(id) && !taken(name, names, frozenShared) {
+        var named = Set(frozen.keys.map(AgentHandles.matchKey))
+        let frozenSharedKeys = Set(frozenShared.keys.map(AgentHandles.matchKey))
+        for (name, id) in late.sorted(by: { $0.key < $1.key }) where frozenIds.contains(id) {
+            let key = AgentHandles.matchKey(name)
+            guard !named.contains(key), !frozenSharedKeys.contains(key) else { continue }
             names[name] = id
+            named.insert(key)
         }
         var shared = frozenShared
-        for (label, place) in lateShared.sorted(by: { $0.key < $1.key }) where !taken(label, names, shared) {
-            let members = place.names.filter { member in names.keys.contains { AgentHandles.matchKey($0) == AgentHandles.matchKey(member) } }
-            if members.count == place.names.count { shared[label] = place }
+        var sharedKeys = frozenSharedKeys
+        for (label, place) in lateShared.sorted(by: { $0.key < $1.key }) {
+            let key = AgentHandles.matchKey(label)
+            guard !named.contains(key), !sharedKeys.contains(key) else { continue }
+            if place.names.allSatisfy({ named.contains(AgentHandles.matchKey($0)) }) {
+                shared[label] = place
+                sharedKeys.insert(key)
+            }
         }
         return (names, shared)
     }

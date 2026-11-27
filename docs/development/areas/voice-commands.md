@@ -340,7 +340,12 @@ every rule above applies to it, with these sharpenings:
   questions alike, so a bare label said without “tell” asks too instead of becoming a message. Names a
   place read produced during the recording are added for the same frozen conversations only
   (`AgentRecipient.addingLate`): they never replace a frozen name, add a conversation, or change the
-  conversation captured in front and the rows. Whether a place label is qualified is decided per spoken label, across every place
+  conversation captured in front and the rows. A take's name work runs on the main actor, so it stays linear in the
+  names: the snapshot works out its name tables once (`AgentSnapshot.addLate`), the parse takes them prepared
+  (`AgentAddress.Names`) rather than normalizing every name again at each step, and name keys are compared as sets,
+  never name against name. Pairwise comparison held the main thread 30 to 40 s per take at about 820 Ultimate
+  conversations (downstream, 2026-11-27); 1,600 names now take under 0.1 s in a debug test build
+  (`AgentSnapshotScaleTests`, 2026-11-27). Whether a place label is qualified is decided per spoken label, across every place
   that has it, not per container. A qualified place name stays once given (`cos claude` keeps its
   qualifier after its sibling closes, and across an app restart through its remembered name), because the
   user may have learned it and the words after a name are the message.

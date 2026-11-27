@@ -13,23 +13,35 @@ public enum SpokenNameMatch: CaseIterable, Sendable {
         }
     }
 
+    struct Keyed: Sendable {
+        let key: String
+        let compact: String
+
+        init(_ text: String, fold: (String) -> String) {
+            key = VoiceCommandText.key(text).split(separator: " ").map { fold(String($0)) }.joined(separator: " ")
+            compact = String(decoding: key.utf8.filter { $0 != UInt8(ascii: " ") }, as: UTF8.self)
+        }
+    }
+
     public func matches(_ spoken: String, _ name: String, fold: (String) -> String = { $0 }) -> Bool {
-        let spoken = Self.key(spoken, fold)
-        let name = Self.key(name, fold)
-        guard !spoken.isEmpty, !name.isEmpty else { return false }
+        matches(Keyed(spoken, fold: fold), Keyed(name, fold: fold))
+    }
+
+    func matches(_ spoken: Keyed, _ name: Keyed) -> Bool {
+        guard !spoken.key.isEmpty, !name.key.isEmpty else { return false }
         switch self {
         case .exact:
-            return spoken == name || VoiceCommandText.compact(spoken) == VoiceCommandText.compact(name)
+            return spoken.key == name.key || spoken.compact == name.compact
         case .partial:
-            guard spoken != name, VoiceCommandText.compact(spoken).count >= 3 else { return false }
-            let words = name.split(separator: " ")
-            let wanted = spoken.split(separator: " ")
+            guard spoken.key != name.key, spoken.compact.count >= 3 else { return false }
+            let words = name.key.split(separator: " ")
+            let wanted = spoken.key.split(separator: " ")
             guard wanted.count < words.count else { return false }
             return (0...(words.count - wanted.count)).contains { Array(words[$0..<$0 + wanted.count]) == wanted }
         case .words:
-            guard VoiceCommandText.compact(spoken).count >= 3 else { return false }
-            let words = Set(name.split(separator: " "))
-            return spoken.split(separator: " ").allSatisfy(words.contains)
+            guard spoken.compact.count >= 3 else { return false }
+            let words = Set(name.key.split(separator: " "))
+            return spoken.key.split(separator: " ").allSatisfy(words.contains)
         }
     }
 
@@ -37,21 +49,25 @@ public enum SpokenNameMatch: CaseIterable, Sendable {
         _ words: [String], names: [String], limit: Int = .max, fold: (String) -> String = { $0 },
         minimumWords: (SpokenNameMatch) -> Int = { _ in 1 }
     ) -> Leading? {
-        let longest = names.map { VoiceCommandText.compact($0).count }.max() ?? 0
+        leading(
+            words, keyed: names.map { ($0, Keyed($0, fold: fold)) }, longest: names.map { VoiceCommandText.compact($0).count }.max() ?? 0,
+            limit: limit, fold: fold, minimumWords: minimumWords)
+    }
+
+    static func leading(
+        _ words: [String], keyed: [(String, Keyed)], longest: Int, limit: Int, fold: (String) -> String,
+        minimumWords: (SpokenNameMatch) -> Int
+    ) -> Leading? {
         let reach = min(words.count, limit, longest)
         guard reach > 0 else { return nil }
         for length in stride(from: reach, through: 1, by: -1) {
-            let spoken = words.prefix(length).joined(separator: " ")
+            let spoken = Keyed(words.prefix(length).joined(separator: " "), fold: fold)
             for match in allCases where length >= minimumWords(match) {
-                let hits = names.filter { match.matches(spoken, $0, fold: fold) && (match != .words || usesEachWordOnce(key(spoken, fold), key($0, fold))) }
+                let hits = keyed.filter { match.matches(spoken, $0.1) && (match != .words || usesEachWordOnce(spoken.key, $0.1.key)) }.map(\.0)
                 if !hits.isEmpty { return Leading(length: length, names: hits) }
             }
         }
         return nil
-    }
-
-    private static func key(_ text: String, _ fold: (String) -> String) -> String {
-        VoiceCommandText.key(text).split(separator: " ").map { fold(String($0)) }.joined(separator: " ")
     }
 
     private static func usesEachWordOnce(_ spoken: String, _ name: String) -> Bool {

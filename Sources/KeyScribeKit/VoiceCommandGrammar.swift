@@ -18,9 +18,34 @@ public enum VoiceCommandIntent: Equatable, Sendable {
 
 public enum VoiceCommandText {
     public static func key(_ text: String) -> String {
+        asciiKey(text) ?? foldedKey(text)
+    }
+
+    static func foldedKey(_ text: String) -> String {
         let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
         let spaced = folded.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
         return String(spaced).split(separator: " ").joined(separator: " ")
+    }
+
+    private static func asciiKey(_ text: String) -> String? {
+        var key: [UInt8] = []
+        key.reserveCapacity(text.utf8.count)
+        var pendingSpace = false
+        for byte in text.utf8 {
+            let lowered: UInt8
+            switch byte {
+            case 0x80...: return nil
+            case UInt8(ascii: "A")...UInt8(ascii: "Z"): lowered = byte + 0x20
+            case UInt8(ascii: "a")...UInt8(ascii: "z"), UInt8(ascii: "0")...UInt8(ascii: "9"): lowered = byte
+            default:
+                pendingSpace = !key.isEmpty
+                continue
+            }
+            if pendingSpace { key.append(UInt8(ascii: " ")) }
+            pendingSpace = false
+            key.append(lowered)
+        }
+        return String(decoding: key, as: UTF8.self)
     }
 
     public static func compact(_ text: String) -> String {

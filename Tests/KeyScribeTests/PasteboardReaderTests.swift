@@ -125,12 +125,13 @@ struct PasteboardReaderTests {
         #expect(snapshot == nil)
     }
 
-    @Test func anOversizedClipboardKeepsItsPlainText() async {
-        let largeType = NSPasteboard.PasteboardType("com.keyscribe.test.large")
+    @Test(arguments: [nil, "a caption"])
+    func aLargeImageIsRestoredWhole(text: String?) async {
+        let image = Data((0..<(26 * 1024 * 1024)).map { UInt8(truncatingIfNeeded: $0 &* 31) })
         let pb = pasteboard {
             let item = NSPasteboardItem()
-            item.setString("plain fallback", forType: .string)
-            item.setData(Data(repeating: 7, count: 9 * 1024 * 1024), forType: largeType)
+            item.setData(image, forType: .tiff)
+            if let text { item.setString(text, forType: .string) }
             $0.clearContents()
             $0.writeObjects([item])
         }
@@ -140,8 +141,8 @@ struct PasteboardReaderTests {
         restored(snapshot, to: pb)
 
         #expect(snapshot?.readInChild == true)
-        #expect(pb.string(forType: .string) == "plain fallback")
-        #expect(pb.data(forType: largeType) == nil)
+        #expect(pb.data(forType: .tiff) == image)
+        #expect(pb.string(forType: .string) == text)
     }
 
     @Test func aSlowImageInAnotherAppIsRenderedForTheChild() async throws {
