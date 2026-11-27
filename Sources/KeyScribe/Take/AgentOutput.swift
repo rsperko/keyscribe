@@ -320,6 +320,10 @@ final class AgentOutput {
             "\(name)\u{2019}s page isn\u{2019}t reporting to \(Branding.appName). \(nothingSent) Reload the page; if that doesn\u{2019}t help, \(name)\u{2019}s status line names the extension problem."
         case .notListed(let name):
             "\(name)\u{2019}s conversation in front isn\u{2019}t in its list yet. \(nothingSent) Try again in a moment."
+        case .notAnswering(let name):
+            "\(name) isn\u{2019}t answering. \(nothingSent)"
+        case .cameBackUnconfirmed(let name):
+            "\(name) restarted while you spoke, and \(Branding.appName) couldn\u{2019}t confirm the conversation in front. \(nothingSent)"
         case .cannotStart(let name):
             "\(name)\u{2019}s plugin can\u{2019}t start conversations. \(nothingSent) Agent settings can update it."
         }

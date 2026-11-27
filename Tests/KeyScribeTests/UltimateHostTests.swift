@@ -324,6 +324,80 @@ struct UltimateHostTests {
         #expect(await ultimate.front(among: [location("61")], reported: location("61"), in: Self.terminal) == .unknown)
     }
 
+    @Test(arguments: [4747, 4848])
+    func aProjectPageWhoseServerStoppedReadsAsNotAnsweringOnlyForAProjectSeenRunning(port: Int) async {
+        @MainActor final class Server { var up = true }
+        let server = Server()
+        let project = UltimateHost.Running(home: Self.home, project: .init(root: "/w/app", name: "app"), lock: .init(pid: 9, port: 4747))
+        let ultimate = UltimateHost(
+            home: "/u", enrolled: { [UltimateNamingTests.setup] }, readProjects: { _ in await MainActor.run { server.up ? [project] : [] } },
+            readConversations: { _, _ in .connector([.init(id: "61", folder: "/h/wt/61")]) },
+            show: { _, _ in .unanswered }, retitle: { _, _, _ in false },
+            frontApp: { Self.browser },
+            documentURL: { _ in URL(string: "http://ultimate.localhost:\(port)/?conversation=61") },
+            activate: { _, _ in false })
+        _ = await ultimate.scan()
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        server.up = false
+        _ = await ultimate.scan()
+
+        let press = await ultimate.focusInFront(requireClaim: false)
+
+        #expect(await ultimate.focusInFront(requireClaim: true) == nil)
+        if port == 4747 {
+            #expect(press?.copy?.answering == false)
+            #expect(press?.copy?.name == "Ultimate for app")
+            #expect(press?.conversation == nil)
+            #expect(press?.addressed == location("61"))
+        } else {
+            #expect(press == nil)
+        }
+    }
+
+    @Test func aLaterNewSideChatReportReplacesTheConversationAStoppedPageIsPinnedTo() async {
+        @MainActor final class Server { var up = true }
+        let server = Server()
+        let project = UltimateHost.Running(home: Self.home, project: .init(root: "/w/app", name: "app"), lock: .init(pid: 9, port: 4747))
+        let ultimate = UltimateHost(
+            home: "/u", enrolled: { [UltimateNamingTests.setup] }, readProjects: { _ in await MainActor.run { server.up ? [project] : [] } },
+            readConversations: { _, _ in .connector([.init(id: "61", folder: "/h/wt/61")]) },
+            show: { _, _ in .unanswered }, retitle: { _, _, _ in false },
+            frontApp: { Self.browser },
+            documentURL: { _ in URL(string: "http://ultimate.localhost:4747/?conversation=61") },
+            activate: { _, _ in false })
+        _ = await ultimate.scan()
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: true, pageConversation: "61"))
+        ultimate.observe(.shown(session: "61@\(Self.home)", on: false, newConversation: true, pageConversation: "61"))
+        server.up = false
+        _ = await ultimate.scan()
+
+        let press = await ultimate.focusInFront(requireClaim: false)
+
+        #expect(press?.copy?.answering == false)
+        #expect(press?.addressed == nil)
+    }
+
+    @Test func aStoppedProjectIsRememberedOnlyLongEnoughForARestart() async {
+        @MainActor final class Clock { var now = Date(timeIntervalSince1970: 1_000_000); var up = true }
+        let clock = Clock()
+        let project = UltimateHost.Running(home: Self.home, project: .init(root: "/w/app", name: "app"), lock: .init(pid: 9, port: 4747))
+        let ultimate = UltimateHost(
+            home: "/u", enrolled: { [UltimateNamingTests.setup] }, readProjects: { _ in await MainActor.run { clock.up ? [project] : [] } },
+            readConversations: { _, _ in .connector([.init(id: "61", folder: "/h/wt/61")]) },
+            show: { _, _ in .unanswered }, retitle: { _, _, _ in false },
+            frontApp: { Self.browser },
+            documentURL: { _ in URL(string: "http://ultimate.localhost:4747/?conversation=61") },
+            activate: { _, _ in false }, now: { clock.now })
+        _ = await ultimate.scan()
+        clock.now += UltimateHost.restartWithin * 3
+        clock.up = false
+        _ = await ultimate.scan()
+        #expect(await ultimate.focusInFront(requireClaim: false)?.copy?.answering == false)
+
+        clock.now += UltimateHost.restartWithin + 1
+        #expect(await ultimate.focusInFront(requireClaim: false) == nil)
+    }
+
     @Test func replyChecksReadNoWindowUntilAPageClaimsFocusWhilePressChecksStillRecognizeTheProjectWindow() async {
         let front = Front()
         front.app = Self.browser

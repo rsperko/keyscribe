@@ -2504,6 +2504,130 @@ struct AgentDeliveryWiringTests {
         }
     }
 
+    enum RestartStep: String, CaseIterable, Sendable { case listed, hello, reported }
+    enum RestartWhen: String, CaseIterable, Sendable { case whileSpeaking, justAfterRelease }
+
+    private func takeDuringUltimateRestart(
+        steps: [RestartStep], when: RestartWhen, pageShowsAfter: String = "61", pageFocusedAtStop: Bool = true,
+        pageEverFocused: Bool = true
+    ) async -> (submitted: [String], hud: [HUDState], projectReads: Int, frontReads: Int) {
+        let home = "/u/.ultimate/projects/app-1234"
+        let browser = AgentHostApp(bundle: "com.google.Chrome.app.x", pid: 40, name: "Ultimate", window: "cg:400")
+        let project = UltimateHost.Running(home: home, project: .init(root: "/w/app", name: "app"), lock: .init(pid: 9, port: 4747))
+        @MainActor final class Server { var up = true; var page = "61"; var reads = 0; var addressReads = 0 }
+        let server = Server()
+        let ultimate = UltimateHost(
+            home: "/u", enrolled: { [UltimateNamingTests.setup] }, readProjects: { _ in await MainActor.run { server.reads += 1; return server.up ? [project] : [] } },
+            readConversations: { _, _ in
+                .connector([.init(id: "53", handle: "@ultimate", folder: "/w/app"), .init(id: "61", folder: "/w/61"), .init(id: "62", folder: "/w/62")])
+            },
+            show: { _, _ in .unanswered }, retitle: { _, _, _ in false },
+            frontApp: { browser },
+            documentURL: { _ in
+                await MainActor.run {
+                    server.addressReads += 1
+                    return URL(string: "http://ultimate.localhost:4747/?conversation=\(server.page)")
+                }
+            },
+            activate: { _, _ in false })
+        let snapshot = TargetSnapshot(bundleId: browser.bundle, pid: Int32(browser.pid), focusedWindowId: browser.window)
+        let rig = await rig("Plan the release.", front: FrontWindow(snapshot), frontGrace: .milliseconds(300),
+                            hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.hostRereadInterval = .milliseconds(50)
+        func id(_ native: String) -> String {
+            AgentSessionID.make(agent: "ultimate", native: AgentHostLocation(host: "ultimate", instance: home, native: native).conversationKey)
+        }
+        func hello(_ native: String) -> AgentEvent.Hello {
+            var hello = AgentHostTests.hello(id(native))
+            hello.agent = "ultimate"
+            hello.features = ["shown", "readiness"]
+            return hello
+        }
+        for native in ["61", "62"] { rig.hub.handle(.hello(hello(native))) }
+        if pageEverFocused { rig.hub.handle(.shown(session: id("61"), on: true, pageConversation: "61")) }
+        await rig.hub.refreshHostsForPress()
+        if !pageFocusedAtStop { rig.hub.handle(.shown(session: id("61"), on: false, pageConversation: "61")) }
+        server.up = false
+        await rig.hub.hungUp(agents: [UltimateHost.kind.id])
+        let readsBefore = server.reads
+        let addressReadsBefore = server.addressReads
+
+        func play() async {
+            for step in steps {
+                switch step {
+                case .listed: server.up = true
+                case .hello: for native in ["61", "62"] { rig.hub.handle(.hello(hello(native))) }
+                case .reported:
+                    server.up = true
+                    server.page = pageShowsAfter
+                    rig.hub.handle(.shown(session: id(pageShowsAfter), on: true, pageConversation: pageShowsAfter))
+                }
+                try? await Task.sleep(for: .milliseconds(when == .whileSpeaking ? 150 : 40))
+            }
+        }
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        try? await Task.sleep(for: .milliseconds(500))
+        if when == .whileSpeaking { await play() }
+        try? await Task.sleep(for: .milliseconds(200))
+        rig.controller.handleCommit()
+        if when == .justAfterRelease { await play() }
+        await rig.controller.dictationTask?.value
+        let submitted = rig.sent.compactMap { if case .submit(_, let session, _, _, _, _, _, _) = $0.0 { session } else { nil } }
+        return (submitted, rig.hud.states, server.reads - readsBefore, server.addressReads - addressReadsBefore)
+    }
+
+    nonisolated private static let restartOrders: [[RestartStep]] = [
+        [.listed, .hello, .reported], [.listed, .reported, .hello], [.hello, .listed, .reported],
+        [.hello, .reported, .listed], [.reported, .listed, .hello], [.reported, .hello, .listed],
+    ]
+
+    @Test(arguments: restartOrders, RestartWhen.allCases)
+    func aTakeStartedWhileUltimateRestartsGoesToItsPageWhenItComesBackInAnyOrder(steps: [RestartStep], when: RestartWhen) async {
+        let (submitted, _, _, _) = await takeDuringUltimateRestart(steps: steps, when: when)
+        let id61 = AgentSessionID.make(
+            agent: "ultimate", native: AgentHostLocation(host: "ultimate", instance: "/u/.ultimate/projects/app-1234", native: "61").conversationKey)
+        #expect(submitted == [id61])
+    }
+
+    @Test func aTakeWhoseUltimateNeverComesBackSaysItIsNotAnsweringAndBacksOffItsRereads() async {
+        let (submitted, hud, reads, _) = await takeDuringUltimateRestart(steps: [], when: .whileSpeaking)
+        #expect(submitted.isEmpty)
+        #expect(reads <= 12, "\(reads) project reads in about a second of waiting")
+        #expect(hud.contains {
+            if case .error(let message, _, _, _) = $0 { message.hasPrefix("Ultimate for app isn\u{2019}t answering. Nothing sent.") } else { false }
+        })
+    }
+
+    @Test func aPageThatLostFocusBeforeItsServerStoppedStillGetsTheTakeWhenItComesBack() async {
+        let (submitted, _, _, _) = await takeDuringUltimateRestart(steps: [.listed, .hello, .reported], when: .whileSpeaking, pageFocusedAtStop: false)
+        let id61 = AgentSessionID.make(
+            agent: "ultimate", native: AgentHostLocation(host: "ultimate", instance: "/u/.ultimate/projects/app-1234", native: "61").conversationKey)
+        #expect(submitted == [id61])
+    }
+
+    @Test func aPageThatNeverReportedItsConversationWaitsOnlyTheGraceWithoutPollingAndSaysItIsNotAnswering() async {
+        let (submitted, hud, reads, frontReads) = await takeDuringUltimateRestart(steps: [], when: .whileSpeaking, pageEverFocused: false)
+        #expect(submitted.isEmpty)
+        #expect(reads == 0)
+        #expect(frontReads <= 4, "\(frontReads) reads of the page address")
+        #expect(hud.contains {
+            if case .error(let message, _, _, _) = $0 { message.hasPrefix("Ultimate for app isn\u{2019}t answering. Nothing sent.") } else { false }
+        })
+    }
+
+    @Test func aRestartedPageShowingAnotherConversationDoesNotTakeTheTake() async {
+        let (submitted, hud, _, _) = await takeDuringUltimateRestart(steps: [.listed, .hello, .reported], when: .whileSpeaking, pageShowsAfter: "62")
+        #expect(submitted.isEmpty)
+        #expect(hud.contains {
+            if case .error(let message, _, _, _) = $0 {
+                message.hasPrefix("Ultimate for app restarted while you spoke, and \(Branding.appName) couldn\u{2019}t confirm the conversation in front.")
+            } else { false }
+        })
+    }
+
     @Test func aDelayedFirstUltimatePageReportArrivingAfterRefreshStillDelivers() async {
         let home = "/u/.ultimate/projects/app-1234"
         let browser = AgentHostApp(bundle: "com.google.Chrome.app.x", pid: 40, name: "Ultimate", window: "cg:400")
@@ -2580,6 +2704,7 @@ struct AgentDeliveryWiringTests {
          false),
         (.notListed("Example Work"),
          "Example Work\u{2019}s conversation in front isn\u{2019}t in its list yet. Nothing sent. Try again in a moment.", false),
+        (.notAnswering("Ultimate for app"), "Ultimate for app isn\u{2019}t answering. Nothing sent.", false),
         (.cannotStart("Example Work"),
          "Example Work\u{2019}s plugin can\u{2019}t start conversations. Nothing sent. Agent settings can update it.", true),
     ])

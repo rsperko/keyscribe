@@ -187,14 +187,15 @@ struct PasteboardReaderTests {
         #expect(ContinuousClock.now - started < .seconds(25))
     }
 
-    @Test func aSpentDeadlineReadsNothing() async {
+    @Test(arguments: [true, false])
+    func aSpentDeadlineReadsNothing(withHelper: Bool) async {
         let pb = pasteboard {
             $0.clearContents()
             $0.setString("keepme", forType: .string)
         }
         defer { pb.releaseGlobally() }
 
-        let snapshot = await TextInserter.PasteboardSnapshot.read(from: pb, deadline: .now, helper: Self.helper)
+        let snapshot = await TextInserter.PasteboardSnapshot.read(from: pb, deadline: .now, helper: withHelper ? Self.helper : nil)
 
         #expect(snapshot == nil)
     }

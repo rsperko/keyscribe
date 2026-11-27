@@ -1739,6 +1739,9 @@ final class DictationController {
     var placeNamesGrace: Duration {
         get { agentTake.placeNamesGrace } set { agentTake.placeNamesGrace = newValue }
     }
+    var hostRereadInterval: Duration {
+        get { agentTake.hostRereadInterval } set { agentTake.hostRereadInterval = newValue }
+    }
     var promptBoxConfirmation: Duration {
         get { agentTake.promptBoxConfirmation } set { agentTake.promptBoxConfirmation = newValue }
     }

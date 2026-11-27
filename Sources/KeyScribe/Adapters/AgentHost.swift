@@ -39,12 +39,14 @@ public struct AgentHostCopy: Equatable, Sendable {
     public var instance: String
     public var enrolled: Bool
     public var setUp: Bool
+    public var answering: Bool
 
-    public init(name: String, instance: String, enrolled: Bool, setUp: Bool = true) {
+    public init(name: String, instance: String, enrolled: Bool, setUp: Bool = true, answering: Bool = true) {
         self.name = name
         self.instance = instance
         self.enrolled = enrolled
         self.setUp = setUp
+        self.answering = answering
     }
 }
 
@@ -63,11 +65,12 @@ public struct AgentHostFocus: Equatable, Sendable {
     public var resolvesConversation: Bool
     public var allowsNewConversation: Bool
     public var pageSilent: Bool
+    public var addressed: AgentHostLocation?
 
     public init(
         app: AgentHostApp? = nil, copy: AgentHostCopy? = nil, problem: String? = nil,
         conversation: AgentHostLocation? = nil, resolvesConversation: Bool = false, allowsNewConversation: Bool = true,
-        pageSilent: Bool = false
+        pageSilent: Bool = false, addressed: AgentHostLocation? = nil
     ) {
         self.app = app
         self.copy = copy
@@ -76,6 +79,7 @@ public struct AgentHostFocus: Equatable, Sendable {
         self.resolvesConversation = resolvesConversation
         self.allowsNewConversation = allowsNewConversation
         self.pageSilent = pageSilent
+        self.addressed = addressed
     }
 }
 

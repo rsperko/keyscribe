@@ -154,7 +154,7 @@ final class AgentHub {
     private var pendingScan: (rereading: Bool, agents: Set<String>?, reusingProcesses: Bool)?
     private var outstanding: [String: Outstanding] = [:]
     private var connectorNamesAt: [String: Date] = [:]
-    private var stopped = false
+    private(set) var stopped = false
     private var savedRemembered: [String: RememberedName] = [:]
     let exclusions: AgentExclusions
     private(set) var exclusionsNotSaved: String?
@@ -523,6 +523,14 @@ final class AgentHub {
         case notListed(String)
         case cannotStart(String)
         case unavailable(String)
+        case notAnswering(String)
+        case cameBackUnconfirmed(String)
+    }
+
+    struct HostRecovery: Equatable {
+        let host: String
+        let name: String
+        let conversation: String
     }
 
     struct HostFrontCheck {
@@ -530,6 +538,7 @@ final class AgentHub {
         var starts = false
         var notReady: HostCopyNotReady?
         var copySlot: String?
+        var recovery: HostRecovery?
     }
 
     func checkHostFront() async -> HostFrontCheck {
@@ -547,7 +556,15 @@ final class AgentHub {
                 }
             }
             if let focus, fallback.notReady == nil, let notReady = notReady(in: source, focus: focus) {
-                fallback = HostFrontCheck(notReady: notReady, copySlot: focus.copy.map { Self.slot(source.kind.id, $0.instance) })
+                let recovery = focus.copy.flatMap { copy in
+                    copy.answering ? nil : focus.addressed.map {
+                        HostRecovery(
+                            host: source.kind.id, name: copy.name,
+                            conversation: AgentSessionID.make(agent: source.kind.id, native: $0.conversationKey))
+                    }
+                }
+                fallback = HostFrontCheck(
+                    notReady: notReady, copySlot: focus.copy.map { Self.slot(source.kind.id, $0.instance) }, recovery: recovery)
             }
         }
         return fallback
@@ -566,6 +583,7 @@ final class AgentHub {
     private func notReady(in source: HostDiscovery, focus: AgentHostFocus) -> HostCopyNotReady? {
         if let problem = focus.problem { return .unavailable(problem) }
         guard let copy = focus.copy else { return nil }
+        guard copy.answering else { return .notAnswering(copy.name) }
         guard copy.setUp else { return .notSetUp(copy.name) }
         guard copy.enrolled else { return .missing(copy.name) }
         let carrier = AgentSessionID.make(
@@ -599,6 +617,11 @@ final class AgentHub {
 
     func hostReportMark() -> HostReportMark {
         HostReportMark(heard: hostReportsHeard)
+    }
+
+    func copyReported(_ copySlot: String?, since mark: HostReportMark) -> Bool {
+        guard let copySlot else { return false }
+        return hostReportsHeard[copySlot, default: 0] != mark.heard[copySlot, default: 0]
     }
 
     var parkedOnHostReport: Bool {
@@ -1029,6 +1052,12 @@ final class AgentHub {
     var onScanned: (() -> Void)?
     var onProcesses: ((Set<Int>) -> Void)?
     private var processesShown: Set<Int> = []
+
+    func reread(host kind: String) {
+        guard let source = hosts.first(where: { $0.kind.id == kind && $0.isEnabled }) else { return }
+        source.expect()
+        requestScan(rereadingTitles: false, agents: [kind])
+    }
 
     func hostsRefreshed(_ refresh: HostRefresh?) -> Bool {
         refresh.map { hostScanRounds.finished > $0.after } ?? true

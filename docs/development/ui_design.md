@@ -792,7 +792,11 @@ Work window is in front. Nothing sent.”, with **Open Accessibility Settings**;
 window is in front. Nothing sent. Click in bb Work’s window, then try again.”; “bb Work hasn’t shown {appName} a
 conversation. Nothing sent. Open or click in one in bb Work, then try again.”; “bb Work’s conversation in front isn’t in its list
 yet. Nothing sent. Try again in a moment.”, or “bb Work’s plugin can’t start conversations. Nothing sent. Agent
-settings can update it.” The plugin-missing, not-connected, and can't-start lines have **Open Agent
+settings can update it.” A copy whose page is in front while its server is not running (an Ultimate project restarting)
+says “Ultimate for app isn’t answering. Nothing sent.” A copy that is not answering is waited for while the user is still
+speaking, and when it comes back the take goes to the conversation its page showed before, and to no other: otherwise
+“Ultimate for app restarted while you spoke, and {appName} couldn’t confirm the conversation in front. Nothing sent.”
+The plugin-missing, not-connected, and can't-start lines have **Open Agent
 Settings**, where the plugin's check says why; the Accessibility line has **Open Accessibility Settings**; the others
 have no button. Any other bb page that shows no thread, such as its settings, has no conversation in front. A Codex
 conversation is in front when the terminal pane of the `codex` process whose title holds its thread id is in front,

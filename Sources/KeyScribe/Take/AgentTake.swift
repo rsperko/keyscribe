@@ -105,6 +105,7 @@ final class AgentTake {
         host?.agents?.directory.conversations.first { $0.id == conversation }?.runningAgent
     }
     var frontReadingGrace: Duration = .seconds(1)
+    var hostRereadInterval: Duration = .milliseconds(250)
     var placeNamesGrace: Duration = .seconds(1)
     var promptBoxConfirmation: Duration = .seconds(2)
     var frontApp: @MainActor () -> FrontApp? = { AgentFront.frontmost() }
@@ -157,30 +158,45 @@ final class AgentTake {
         let pressDeadline = ContinuousClock.now + frontReadingGrace
         host.agentFrontTask?.cancel()
         host.agentFrontTask = Task { @MainActor [weak self, weak host, weak agents] in
-            guard var mark = agents?.hostReportMark() else { return }
+            guard var mark = agents?.hostReportMark(), let self else { return }
             var shown = await agents?.terminalSessionInFrontWithoutAsking()
             var starts = false
             var notReady: AgentHub.HostCopyNotReady?
             var copySlot: String?
-            if shown == nil, !Task.isCancelled, let check = await agents?.checkHostFront() {
+            var recovery: AgentHub.HostRecovery?
+            var rereadEvery = hostRereadInterval
+            var nextReread = ContinuousClock.now
+            func take(_ check: AgentHub.HostFrontCheck) {
                 shown = check.shown
                 starts = check.starts
                 notReady = check.notReady
                 copySlot = check.copySlot
+                recovery = recovery ?? check.recovery
             }
-            while shown == nil, !Task.isCancelled, let host, host.takeIdentity === identity, let agents,
-                  ContinuousClock.now < host.agentFrontCutoff ?? pressDeadline {
+            if shown == nil, !Task.isCancelled, let check = await agents?.checkHostFront() { take(check) }
+            @MainActor func waitsUntil(_ host: AgentTakeHost) -> ContinuousClock.Instant? {
+                host.agentFrontCutoff ?? (recovery == nil ? pressDeadline : nil)
+            }
+            @MainActor func stillWaiting(_ host: AgentTakeHost) -> Bool {
+                waitsUntil(host).map { ContinuousClock.now < $0 } ?? true
+            }
+            while shown == nil, !Task.isCancelled, let host, host.takeIdentity === identity, let agents, stillWaiting(host) {
                 let refreshing = !agents.hostsRefreshed(refresh)
-                guard notReady != nil || refreshing else { break }
+                guard notReady != nil || refreshing || recovery != nil else { break }
                 if let notReady { host.agentHostCopyNotReady = notReady }
-                guard await agents.nextHostReport(since: mark, watching: copySlot, awaitingRefresh: refreshing, before: host.agentFrontCutoff ?? pressDeadline)
-                else { break }
+                let polling = recovery != nil && notReady.map { if case .notAnswering = $0 { true } else { false } } == true
+                if let recovery, polling, ContinuousClock.now >= nextReread {
+                    agents.reread(host: recovery.host)
+                    nextReread = .now + rereadEvery
+                    rereadEvery = min(rereadEvery * 2, frontReadingGrace)
+                }
+                var until = waitsUntil(host) ?? .now + frontReadingGrace
+                if polling { until = min(until, nextReread) }
+                let woke = await agents.nextHostReport(since: mark, watching: copySlot, awaitingRefresh: refreshing, before: until)
+                guard woke || (!agents.stopped && !Task.isCancelled && stillWaiting(host)) else { break }
+                if polling, agents.copyReported(copySlot, since: mark) { nextReread = .now }
                 mark = agents.hostReportMark()
-                let check = await agents.checkHostFront()
-                shown = check.shown
-                starts = check.starts
-                notReady = check.notReady
-                copySlot = check.copySlot
+                take(await agents.checkHostFront())
                 if shown != nil { host.agentHostCopyNotReady = nil }
             }
             if shown == nil, !Task.isCancelled, let host, host.takeIdentity === identity {
@@ -191,7 +207,11 @@ final class AgentTake {
                 }
                 return
             }
-            guard let shown, let self, let host, !Task.isCancelled,
+            if let recovery, let shown, recovery.conversation != shown.id, !Task.isCancelled, let host, host.takeIdentity === identity {
+                host.agentHostCopyNotReady = .cameBackUnconfirmed(recovery.name)
+                return
+            }
+            guard let shown, let host, !Task.isCancelled,
                   host.takeIdentity === identity,
                   host.agentFrontCutoff.map({ ContinuousClock.now <= $0 }) ?? true,
                   starts || snapshot.rows.contains(shown.id) || snapshot.disconnected.values.contains(shown.id)
@@ -423,7 +443,7 @@ final class AgentTake {
         switch notReady {
         case .missing, .notConnected, .cannotStart: .openAgents(mode)
         case .needsAccessibility: .openAccessibilitySettings
-        case .notSetUp, .windowUnknown, .nothingShown, .pageSilent, .notListed, .unavailable: nil
+        case .notSetUp, .windowUnknown, .nothingShown, .pageSilent, .notListed, .unavailable, .notAnswering, .cameBackUnconfirmed: nil
         }
     }
 

@@ -643,7 +643,21 @@ every rule above applies to it, with these sharpenings:
   (`AgentHub.nextHostReport`, snapshotting report counts before the async check so mid-read reports wake it), until the
   release cutoff, or one front-reading grace after the press while the user
   still speaks; a slow or hung host listing never holds it longer, and a stopped hub ends the wait. Reports about
-  other agents and other copies do not wake it.
+  other agents and other copies do not wake it. A copy in front that is not answering is the exception: when a scan
+  first finds a running Ultimate project gone, the host keeps it, with the last report its page sent claiming focus
+  (kept across a blur, since the box cannot change without the page reporting again), for
+  `UltimateHost.restartWithin`, so its page in front while that project's server restarts reads as `notAnswering`
+  rather than as nothing in front. Once a take has seen that, it waits until the release cutoff whatever the copy
+  passes through on its way back (listed, connected, reporting, in any order), since the user is still speaking
+  (`AgentHub.HostRecovery`). Only that host is re-read while it is not answering, first after
+  `AgentTake.hostRereadInterval` and then backing off to one front-reading grace; a report from the copy re-reads it
+  at once, and the re-read's own listing never does, or the loop would scan back to back. The take goes only to the
+  conversation that last report named for the same page address (the box, not the address: a side chat over a
+  parent is its own conversation), and holds with “<name> restarted while you spoke, and {appName} couldn’t confirm
+  the conversation in front. Nothing sent.” when the page comes back on another one. A page with no such report
+  (it never claimed focus, or its last focused report was a new side chat or a problem) cannot be recovered, so it
+  waits only the usual front-reading grace, re-reads nothing, and holds as a copy that is not answering. A copy still not
+  answering at the cutoff holds the take with “<name> isn’t answering. Nothing sent.”
   Instance paths use the filesystem's canonical path on both sides.
   “Open” switches Ultimate's shared UI state through its loopback `/api/ui` and raises the window last matched, and
   each write carries the change both as `ops` (what current Ultimate reads) and as `set` (what an older one reads), since

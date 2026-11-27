@@ -57,6 +57,9 @@ final class UltimateHost: AgentHost {
     private let activate: @MainActor (AgentHostApp, @escaping @MainActor () -> Bool) async -> Bool
     private let openPage: @MainActor (URL) -> Bool
     private var running: [String: Running] = [:]
+    private var stopped: [String: (project: Running, report: Report?, at: Date)] = [:]
+    private var lastFocused: [String: Report] = [:]
+    static let restartWithin: TimeInterval = 120
     private var listed: [String: [UltimateProjects.Conversation]] = [:]
     private var listedByConnector: Set<String> = []
     private var reports: [String: Report] = [:]
@@ -105,8 +108,13 @@ final class UltimateHost: AgentHost {
     func deliveryRoute(at location: AgentHostLocation) -> AgentHostDeliveryRoute { .connector }
 
     func scan() async -> AgentHostScan {
+        let started = now()
         let found = await readProjects(setups)
+        let before = running
         running = Dictionary(found.map { ($0.home, $0) }, uniquingKeysWith: { first, _ in first })
+        for (home, project) in before where running[home] == nil { stopped[home] = (project, lastFocused[home], now()) }
+        stopped = stopped.filter { running[$0.key] == nil && now().timeIntervalSince($0.value.at) < Self.restartWithin }
+        lastFocused = lastFocused.filter { running[$0.key] != nil || stopped[$0.key] != nil }
         var sessions: [AgentSession] = []
         var titles: [String: String] = [:]
         var sidebarTitles: [String: String] = [:]
@@ -152,8 +160,9 @@ final class UltimateHost: AgentHost {
         }
         listed = listed.filter { running[$0.key] != nil }
         listedByConnector = listedByConnector.filter { running[$0] != nil }
-        reports = reports.filter { running[$0.key] != nil }
-        lastClaim = lastClaim.filter { running[$0.key] != nil }
+        let reportedSince = Set(lastClaim.filter { $0.value >= started }.keys)
+        reports = reports.filter { running[$0.key] != nil || reportedSince.contains($0.key) }
+        lastClaim = lastClaim.filter { running[$0.key] != nil || reportedSince.contains($0.key) }
         lastWindow = lastWindow.filter { running[$0.key] != nil }
         for (instance, task) in rememberTasks where running[instance] == nil {
             task.cancel()
@@ -181,7 +190,10 @@ final class UltimateHost: AgentHost {
             conversation: on ? location.native : nil, pageConversation: pageConversation,
             on: on, newConversation: newConversation, problem: problem)
         reports[location.instance] = report.claimsFocus ? report : nil
-        if report.claimsFocus { lastClaim[location.instance] = now() }
+        if report.claimsFocus {
+            lastClaim[location.instance] = now()
+            lastFocused[location.instance] = report
+        }
         if !wasClaiming, report.claimsFocus {
             let instance = location.instance
             rememberTasks[instance]?.cancel()
@@ -215,21 +227,43 @@ final class UltimateHost: AgentHost {
         return (report.pageConversation ?? report.conversation) == urlConversation
     }
 
-    private func verifiedPage(requireClaim: Bool) async -> (app: AgentHostApp, project: Running, urlConversation: String?)? {
-        guard !running.isEmpty else { return nil }
+    private var restarting: [Running] {
+        stopped.values.filter { now().timeIntervalSince($0.at) < Self.restartWithin }.map(\.project)
+    }
+
+    private func verifiedPage(
+        requireClaim: Bool
+    ) async -> (app: AgentHostApp, project: Running, urlConversation: String?, answering: Bool)? {
+        let restarting = requireClaim ? [] : self.restarting
+        guard !running.isEmpty || !restarting.isEmpty else { return nil }
         if requireClaim, !reports.contains(where: { running[$0.key] != nil && $0.value.claimsFocus }) { return nil }
         guard let app = frontApp(), let window = app.window else { return nil }
         let url = await documentURL(app)
         guard !Task.isCancelled, let after = frontApp(), after.pid == app.pid, after.window == window else { return nil }
-        guard let url, Self.isLocalPage(url), let project = running.values.first(where: { $0.lock.port == url.port }) else { return nil }
+        guard let url, Self.isLocalPage(url) else { return nil }
         var found = after
+        if let project = running.values.first(where: { $0.lock.port == url.port }) {
+            found.instance = project.home
+            lastWindow[project.home] = found
+            return (found, project, Self.conversation(in: url), true)
+        }
+        guard !requireClaim, let project = restarting.first(where: { $0.lock.port == url.port }) else { return nil }
         found.instance = project.home
-        lastWindow[project.home] = found
-        return (found, project, Self.conversation(in: url))
+        return (found, project, Self.conversation(in: url), false)
     }
 
     func focusInFront(requireClaim: Bool) async -> AgentHostFocus? {
         guard let page = await verifiedPage(requireClaim: requireClaim) else { return nil }
+        guard page.answering else {
+            return AgentHostFocus(
+                app: page.app, copy: AgentHostCopy(name: name(page.project), instance: page.project.home, enrolled: true, answering: false),
+                resolvesConversation: true, allowsNewConversation: false,
+                addressed: stopped[page.project.home]?.report.flatMap { report in
+                    guard report.on, Self.matches(report, urlConversation: page.urlConversation), let conversation = report.conversation
+                    else { return nil }
+                    return location(page.project.home, conversation)
+                })
+        }
         let copy = AgentHostCopy(name: name(page.project), instance: page.project.home, enrolled: true)
         guard let report = reports[page.project.home], Self.matches(report, urlConversation: page.urlConversation) else {
             let silent = lastClaim[page.project.home].map { now().timeIntervalSince($0) > Self.pageReportsWithin } ?? true
