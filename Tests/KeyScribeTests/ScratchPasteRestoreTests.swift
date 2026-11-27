@@ -1,4 +1,5 @@
 import AppKit
+import os
 import KeyScribeKit
 import Foundation
 import Testing
@@ -9,6 +10,24 @@ import Testing
 // text (which can hold a just-restored redacted span) gets restored back and persists. Runs against a
 // PRIVATE pasteboard (no real clipboard, no synthesized ⌘V). Serialized because the coordinator keeps
 // process-wide pending-restore state the dictation state machine only ever touches one at a time.
+final class LateReads: @unchecked Sendable {
+    private let lock = NSLock()
+    private var read: [String] = []
+    var texts: [String] { lock.withLock { read } }
+
+    func read(_ name: String, after delay: Duration) {
+        Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            let text = NSPasteboard(name: NSPasteboard.Name(name)).string(forType: .string) ?? ""
+            self.lock.withLock { self.read.append(text) }
+        }
+    }
+
+    func settled(count: Int) async {
+        for _ in 0..<500 where texts.count < count { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+}
+
 @MainActor
 @Suite(.serialized)
 struct ScratchPasteRestoreTests {
@@ -276,7 +295,7 @@ struct ScratchPasteRestoreTests {
         pb.clearContents()
         pb.setString("USER_ORIGINAL", forType: .string)
 
-        TextInserter.prefetchSnapshot(on: pb)
+        await TextInserter.prefetchSnapshot(on: pb).value
         let (scratch, captures) = await pasteCountingCaptures("dictation", on: pb)
         #expect(captures == 0)
         await TextInserter.settleScratch(scratch!, awaitSettle: true)
@@ -289,7 +308,7 @@ struct ScratchPasteRestoreTests {
         pb.clearContents()
         pb.setString("USER_ORIGINAL", forType: .string)
 
-        TextInserter.prefetchSnapshot(on: pb)
+        await TextInserter.prefetchSnapshot(on: pb).value
         pb.clearContents()
         pb.setString("USER_COPIED_LATER", forType: .string)
         let (scratch, captures) = await pasteCountingCaptures("dictation", on: pb)
@@ -306,7 +325,7 @@ struct ScratchPasteRestoreTests {
         let first = await TextInserter.beginScratchPaste("dictationA", on: pb)
         await TextInserter.settleScratch(first!, awaitSettle: false)
 
-        TextInserter.prefetchSnapshot(on: pb)
+        await TextInserter.prefetchSnapshot(on: pb).value
         let (second, _) = await pasteCountingCaptures("dictationB", on: pb)
         await TextInserter.settleScratch(second!, awaitSettle: true)
         await TextInserter.drainPendingRestore()
@@ -318,7 +337,7 @@ struct ScratchPasteRestoreTests {
         pb.clearContents()
         pb.setString("USER_ORIGINAL", forType: .string)
 
-        TextInserter.prefetchSnapshot(on: pb)
+        await TextInserter.prefetchSnapshot(on: pb).value
         let (first, _) = await pasteCountingCaptures("dictationA", on: pb)
         await TextInserter.settleScratch(first!, awaitSettle: true)
         await TextInserter.drainPendingRestore()
@@ -336,7 +355,7 @@ struct ScratchPasteRestoreTests {
         pb.clearContents()
         pb.setString("USER_ORIGINAL", forType: .string)
 
-        TextInserter.prefetchSnapshot(on: other)
+        await TextInserter.prefetchSnapshot(on: other).value
         let (scratch, captures) = await pasteCountingCaptures("dictation", on: pb)
         #expect(captures == 1)
         await TextInserter.settleScratch(scratch!, awaitSettle: true)
@@ -350,7 +369,7 @@ struct ScratchPasteRestoreTests {
         pb.clearContents()
         pb.setString("USER_ORIGINAL", forType: .string)
 
-        TextInserter.prefetchSnapshot(on: pb)
+        await TextInserter.prefetchSnapshot(on: pb).value
         TextInserter.discardPrefetchedSnapshot()
         let (scratch, captures) = await pasteCountingCaptures("dictation", on: pb)
         #expect(captures == 1)
@@ -416,5 +435,175 @@ struct ScratchPasteRestoreTests {
         #expect(pasted?.trimmingCharacters(in: .whitespaces) == "hello there")
         #expect(captures == 0)
         #expect(pb.string(forType: .string) == "USER_ORIGINAL")
+    }
+
+    @Test func aPrefetchDiscardedWhileItReadsLeavesNothingForThePaste() async throws {
+        let pb = makePasteboard()
+        defer { pb.releaseGlobally() }
+        let source = try await SlowPasteboardSource(on: pb, delay: 0.5)
+        defer { source.stop() }
+        let prefetch = TextInserter.PasteboardSnapshot.$readBudgetSeconds.withValue(30) {
+            TextInserter.prefetchSnapshot(on: pb, helper: PasteboardReaderTests.helper)
+        }
+        try await source.until("rendering")
+        TextInserter.discardPrefetchedSnapshot()
+
+        let (scratch, captures) = await pasteCountingCaptures("dictation", on: pb)
+        if let scratch { await TextInserter.settleScratch(scratch, awaitSettle: false) }
+        await TextInserter.drainPendingRestore()
+        _ = await prefetch.value
+
+        #expect(captures == 1)
+    }
+
+    @Test func aSecondPasteDuringTheFirstsClipboardReadWaitsAndRestoresTheUsersClipboard() async throws {
+        let pb = makePasteboard()
+        defer { pb.releaseGlobally() }
+        let source = try await SlowPasteboardSource(on: pb, delay: 0.6)
+        defer { source.stop() }
+        let helper = PasteboardReaderTests.helper
+        let keys = OSAllocatedUnfairLock(initialState: 0)
+
+        await TextInserter.PasteboardSnapshot.$readBudgetSeconds.withValue(30) {
+            await TextInserter.$frontmostApp.withValue({ 1 }) {
+                await TextInserter.$keystrokeSink.withValue({ _ in keys.withLock { $0 += 1 } }) {
+                    let first = Task { await TextInserter.insertViaPaste("dictationA", awaitSettle: false, on: pb, helper: helper) }
+                    try? await source.until("rendering")
+                    let second = Task { await TextInserter.insertViaPaste("dictationB", awaitSettle: false, on: pb, helper: helper) }
+                    #expect(await first.value)
+                    #expect(await second.value)
+                }
+            }
+        }
+        await TextInserter.drainPendingRestore()
+
+        #expect(keys.withLock { $0 } == 2)
+        #expect(pb.string(forType: .string) == "plain fallback")
+        #expect(pb.data(forType: SlowPasteboardSource.slowType) == Data("slow bytes".utf8))
+    }
+
+    @Test func aTargetThatReadsThePasteLateStillGetsThatPastesText() async {
+        let name = "keyscribe-test-\(UUID().uuidString)"
+        let pb = NSPasteboard(name: NSPasteboard.Name(name))
+        defer { pb.releaseGlobally() }
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+        let late = LateReads()
+
+        await TextInserter.PasteboardSnapshot.$readBudgetSeconds.withValue(30) {
+            await TextInserter.$frontmostApp.withValue({ 1 }) {
+                await TextInserter.$keystrokeSink.withValue({ _ in late.read(name, after: .milliseconds(100)) }) {
+                    let first = Task {
+                        await TextInserter.insertViaPaste("dictationA", awaitSettle: false, on: pb, helper: PasteboardReaderTests.helper)
+                    }
+                    let second = Task {
+                        await TextInserter.insertViaPaste("dictationB", awaitSettle: false, on: pb, helper: PasteboardReaderTests.helper)
+                    }
+                    #expect(await first.value)
+                    #expect(await second.value)
+                }
+            }
+        }
+        await late.settled(count: 2)
+        await TextInserter.drainPendingRestore()
+
+        #expect(late.texts == ["dictationA", "dictationB"])
+        #expect(pb.string(forType: .string) == "USER_ORIGINAL")
+    }
+
+    @Test func anotherAppInFrontAfterTheReadSkipsThePaste() async {
+        let pb = makePasteboard()
+        defer { pb.releaseGlobally() }
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+        let asked = OSAllocatedUnfairLock(initialState: Int32(0))
+        let keys = OSAllocatedUnfairLock(initialState: 0)
+
+        let pasted = await TextInserter.$frontmostApp.withValue({ asked.withLock { $0 += 1; return $0 } }) {
+            await TextInserter.$keystrokeSink.withValue({ _ in keys.withLock { $0 += 1 } }) {
+                await TextInserter.insertViaPaste("dictation", awaitSettle: false, on: pb, helper: PasteboardReaderTests.helper)
+            }
+        }
+
+        #expect(!pasted)
+        #expect(keys.withLock { $0 } == 0)
+        #expect(pb.string(forType: .string) == "USER_ORIGINAL")
+    }
+
+    private func pasteAfterPrefetch(
+        on pb: NSPasteboard, settledFirst: Bool, check: @escaping @MainActor @Sendable () async -> Bool
+    ) async -> (pasted: Bool, keys: Int) {
+        let keys = OSAllocatedUnfairLock(initialState: 0)
+        let pasted = await TextInserter.PasteboardSnapshot.$readBudgetSeconds.withValue(30) {
+            await TextInserter.$frontmostApp.withValue({ 1 }) {
+                await TextInserter.$targetStillFocused.withValue(check) {
+                    await TextInserter.$keystrokeSink.withValue({ _ in keys.withLock { $0 += 1 } }) {
+                        let read = TextInserter.prefetchSnapshot(on: pb, helper: PasteboardReaderTests.helper)
+                        if settledFirst { _ = await read.value }
+                        let paste = await TextInserter.insertViaPaste("dictation", awaitSettle: false, on: pb, helper: nil)
+                        _ = await read.value
+                        return paste
+                    }
+                }
+            }
+        }
+        await TextInserter.drainPendingRestore()
+        return (pasted, keys.withLock { $0 })
+    }
+
+    @Test(arguments: [true, false])
+    func aPasteThatWaitedOnTheClipboardChecksItsTargetAgainBeforeTheKeystroke(stillThere: Bool) async throws {
+        let pb = makePasteboard()
+        defer { pb.releaseGlobally() }
+        let source = try await SlowPasteboardSource(on: pb, delay: 0.3)
+        defer { source.stop() }
+        let checks = OSAllocatedUnfairLock(initialState: 0)
+
+        let (pasted, keys) = await pasteAfterPrefetch(on: pb, settledFirst: false) {
+            checks.withLock { $0 += 1 }
+            return stillThere
+        }
+
+        #expect(pasted == stillThere)
+        #expect(checks.withLock { $0 } == 1)
+        #expect(keys == (stillThere ? 1 : 0))
+        #expect(pb.string(forType: .string) == "plain fallback")
+    }
+
+    @Test func aPasteWhoseClipboardWasReadyDoesNotCheckItsTargetAgain() async {
+        let pb = makePasteboard()
+        defer { pb.releaseGlobally() }
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+        let checks = OSAllocatedUnfairLock(initialState: 0)
+
+        let (pasted, keys) = await pasteAfterPrefetch(on: pb, settledFirst: true) {
+            checks.withLock { $0 += 1 }
+            return false
+        }
+
+        #expect(pasted)
+        #expect(checks.withLock { $0 } == 0)
+        #expect(keys == 1)
+    }
+
+    @Test func aCopyLandingWhileTheTargetIsCheckedAgainIsNeitherPastedNorOverwritten() async throws {
+        let name = "keyscribe-test-\(UUID().uuidString)"
+        let pb = NSPasteboard(name: NSPasteboard.Name(name))
+        defer { pb.releaseGlobally() }
+        let source = try await SlowPasteboardSource(on: pb, delay: 0.3)
+        defer { source.stop() }
+
+        let (pasted, keys) = await pasteAfterPrefetch(on: pb, settledFirst: false) {
+            try? await Task.sleep(for: .milliseconds(20))
+            let copied = NSPasteboard(name: NSPasteboard.Name(name))
+            copied.clearContents()
+            copied.setString("COPIED_DURING_CHECK", forType: .string)
+            return true
+        }
+
+        #expect(!pasted)
+        #expect(keys == 0)
+        #expect(pb.string(forType: .string) == "COPIED_DURING_CHECK")
     }
 }

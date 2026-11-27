@@ -90,8 +90,17 @@ final class InsertOutput {
             guard lease.stillWanted() else { return (.abandoned, report) }
             // Actuation suspends inside (the clipboard settle, every typed character). Task-local, so the
             // abort reaches this insertion's call tree and nothing else, such as Paste Last.
-            let actuated = await TextInserter.$shouldAbortInsertion.withValue(lease.abortsActuation) {
-                await insert(decision, method, request.paste, request.text + request.trailing, submitFollows)
+            var recheck: (@MainActor @Sendable () async -> Bool)?
+            if decision == .insert {
+                recheck = { @MainActor @Sendable [weak self] in
+                    guard let self else { return false }
+                    return decideInsertion(captured: captured, current: await self.snapshotAsync()) == .insert
+                }
+            }
+            let actuated = await TextInserter.$targetStillFocused.withValue(recheck) {
+                await TextInserter.$shouldAbortInsertion.withValue(lease.abortsActuation) {
+                    await insert(decision, method, request.paste, request.text + request.trailing, submitFollows)
+                }
             }
             report.insertMs = Self.elapsedMs(since: insertStart)
             guard lease.stillWanted() else { return (.abandoned, report) }

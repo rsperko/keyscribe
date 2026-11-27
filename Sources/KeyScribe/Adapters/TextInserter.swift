@@ -10,7 +10,29 @@ enum TextInserter {
     private static var pendingRestore: ScratchPaste?
     private static var pendingRestoreBackstop: Task<Void, Never>?
     private static var pendingRestoreGeneration = 0
-    private static var prefetched: (pb: NSPasteboard, snapshot: PasteboardSnapshot)?
+    private static var prefetch: (pb: NSPasteboard, read: Task<PasteboardSnapshot?, Never>)?
+    private static var clipboardHeld = false
+    private static var clipboardWaiters: [CheckedContinuation<Void, Never>] = []
+
+    private static func exclusively<T>(_ body: () async -> T) async -> T {
+        if clipboardHeld {
+            await withCheckedContinuation { clipboardWaiters.append($0) }
+        } else {
+            clipboardHeld = true
+        }
+        defer {
+            if clipboardWaiters.isEmpty { clipboardHeld = false } else { clipboardWaiters.removeFirst().resume() }
+        }
+        return await body()
+    }
+
+    @TaskLocal static var frontmostApp: @MainActor @Sendable () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+    private static var frontmostPid: pid_t? { frontmostApp() }
+
+    private static func settlePendingRestore() async {
+        await pendingRestoreBackstop?.value
+        drainPendingRestoreNow()
+    }
 
     // Reads the target app's current selection. Native apps expose it via AX, read directly (no ⌘C, so an
     // empty selection can't beep or grab the current line). AX-unavailable (Electron/Chromium) falls back to
@@ -21,20 +43,33 @@ enum TextInserter {
         if case .text(let selection) = axSelectedText() {
             return selection.isEmpty ? nil : selection
         }
-        // Drain first so the guard below sees the user's real clipboard, not a prior paste's scratch text.
-        await drainPendingRestore()
+        let front = frontmostPid
         let pb = NSPasteboard.general
-        // The AX-unavailable ⌘C restores byte-perfect only for a plain-text/empty clipboard. Convenience callers
-        // (Add-to-Vocabulary prefill) pass requirePerfectRestore so a rich/image clipboard is never risked for a
-        // non-essential copy — they just get no prefill in that app.
-        if requirePerfectRestore, !clipboardRestoresPerfectly(pb) { return nil }
-        return await withMutedAlertVolume {
-            let snapshot = PasteboardSnapshot.capture(from: pb)
-            guard postKey(keystroke) else { return nil }
+        let early = await prefetched(on: pb)
+        return await exclusively {
+            // Settle first so the guard below sees the user's real clipboard, not a prior paste's scratch text.
+            await settlePendingRestore()
+            // The AX-unavailable ⌘C restores byte-perfect only for a plain-text/empty clipboard. Convenience
+            // callers (Add-to-Vocabulary prefill) pass requirePerfectRestore so a rich/image clipboard is never
+            // risked for a non-essential copy — they just get no prefill in that app.
+            if requirePerfectRestore, !clipboardRestoresPerfectly(pb) { return nil }
+            guard let snapshot = await snapshot(of: pb, early: early, deadline: PasteboardSnapshot.readDeadline()),
+                  !Task.isCancelled, frontmostPid == front
+            else { return nil }
+            return await copySelection(keystroke, on: pb, restoring: snapshot)
+        }
+    }
+
+    private static func copySelection(_ keystroke: ClipboardKeystroke, on pb: NSPasteboard, restoring snapshot: PasteboardSnapshot) async -> String? {
+        await withMutedAlertVolume {
+            guard pb.changeCount == snapshot.changeCount, postKey(keystroke) else { return nil }
             guard await waitForChange(since: snapshot.changeCount) else { return nil }
             let copied = pb.string(forType: .string)
             let editorData = pb.pasteboardItems?.first?.data(forType: webCustomDataType)
-            snapshot.restore()
+            if let claimed = snapshot.restore(to: pb), pb.changeCount == claimed {
+                let restored = snapshot.stamped(claimed)
+                prefetch = (pb, Task { restored })
+            }
             guard WebCustomData.copyIsTrustworthySelection(editorData) else {
                 Log.insertion.debug("captureSelection: discarding VS Code empty-selection whole-line copy")
                 return nil
@@ -129,12 +164,15 @@ enum TextInserter {
     // both suspend after the caller's own gate. TaskLocal, not a stored property: a static would be shared
     // with Paste Last and the correction panel, and reentrancy lets one task clobber another's closure.
     @TaskLocal static var shouldAbortInsertion: (@Sendable () -> Bool)?
+    @TaskLocal static var targetStillFocused: (@MainActor @Sendable () async -> Bool)?
+    private static let waitWorthRechecking: Duration = .milliseconds(30)
 
     private static var insertionAborted: Bool { shouldAbortInsertion?() ?? false }
 
     // Test seam. Typed insertion posts to `.cghidEventTap`, which is system-wide input — a test driving it
     // types into whatever app the user has focused. When this is set the characters are recorded instead.
     @TaskLocal static var typedCharacterSink: (@Sendable (Character) -> Void)?
+    @TaskLocal static var keystrokeSink: (@Sendable (ClipboardKeystroke) -> Void)?
 
     // Returns whether the insertion path verifiably acted. False ⇒ nothing is known to have landed, so the
     // caller must not report success or fire a submit keystroke.
@@ -167,36 +205,59 @@ enum TextInserter {
     @discardableResult
     static func insertViaPaste(
         _ text: String, paste: ClipboardPaste = .init(), awaitSettle: Bool = true,
-        on pb: NSPasteboard = .general
+        on pb: NSPasteboard = .general, helper: URL? = PasteboardReader.helper
     ) async -> Bool {
         guard !text.isEmpty else { return true }
-        guard let scratch = await beginScratchPaste(
-            text, on: pb, concealed: !paste.syncsClipboard, lazy: paste.restoreOnRead && !paste.syncsClipboard
-        ) else {
-            Log.insertion.error("paste: pasteboard write unverified; skipped ⌘V to avoid pasting stale clipboard")
-            return false
-        }
-        if paste.settleMs > 0 {
-            try? await Task.sleep(for: .milliseconds(paste.settleMs))
-        }
-        // Last point before the text lands: the scratch write and the settle above are both suspensions.
-        if insertionAborted {
-            // Restore NOW, not through settleScratch's post-paste window: that window exists to let a
-            // lagging target consume a ⌘V that, here, never happened. Leaving the dictated text on the
-            // clipboard meanwhile would be a needless exposure.
-            Log.insertion.notice("paste: aborted before ⌘V — the capture this text came from was lost")
-            restoreIfScratchIntact(scratch)
-            return false
-        }
-        guard postKey(paste.keystroke) else {
-            restoreIfScratchIntact(scratch)
-            return false
-        }
-        let pastedAt = ContinuousClock.now
-        if paste.syncsClipboard {
+        let front = frontmostPid
+        let preparing = ContinuousClock.now
+        let early = await prefetched(on: pb)
+        let detached = await exclusively { () -> Bool? in
+            guard let scratch = await scratchPaste(
+                text, on: pb, early: early, concealed: !paste.syncsClipboard,
+                lazy: paste.restoreOnRead && !paste.syncsClipboard, helper: helper
+            ) else {
+                Log.insertion.error("paste: no clipboard snapshot in time, or the scratch write was unverified; skipped ⌘V")
+                return nil
+            }
+            if paste.settleMs > 0 {
+                try? await Task.sleep(for: .milliseconds(paste.settleMs))
+            }
+            if preparing.duration(to: .now) > waitWorthRechecking, let check = targetStillFocused, !(await check()) {
+                Log.insertion.notice("paste: the target changed while the clipboard was prepared; skipped ⌘V")
+                restoreIfScratchIntact(scratch)
+                return nil
+            }
+            // Last point before the text lands, with no suspension between these checks and the keystroke: the
+            // clipboard read, the scratch write, the settle and the target check above all suspend.
+            if insertionAborted {
+                // Restore NOW, not through settleScratch's post-paste window: that window exists to let a
+                // lagging target consume a ⌘V that, here, never happened. Leaving the dictated text on the
+                // clipboard meanwhile would be a needless exposure.
+                Log.insertion.notice("paste: aborted before ⌘V — the capture this text came from was lost")
+                restoreIfScratchIntact(scratch)
+                return nil
+            }
+            guard frontmostPid == front else {
+                Log.insertion.notice("paste: focus moved to another app before ⌘V; skipped it")
+                restoreIfScratchIntact(scratch)
+                return nil
+            }
+            guard pb.changeCount == scratch.stamp else {
+                Log.insertion.notice("paste: the clipboard changed after the scratch write; skipped ⌘V")
+                return nil
+            }
+            guard postKey(paste.keystroke) else {
+                restoreIfScratchIntact(scratch)
+                return nil
+            }
+            guard !paste.syncsClipboard else { return false }
+            detachRestore(scratch, restoreMs: paste.restoreMs, pastedAt: .now)
             return true
         }
-        await settleScratch(scratch, awaitSettle: awaitSettle, restoreMs: paste.restoreMs, pastedAt: pastedAt)
+        guard let detached else { return false }
+        if detached, awaitSettle {
+            try? await Task.sleep(for: .milliseconds(submitSettleMs))
+        }
         return true
     }
 
@@ -207,45 +268,88 @@ enum TextInserter {
         let provider: ScratchProvider?
     }
 
-    static func prefetchSnapshot(on pb: NSPasteboard = .general) {
-        drainPendingRestoreNow()
-        prefetched = (pb, PasteboardSnapshot.capture(from: pb))
+    @discardableResult
+    static func prefetchSnapshot(on pb: NSPasteboard = .general, helper: URL? = PasteboardReader.helper) -> Task<PasteboardSnapshot?, Never> {
+        let budget = PasteboardSnapshot.readBudgetSeconds
+        prefetch?.read.cancel()
+        let read = Task {
+            await exclusively { () -> PasteboardSnapshot? in
+                guard !Task.isCancelled else { return nil }
+                await settlePendingRestore()
+                return await PasteboardSnapshot.read(from: pb, deadline: .now.advanced(by: .seconds(budget)), helper: helper)
+            }
+        }
+        prefetch = (pb, read)
+        return read
     }
 
     static func discardPrefetchedSnapshot() {
-        prefetched = nil
+        prefetch?.read.cancel()
+        prefetch = nil
+    }
+
+    private static func prefetched(on pb: NSPasteboard) async -> PasteboardSnapshot? {
+        guard let pending = prefetch, pending.pb === pb else { return nil }
+        prefetch = nil
+        return await pending.read.value
+    }
+
+    private static func snapshot(
+        of pb: NSPasteboard, early: PasteboardSnapshot?, deadline: ContinuousClock.Instant
+    ) async -> PasteboardSnapshot? {
+        if let early, early.changeCount == pb.changeCount { return early }
+        return await PasteboardSnapshot.read(from: pb, deadline: deadline)
     }
 
     // Snapshots the clipboard and writes the scratch value ⌘V will paste. Drains any in-flight detached
     // restore first so the snapshot is the user's real clipboard, not a prior paste's scratch text
     // (restoring that would leak dictated content). nil ⇒ scratch write unverified, caller must not ⌘V.
-    static func beginScratchPaste(_ text: String, on pb: NSPasteboard, concealed: Bool = true, lazy: Bool = false, afterCapture: (() -> Void)? = nil) async -> ScratchPaste? {
-        await drainPendingRestore()
-        let early = prefetched.flatMap { $0.pb === pb && $0.snapshot.changeCount == pb.changeCount ? $0.snapshot : nil }
-        prefetched = nil
-        // ONE deadline across every capture below: each renders on the main thread, so a per-capture budget
-        // would let a promised-flavor clipboard stall main for up to 4x the bound. A retry that finds it spent
-        // degrades to a plain-text snapshot, which is the safe direction — restore still clears the scratch.
-        let renderDeadline = PasteboardSnapshot.renderDeadline()
-        var snapshot: PasteboardSnapshot
-        if let early {
+    static func beginScratchPaste(
+        _ text: String, on pb: NSPasteboard, concealed: Bool = true, lazy: Bool = false, afterCapture: (() -> Void)? = nil,
+        helper: URL? = PasteboardReader.helper
+    ) async -> ScratchPaste? {
+        let early = await prefetched(on: pb)
+        return await exclusively {
+            await scratchPaste(
+                text, on: pb, early: early, concealed: concealed, lazy: lazy, afterCapture: afterCapture, helper: helper)
+        }
+    }
+
+    private static func scratchPaste(
+        _ text: String, on pb: NSPasteboard, early: PasteboardSnapshot?, concealed: Bool, lazy: Bool,
+        afterCapture: (() -> Void)? = nil, helper: URL?
+    ) async -> ScratchPaste? {
+        await settlePendingRestore()
+        return await stageScratch(
+            text, on: pb, early: early, concealed: concealed, lazy: lazy, afterCapture: afterCapture, helper: helper)
+    }
+
+    private static func stageScratch(
+        _ text: String, on pb: NSPasteboard, early: PasteboardSnapshot?, concealed: Bool, lazy: Bool,
+        afterCapture: (() -> Void)?, helper: URL?
+    ) async -> ScratchPaste? {
+        // ONE deadline across every read below, so a clipboard that keeps changing cannot hold the paste for
+        // several budgets.
+        let deadline = PasteboardSnapshot.readDeadline()
+        var snapshot: PasteboardSnapshot?
+        if let early, early.changeCount == pb.changeCount {
             snapshot = early
         } else {
-            snapshot = PasteboardSnapshot.capture(from: pb, renderDeadline: renderDeadline)
+            snapshot = await PasteboardSnapshot.read(from: pb, deadline: deadline, helper: helper)
             afterCapture?()
         }
-        // Re-capture until a snapshot spans no concurrent copy, so the scratch write can't clobber a copy
-        // that landed mid-capture. If it never stabilizes within the cap, fail closed below rather than
-        // clobber an actively-changing clipboard.
+        // Re-read until a snapshot spans no concurrent copy, so the scratch write can't clobber a copy that
+        // landed mid-read. If it never stabilizes within the cap, or a read gives nothing to restore, fail
+        // closed below rather than lose the user's clipboard.
         var stabilizeAttempts = 0
-        while pb.changeCount != snapshot.changeCount && stabilizeAttempts < maxSnapshotStabilizeAttempts {
-            snapshot = PasteboardSnapshot.capture(from: pb, renderDeadline: renderDeadline)
+        while let current = snapshot, pb.changeCount != current.changeCount && stabilizeAttempts < maxSnapshotStabilizeAttempts {
+            snapshot = await PasteboardSnapshot.read(from: pb, deadline: deadline, helper: helper)
             afterCapture?()
             stabilizeAttempts += 1
         }
         // A still-unstable clipboard means a copy is landing right now; skip the paste (recoverable via Paste
         // Last) rather than write scratch over that copy and later restore a stale snapshot.
-        guard pb.changeCount == snapshot.changeCount else { return nil }
+        guard let snapshot, pb.changeCount == snapshot.changeCount else { return nil }
         let provider = lazy ? ScratchProvider(text: text) : nil
         guard writeScratchVerified(text, to: pb, concealed: concealed, provider: provider) else {
             snapshot.restore(to: pb)
@@ -576,6 +680,11 @@ enum TextInserter {
     struct PasteboardSnapshot {
         let changeCount: Int
         private let storage: Storage
+        private(set) var readInChild = false
+
+        func stamped(_ changeCount: Int) -> PasteboardSnapshot {
+            PasteboardSnapshot(changeCount: changeCount, storage: storage, readInChild: readInChild)
+        }
         private static let maxSnapshotBytes = 8 * 1024 * 1024
         // Bounds the render ACROSS flavors, checked between them (see capture): eager images render fully, a
         // clipboard whose lazy/promised payloads blow through it falls back to plain text.
@@ -586,8 +695,32 @@ enum TextInserter {
             case plainText(String?)
         }
 
+        @TaskLocal static var readBudgetSeconds = 1.0
+
         static func renderDeadline() -> ContinuousClock.Instant {
             ContinuousClock.now.advanced(by: .seconds(renderBudgetSeconds))
+        }
+
+        static func readDeadline() -> ContinuousClock.Instant {
+            ContinuousClock.now.advanced(by: .seconds(readBudgetSeconds))
+        }
+
+        @MainActor
+        static func read(
+            from pb: NSPasteboard, deadline: ContinuousClock.Instant, helper: URL? = PasteboardReader.helper
+        ) async -> PasteboardSnapshot? {
+            guard ContinuousClock.now < deadline else { return nil }
+            guard let helper else { return capture(from: pb, renderDeadline: min(deadline, renderDeadline())) }
+            switch await PasteboardReader.read(pb.name, maxBytes: maxSnapshotBytes, deadline: deadline, helper: helper) {
+            case .read(let reading):
+                return PasteboardSnapshot(
+                    changeCount: reading.changeCount, storage: reading.items.map { .full($0) } ?? .plainText(reading.text),
+                    readInChild: true)
+            case .unreadable:
+                return nil
+            case .couldNotStart:
+                return capture(from: pb, renderDeadline: min(deadline, renderDeadline()))
+            }
         }
 
         @MainActor
@@ -630,35 +763,38 @@ enum TextInserter {
         // Main-actor for the same reason as capture: the write side touches NSPasteboard too. Nested types do
         // NOT inherit the enclosing @MainActor, so this must be stated, not assumed from `enum TextInserter`.
         @MainActor
-        func restore(to pb: NSPasteboard = .general) {
+        @discardableResult
+        func restore(to pb: NSPasteboard = .general) -> Int? {
             switch storage {
             case .full(let items):
-                restoreFull(items, to: pb)
+                return restoreFull(items, to: pb)
             case .plainText(let text):
                 // Always clear first so a nil snapshot (a heavyweight/oversized clipboard we couldn't
                 // preserve, no `.string` flavor) removes the scratch paste rather than leaving dictated text
                 // (incl. restored redacted spans) on the clipboard.
-                pb.clearContents()
+                let claimed = pb.clearContents()
                 if let text { pb.setString(text, forType: .string) }
+                return claimed
             }
         }
 
         @MainActor
-        private func restoreFull(_ items: [[NSPasteboard.PasteboardType: Data]], to pb: NSPasteboard) {
-            pb.clearContents()
-            guard !items.isEmpty else { return }
+        private func restoreFull(_ items: [[NSPasteboard.PasteboardType: Data]], to pb: NSPasteboard) -> Int? {
+            let claimed = pb.clearContents()
+            guard !items.isEmpty else { return claimed }
             let objects = items.map { byType -> NSPasteboardItem in
                 let item = NSPasteboardItem()
                 for (type, data) in byType { item.setData(data, forType: type) }
                 return item
             }
-            if pb.writeObjects(objects) { return }
+            if pb.writeObjects(objects) { return claimed }
             // Some multi-representation clipboards reject a full round-trip write; fall back to the
             // plain-text representation rather than leave the clipboard empty.
             pb.clearContents()
             if let stringData = items.first?[.string], let text = String(data: stringData, encoding: .utf8) {
                 pb.setString(text, forType: .string)
             }
+            return nil
         }
     }
 
@@ -678,6 +814,10 @@ enum TextInserter {
     // A foreign target (VM guest, remote session) reads key codes off the wire rather than the CGEvent
     // flags a macOS app reads, so its modifiers must be posted as real key events around the chord.
     private static func postKey(_ keystroke: ClipboardKeystroke) -> Bool {
+        if let sink = keystrokeSink {
+            sink(keystroke)
+            return true
+        }
         guard let keyCode = keystroke.keyCode(in: KeyboardLayout.current()) else {
             Log.insertion.error(
                 "clipboard chord \(keystroke.canonical, privacy: .public) is absent from the active keyboard layout")

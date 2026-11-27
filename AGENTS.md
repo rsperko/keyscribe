@@ -112,7 +112,9 @@ are the ones that must never break; the guide explains why and what else applies
   - Paste is the primary insertion path; AX insert is a verified secondary.
   - The recording HUD is key only while visible and cancellable; relinquish key focus before any
     synthesized ⌘C or ⌘V.
-  - `PasteboardSnapshot.capture` stays synchronous and `@MainActor`. `runWithDeadline` and
+  - A clipboard snapshot is read in a child process (`PasteboardReader`), only by a take that may paste,
+    one clipboard transaction at a time. The in-process read, `PasteboardSnapshot.capture`, stays synchronous and
+    `@MainActor`. `runWithDeadline` and
     `runWithBudget` are never used for AppKit work.
 - **Speech-to-text engines** → `docs/development/areas/stt-engines.md` (catalog, engine adapters,
   no-speech gate, empty-transcript recovery, recognition bias).

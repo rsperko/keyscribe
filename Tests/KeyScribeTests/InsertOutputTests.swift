@@ -14,12 +14,15 @@ struct InsertOutputTests {
         var acting = true
         var loseDuringInsert = false
         var accessibility = true
+        var rechecks: [Bool?] = []
+        var callsRecheck = false
 
         func output() -> InsertOutput {
             InsertOutput(
                 snapshotAsync: { [unowned self] in self.snapshots.isEmpty ? TargetSnapshot(bundleId: "app") : self.snapshots.removeFirst() },
                 accessibilityGranted: { [unowned self] in self.accessibility },
                 insert: { [unowned self] _, _, _, text, _ in
+                    if self.callsRecheck { self.rechecks.append(await TextInserter.targetStillFocused?()) }
                     self.inserted.append(text)
                     if self.loseDuringInsert { self.wanted = false }
                     return self.actuates
@@ -120,5 +123,26 @@ struct InsertOutputTests {
 
     @Test func nothingSaidIsNoSpeech() async {
         #expect(await run(Rig(), request("", heard: "")).0 == .done(.noSpeech))
+    }
+
+    @Test func theInsertCanCheckItsTargetAgainAgainstTheSnapshotItWasDecidedOn() async {
+        let rig = Rig()
+        rig.callsRecheck = true
+        rig.snapshots = [TargetSnapshot(bundleId: "app"), TargetSnapshot(bundleId: "other")]
+        _ = await run(rig, request("Hello"))
+        #expect(rig.rechecks == [false])
+
+        let still = Rig()
+        still.callsRecheck = true
+        _ = await run(still, request("Hello"))
+        #expect(still.rechecks == [true])
+    }
+
+    @Test func aClipboardFallbackHasNoTargetToCheckAgain() async {
+        let rig = Rig()
+        rig.callsRecheck = true
+        rig.accessibility = false
+        _ = await run(rig, request("Hello"))
+        #expect(rig.rechecks == [nil])
     }
 }

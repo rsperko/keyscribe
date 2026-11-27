@@ -53,15 +53,20 @@ struct ClipboardPrefetchWiringTests {
         func stop() -> URL? { url }
     }
 
-    private func controller(engine: HeldEngine, events: Events, dir: URL) throws -> DictationController {
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent("modes", isDirectory: true), withIntermediateDirectories: true)
+    private func controller(engine: HeldEngine, events: Events, dir: URL, mode: Mode? = nil) throws -> DictationController {
+        let modes = dir.appendingPathComponent("modes", isDirectory: true)
+        try FileManager.default.createDirectory(at: modes, withIntermediateDirectories: true)
+        if let mode { try ModeStore.write(mode, to: modes) }
         var settings = Settings.defaults
         settings.stt = .init(engine: "fixed", eviction: .frugal)
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
+        for feature in [Feature.voiceCommands, .agents] { settings.features.setEnabled(true, for: feature) }
         let provider = try SpeechEngineProvider(engines: [engine], activeId: "fixed")
-        return DictationController(
-            settings: settings, provider: provider, config: ConfigCache(supportDir: dir),
+        let config = ConfigCache(supportDir: dir)
+        config.voiceCommandsEnabled = true
+        config.agentsEnabled = true
+        let controller = DictationController(
+            settings: settings, provider: provider, config: config,
             history: HistoryStore(supportDir: dir), hud: nil, permits: { _ in true },
             audio: FakeAudio(url: dir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in await MainActor.run { events.items.append("insert") }; return true },
@@ -70,6 +75,8 @@ struct ClipboardPrefetchWiringTests {
             accessibilityGranted: { true },
             prefetchClipboard: { events.items.append("prefetch") },
             discardPrefetchedClipboard: { events.items.append("discard") })
+        if let mode { controller.setNextModeOverride(id: mode.id) }
+        return controller
     }
 
     private func temporaryDirectory() -> URL {
@@ -122,5 +129,33 @@ struct ClipboardPrefetchWiringTests {
         controller.cancel()
         await prefetch.value
         #expect(!events.items.contains("prefetch"))
+    }
+
+    nonisolated private static func chosen(_ insertion: Mode.Insertion) -> Mode {
+        var mode = Mode(id: "chosen", name: "Chosen")
+        mode.insertion = insertion
+        mode.commands = .init(liveEdits: false, privacy: false)
+        return mode
+    }
+
+    @Test(arguments: [
+        (chosen(.paste), true),
+        (chosen(.insert), true),
+        (chosen(.type), false),
+        (Mode.agentMode, false),
+        (Mode.voiceCommands, false),
+    ])
+    func aTakeThatCannotPasteNeverReadsTheClipboard(mode: Mode, reads: Bool) async throws {
+        let dir = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let events = Events()
+        let controller = try controller(engine: HeldEngine(), events: events, dir: dir, mode: mode)
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await controller.dictationTask?.value
+        #expect(controller.lastRecord?.modeName == mode.name)
+        #expect(events.items.contains("prefetch") == reads)
     }
 }

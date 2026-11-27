@@ -567,4 +567,24 @@ struct ModeTests {
         m.setPrimaryPressStyle("hold-only")
         #expect(m.triggerKeys.isEmpty)
     }
+
+    @Test(arguments: [
+        (Mode.Output.cursor, Mode.Insertion.paste, true),
+        (.cursor, .insert, true),
+        (.cursor, .type, false),
+        (.replaceSelection, .paste, true),
+        (.replaceSelection, .insert, true),
+        (.replaceSelection, .type, false),
+        (.agent, .paste, false),
+        (.voiceCommand, .paste, false),
+        (.speak, .paste, false),
+    ])
+    func onlyAModeThatPutsTextAtTheCursorThroughTheClipboardMayPaste(
+        output: Mode.Output, insertion: Mode.Insertion, mayPaste: Bool
+    ) {
+        var mode = Mode(id: "m", name: "M")
+        mode.output = output
+        mode.insertion = insertion
+        #expect(mode.mayPaste == mayPaste)
+    }
 }

@@ -149,6 +149,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_: Notification) {
         DependencyLogging.configure()
+        PasteboardReader.warm()
         if let hudPreview {
             hud.appearance = HUDPreview.appearance(from: CommandLine.arguments) ?? .system
             hud.canCancel = { true }

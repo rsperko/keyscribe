@@ -30,38 +30,67 @@ Read before changing text insertion, pasteboard capture or restore, selection ca
   held key focus. Do not add an arming HUD to "restore" ESC.
   `CorrectionPanelController` solves the same problem by capturing `previousApp`
   + selection first, then orderOut → activate → wait → paste.
-- **`NSPasteboard`/`NSPasteboardItem` are main-thread-only — `PasteboardSnapshot.capture` is deliberately
-  SYNCHRONOUS `@MainActor`, and must stay both.** `data(forType:)` on a promised/lazy flavor drives
-  CFPasteboard's cross-process XPC bridge; doing that off-main corrupts the CF object graph and
-  **PAC-traps** (`EXC_BREAKPOINT` in `__CF_IS_OBJC` ← `_CFXPCCreateXPCObjectFromCFObject`) — a shipped crash,
-  and AppKit itself logs `NSPasteboard: synchronous promise fulfillment requested from a background thread!`
-  right before it. An earlier build ran the render off-main under `runWithDeadline` to keep the HUD smooth;
-  that is the bug. **`runWithDeadline`/`runWithBudget` are the WRONG tool for any AppKit work, twice over**:
-  `operation` is `@escaping @Sendable`, so it does NOT inherit the caller's `@MainActor` and lands on the
-  cooperative pool; and on expiry they only *abandon* it — the abandoned render kept touching
-  `NSPasteboardItem`s that the main actor then invalidated via `clearContents()`/`writeObjects`. Being
-  synchronous is load-bearing beyond thread affinity: with no suspension point, nothing can rewrite the
-  pasteboard *between* two flavors and no render outlives the call, so a single `capture` is atomic against
-  the clipboard. The **cost is accepted, not overlooked**: macOS exposes no bounded or cancellable pasteboard
-  read (`NSFilePromiseReceiver` is file-promises-only; there is no timeout knob on CFPasteboard's XPC), so
-  `renderBudgetSeconds` (0.25) can only be checked BETWEEN flavors — the aggregate is bounded, but one wedged
-  flavor blocks main for its whole render. `beginScratchPaste` threads ONE deadline through every
-  stabilize capture (`maxSnapshotStabilizeAttempts` retries plus the first), else that stall multiplies
-  by the attempt count. Tests pin both halves
-  (`lazyFlavorsThatBlowTheBudgetFallBackToPlainText`, `aSlowFlavorOutlastingTheBudgetStillRendersToCompletion`)
-  plus a data-provider probe asserting the render ran on the main thread. Two traps when touching this:
-  nested types do **NOT** inherit the enclosing `@MainActor` (`PasteboardSnapshot` sits inside `@MainActor
-  enum TextInserter` yet its members are nonisolated unless annotated — `capture`/`restore`/`restoreFull` each
-  say so explicitly); and a `SlowDataProvider`-style test now sleeps **on the main actor**, so keep such
-  delays just over the budget (~0.3 s, never seconds) or it starves every other `@MainActor` test in the suite.
-- **A take snapshots the clipboard while the engine transcribes, not between the transcript and ⌘V.**
-  `TextInserter.prefetchSnapshot` is an ordinary synchronous main-actor `capture`, run from a main-actor
-  task while the take is suspended on the engine, so the render costs no time after the transcript unless
-  inference finishes first. It drains a pending restore before it captures, for the same reason
-  `beginScratchPaste` does. `beginScratchPaste` uses a prefetched snapshot once, only for the same
-  pasteboard and only when `changeCount` has not moved; anything else is a fresh capture. The take awaits
-  its prefetch before anything can paste, a prefetch for a take that already ended does nothing, and every
-  terminal discards the slot.
+- **A clipboard snapshot is read in a child process.** Another app
+  renders a promised flavor (a large image, typically) only when it is read, and macOS offers no bounded or
+  cancellable read, so a read in the app blocks the main thread, and with it the HUD and every hotkey, for the
+  whole render. `PasteboardSnapshot.read` runs `PasteboardReader`: a copy of the app binary started with
+  `--read-pasteboard`, which reads the named pasteboard, sends its `changeCount` and plain text first and then
+  every flavor, and is killed at the deadline (`readBudgetSeconds`, 1 s: it overlaps transcription for a take;
+  a paste whose prefetch got nothing reads once more, so a declined paste waits at most two budgets). A read cut short, or one over `maxSnapshotBytes`, keeps
+  the plain text. A read that got nothing in time (the owner is slow to render even its plain text) returns
+  nil and the paste is declined, keeping the user's clipboard; the words stay for Paste last dictation. Even a
+  plain-text-only clipboard goes to the child: its types say nothing about whether its text is already rendered
+  (`aSlowPlainTextOnlyClipboardIsReadInTheChildToo`). A full read through the child took 0.02 s, a 4 MB PNG
+  included, in a Release dev build (measured 2026-11-27; the first launch right after the build took 0.87 s). A
+  child that cannot start, or exits without an answer, falls back to the in-process read below.
+  `DevCLI.handleFlags` answers the flag and sets the helper, so a host that never calls it keeps the in-process
+  read. The child also ends itself after `childLifetimeSeconds` in case the app is gone. Tests:
+  `aSlowImageInAnotherAppIsRenderedForTheChild` (a JXA script in its own process is the slow source; a
+  slow provider in the test process would render on the test's own main thread),
+  `aSourceSlowerThanTheDeadlineKeepsOnlyItsPlainText`, `aSlowPlainTextGivesNothingToRestore`. Other clipboard
+  reads (the Agent mode's spoken "clipboard", `currentClipboardText`) still read in the app.
+- **One clipboard transaction at a time.** `TextInserter.exclusively` serializes every clipboard snapshot: a
+  paste holds it from its snapshot through the ⌘V and the registered restore, a selection capture through its
+  restore, and a prefetch for its read. The read suspends, so without it a second paste could stage its scratch
+  while the first reads, and the first would snapshot that scratch as the user's clipboard and later restore
+  dictated text. A transaction waits for a restore still pending to end at its own trigger (the target's read,
+  or `restoreMs`) rather than forcing it, since a target that reads the ⌘V late would otherwise get the user's
+  clipboard or the next paste's text. A prefetch takes the gate itself, so a paste awaits its prefetch before
+  taking the gate, never inside it. Because a paste can now wait (on its prefetch, a pending restore, or a read)
+  after the take's target check, it checks again just before the keystroke whenever it waited
+  (`TextInserter.targetStillFocused`, set by `InsertOutput` from the same `decideInsertion`). That check
+  suspends, so the synchronous checks come after it, with nothing between them and the keystroke: the take
+  still wants it, the same app is in front (`frontmostApp`), and the clipboard still holds the scratch (so a
+  tool that rewrites every copy can skip a paste in a mode with a paste settle delay; skipping is the safe
+  direction). The app starts the reader once at launch (`PasteboardReader.warm`), touching no pasteboard, so the
+  first real read does not pay for a cold start. A
+  discarded or replaced prefetch is cancelled, so it gives up its place in the gate. A selection capture takes the
+  prefetch when it still matches, and leaves the snapshot it restored as the prefetch, stamped with the
+  `changeCount` its own restore claimed, so the paste after it reads nothing. Reads that are not snapshots (the
+  Agent mode's spoken "clipboard", `currentClipboardText`) still force a pending restore: they run inside the
+  synchronous text pipeline. Tests: `aSecondPasteDuringTheFirstsClipboardReadWaitsAndRestoresTheUsersClipboard`,
+  `aTargetThatReadsThePasteLateStillGetsThatPastesText`, `anotherAppInFrontAfterTheReadSkipsThePaste`,
+  `aPasteThatWaitedOnTheClipboardChecksItsTargetAgainBeforeTheKeystroke`,
+  `aCopyLandingWhileTheTargetIsCheckedAgainIsNeitherPastedNorOverwritten`.
+- **The in-process read stays synchronous `@MainActor`.** It is the fallback when no helper is set or the child
+  cannot start. `NSPasteboard`/`NSPasteboardItem` are main-thread-only: `data(forType:)` on a promised flavor
+  drives CFPasteboard's cross-process XPC bridge, and doing that off-main corrupts the CF object graph and
+  **PAC-traps** (`EXC_BREAKPOINT` in `__CF_IS_OBJC` ← `_CFXPCCreateXPCObjectFromCFObject`), a shipped crash.
+  **`runWithDeadline`/`runWithBudget` are the wrong tool for any AppKit work**: `operation` is `@escaping
+  @Sendable`, so it lands on the cooperative pool, and on expiry they only abandon it, so an abandoned render
+  kept touching items the main actor then invalidated. With no suspension point a single `capture` is atomic
+  against the clipboard; `renderBudgetSeconds` is checked between flavors, so one wedged flavor still blocks
+  main for its whole render, which is why the child exists. Nested types do **not** inherit the enclosing
+  `@MainActor`, so `capture`/`restore`/`restoreFull` each say so; a `SlowDataProvider`-style test sleeps on the
+  main actor, so keep such delays just over the budget (~0.3 s).
+- **Only a take that may paste reads the clipboard.** `Mode.mayPaste` decides, from the mode's output and
+  insertion method (AX insert counts, since it falls back to paste); any other take reads the clipboard only when
+  the user asks for it by voice. The read starts while the engine transcribes, once the press's mode is known
+  (`startClipboardPrefetch`), as a task `beginScratchPaste` awaits, so nothing before the paste waits for it:
+  routing, a rewrite, help and the Agent path run while it reads. It drains a pending restore before it reads,
+  for the same reason `beginScratchPaste` does. The paste uses that snapshot once, only for the same pasteboard
+  and only when `changeCount` has not moved; anything else, including a phrase that routes to a pasting mode
+  after the transcript, is a fresh read. Every terminal drops the task.
 - **A long agent roster lays out only the rows in view.** Once the roster needs a scroll view, its rows are a lazy
   stack, so showing and updating the HUD costs about the same with hundreds of conversations as with a few. As
   measured in a debug build on 2026-11-25, with 400 rows over five takes (show, three updates, transcribing,

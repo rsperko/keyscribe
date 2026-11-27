@@ -8,6 +8,8 @@ public enum DevCLI {
     // Handles any dev/admin flag present in the process arguments and exits; returns only when the
     // invocation is a plain menu-bar app launch.
     public static func handleFlags(agentIntegrations: AgentIntegrations = .builtIn) {
+        PasteboardReader.serveIfAsked()
+        PasteboardReader.helper = Bundle.main.executableURL
         // `--help` / `-h`: print the CLI surface and exit. No arguments launches the menu-bar app.
         if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-h") {
             print("""

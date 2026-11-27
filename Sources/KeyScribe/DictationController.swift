@@ -1454,7 +1454,8 @@ final class DictationController {
     func startClipboardPrefetch() -> Task<Void, Never>? {
         guard let identity = session?.identity else { return nil }
         return Task { @MainActor [weak self] in
-            guard let self, self.session?.identity === identity else { return }
+            await self?.session?.modeResolveTask?.value
+            guard let self, self.session?.identity === identity, self.activeMode?.mayPaste ?? true else { return }
             self.prefetchClipboard()
         }
     }

@@ -371,6 +371,10 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var isDirect: Bool { id == Mode.directId }
     public var runsVoiceCommands: Bool { output == .voiceCommand }
     public var answersAloud: Bool { output == .speak }
+    public var mayPaste: Bool {
+        guard output == .cursor || output == .replaceSelection else { return false }
+        return insertion != .type
+    }
     public var reply: ReplyKind { answersAloud ? .answer : .rewrite }
     public var hasOwnVocabulary: Bool { !isDirect }
 
