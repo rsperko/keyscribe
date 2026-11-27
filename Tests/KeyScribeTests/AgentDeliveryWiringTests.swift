@@ -2506,10 +2506,11 @@ struct AgentDeliveryWiringTests {
 
     enum RestartStep: String, CaseIterable, Sendable { case listed, hello, reported }
     enum RestartWhen: String, CaseIterable, Sendable { case whileSpeaking, justAfterRelease }
+    enum RestartLate: Sendable { case afterTheCutoff }
 
     private func takeDuringUltimateRestart(
         steps: [RestartStep], when: RestartWhen, pageShowsAfter: String = "61", pageFocusedAtStop: Bool = true,
-        pageEverFocused: Bool = true
+        pageEverFocused: Bool = true, late: RestartLate? = nil
     ) async -> (submitted: [String], hud: [HUDState], projectReads: Int, frontReads: Int) {
         let home = "/u/.ultimate/projects/app-1234"
         let browser = AgentHostApp(bundle: "com.google.Chrome.app.x", pid: 40, name: "Ultimate", window: "cg:400")
@@ -2531,7 +2532,7 @@ struct AgentDeliveryWiringTests {
             },
             activate: { _, _ in false })
         let snapshot = TargetSnapshot(bundleId: browser.bundle, pid: Int32(browser.pid), focusedWindowId: browser.window)
-        let rig = await rig("Plan the release.", front: FrontWindow(snapshot), frontGrace: .milliseconds(300),
+        let rig = await rig("Plan the release.", front: FrontWindow(snapshot), frontGrace: .seconds(1),
                             hosts: [AgentHostIntegration(kind: UltimateHost.kind, make: { ultimate })])
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.controller.hostRereadInterval = .milliseconds(50)
@@ -2573,7 +2574,10 @@ struct AgentDeliveryWiringTests {
         if when == .whileSpeaking { await play() }
         try? await Task.sleep(for: .milliseconds(200))
         rig.controller.handleCommit()
-        if when == .justAfterRelease { await play() }
+        if when == .justAfterRelease {
+            if late == .afterTheCutoff { try? await Task.sleep(for: .milliseconds(1300)) }
+            await play()
+        }
         await rig.controller.dictationTask?.value
         let submitted = rig.sent.compactMap { if case .submit(_, let session, _, _, _, _, _, _) = $0.0 { session } else { nil } }
         return (submitted, rig.hud.states, server.reads - readsBefore, server.addressReads - addressReadsBefore)
@@ -2590,6 +2594,15 @@ struct AgentDeliveryWiringTests {
         let id61 = AgentSessionID.make(
             agent: "ultimate", native: AgentHostLocation(host: "ultimate", instance: "/u/.ultimate/projects/app-1234", native: "61").conversationKey)
         #expect(submitted == [id61])
+    }
+
+    @Test func aProjectBackOnlyAfterTheReleaseCutoffDoesNotTakeTheTake() async {
+        let (submitted, hud, _, _) = await takeDuringUltimateRestart(
+            steps: [.listed, .hello, .reported], when: .justAfterRelease, late: .afterTheCutoff)
+        #expect(submitted.isEmpty)
+        #expect(hud.contains {
+            if case .error(let message, _, _, _) = $0 { message.hasPrefix("Ultimate for app isn\u{2019}t answering. Nothing sent.") } else { false }
+        })
     }
 
     @Test func aTakeWhoseUltimateNeverComesBackSaysItIsNotAnsweringAndBacksOffItsRereads() async {

@@ -113,6 +113,8 @@ public struct AgentDirectory: Sendable {
     public static let retiredLimit = 512
     public private(set) var conversations: [AgentConversation] = []
     public private(set) var disconnected: [AgentConversation] = []
+    private var listedAt: [String: [Int]] = [:]
+    private var disconnectedAt: [String: [Int]] = [:]
     public private(set) var revision = 0
     private var handleById: [String: String] = [:]
     struct Retired: Equatable, Sendable {
@@ -262,15 +264,20 @@ public struct AgentDirectory: Sendable {
     public mutating func patch(_ rows: [String: Row]) {
         guard !rows.isEmpty else { return }
         var changed = false
-        for index in conversations.indices {
-            guard let row = rows[conversations[index].id] else { continue }
-            changed = Self.apply(row, to: &conversations[index]) || changed
-        }
-        for index in disconnected.indices {
-            guard let row = rows[disconnected[index].id] else { continue }
-            changed = Self.apply(row, to: &disconnected[index]) || changed
+        for (id, row) in rows {
+            for index in listedAt[id] ?? [] { changed = Self.apply(row, to: &conversations[index]) || changed }
+            for index in disconnectedAt[id] ?? [] { changed = Self.apply(row, to: &disconnected[index]) || changed }
         }
         if changed { revision += 1 }
+    }
+
+    private mutating func reindex() {
+        listedAt = Dictionary(grouping: conversations.indices, by: { conversations[$0].id })
+        disconnectedAt = Dictionary(grouping: disconnected.indices, by: { disconnected[$0].id })
+    }
+
+    public func listed(id: String) -> AgentConversation? {
+        listedAt[id]?.first.map { conversations[$0] }
     }
 
     private static func apply(_ row: Row, to conversation: inout AgentConversation) -> Bool {
@@ -288,7 +295,7 @@ public struct AgentDirectory: Sendable {
     }
 
     public func conversation(id: String) -> AgentConversation? {
-        conversations.first { $0.id == id } ?? disconnected.first { $0.id == id }
+        listed(id: id) ?? disconnectedAt[id]?.first.map { disconnected[$0] }
     }
 
     public mutating func update(
@@ -498,6 +505,7 @@ public struct AgentDirectory: Sendable {
         if shown != conversations || excludedNow != disconnected {
             conversations = shown
             disconnected = excludedNow
+            reindex()
             revision += 1
         }
         rememberAll()
@@ -670,6 +678,7 @@ public struct AgentDirectory: Sendable {
             .sorted { $0.handle < $1.handle }
         disconnected = disconnected.map(renamed)
             .sorted { $0.handle < $1.handle }
+        reindex()
         rememberAll()
         revision += 1
     }

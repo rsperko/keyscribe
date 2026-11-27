@@ -606,4 +606,18 @@ struct ScratchPasteRestoreTests {
         #expect(keys == 0)
         #expect(pb.string(forType: .string) == "COPIED_DURING_CHECK")
     }
+
+    @Test func anAbortedPasteRestoresTheClipboardImmediately() async {
+        let pb = NSPasteboard(name: NSPasteboard.Name("keyscribe-abort-\(UUID().uuidString)"))
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+
+        var acted = true
+        await TextInserter.$shouldAbortInsertion.withValue({ true }) {
+            acted = await TextInserter.insertViaPaste("truncated dictation", awaitSettle: false, on: pb)
+        }
+
+        #expect(acted == false)
+        #expect(pb.string(forType: .string) == "USER_ORIGINAL")
+    }
 }

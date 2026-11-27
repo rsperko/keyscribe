@@ -186,7 +186,18 @@ every rule above applies to it, with these sharpenings:
   or before the conversation's first scan, still holds the next dictation.
   The roster is rebuilt only when its inputs, its names, or which name-remembered conversations still run changed
   (`AgentHub.refresh`), and inputs that differ only in what a row shows and no name depends on (state, generated
-  title, setup, connection, host) change those rows (`AgentDirectory.patch`) without reassigning names. A name change
+  title, setup, connection, host) change those rows (`AgentDirectory.patch`) without reassigning names. The row path of
+  `AgentHub.refresh(rows:)` never builds the roster's inputs at all: inside the same liveness snapshot a rebuild takes,
+  it reads only the rows the event is about, through id indexes on the last scan and the directory, sends their labels
+  alone, and prunes every running marker past its grace. It falls back to the rebuild when any other row's liveness
+  moved, when a session the rebuild would now forget (retained, not listed, not scanned, not live) exists, while a name save
+  is pending, or for anything past those rows (a name, a conversation hidden in a host, exclusion, places).
+  `AgentHubRowRefreshTests` replays random events (turns, prompts, hellos, titles, another conversation's connector
+  going quiet, a session no scan lists, time passing) on two hubs, one of them always rebuilding, and compares directory,
+  labels, attention, change notices, open prompts and forgotten sessions after every event; held dictation and receipts
+  are not in it. In a debug build with the test transport, as measured 2026-11-27, at 800 listed conversations: a burst of 800
+  hellos took about 0.8 ms each (4.5 ms each before), and a turn event that changed a state about 0.5 ms (2.4 ms
+  before); most of what is left is building the liveness snapshot, which still grows with the roster. A name change
   still reassigns every name, since one conversation's new name can change another's. In a release build with 430 listed conversations, as
   measured 2026-11-25: keeping the names a directory remembers as it changes, rather than working them out at each
   read (`AgentDirectory.remembered`), took a turn event that changed one state from about 1.27 ms to 0.50 ms; an

@@ -147,7 +147,11 @@ final class AgentPlaceTracker {
     }
 
     func notice() {
-        let changed = queries().filter { readAs[$0.id] != Self.asked($0) }
+        notice(queries())
+    }
+
+    func notice(_ queries: [AgentPlaceQuery]) {
+        let changed = queries.filter { readAs[$0.id] != Self.asked($0) }
         if !changed.isEmpty { request(only: Set(changed.map(\.id))) }
     }
 

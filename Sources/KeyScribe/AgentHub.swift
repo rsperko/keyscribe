@@ -143,9 +143,30 @@ final class AgentHub {
     private var lastScan: [String: [AgentSession]] = [:]
     private var scannedIds: [String: Set<String>] = [:]
 
+    private var scanIndex: [String: [String: [Int]]] = [:]
+    private var scannedPids: [Int: Set<String>]?
+
     private func scanned(_ agent: String, _ sessions: [AgentSession]) {
         lastScan[agent] = sessions
         scannedIds[agent] = Set(sessions.map { AgentSessionID.make(agent: $0.agent, native: $0.id) })
+        scanIndex[agent] = Dictionary(grouping: sessions.indices, by: { sessions[$0].id })
+        scannedPids = nil
+    }
+
+    private func scannedEntries(_ agent: String, _ native: String) -> [AgentSession] {
+        guard let listed = lastScan[agent] else { return [] }
+        return (scanIndex[agent]?[native] ?? []).map { listed[$0] }
+    }
+
+    private func sessionsRunning(_ pid: Int) -> Set<String> {
+        if scannedPids == nil {
+            var pids: [Int: Set<String>] = [:]
+            for (agent, listed) in lastScan {
+                for entry in listed { if let pid = entry.pid { pids[pid, default: []].insert(AgentSessionID.make(agent: agent, native: entry.id)) } }
+            }
+            scannedPids = pids
+        }
+        return scannedPids?[pid] ?? []
     }
     private var lastExtras: [String: AgentScanExtras] = [:]
     private var staleAgents: Set<String> = []
@@ -347,13 +368,15 @@ final class AgentHub {
     }
 
     private var placeQueries: [AgentPlaceQuery] {
-        (directory.conversations + directory.disconnected).compactMap { conversation in
-            guard let pid = conversation.pid else { return nil }
-            return AgentSessionID.split(conversation.id).map {
-                AgentPlaceQuery(
-                    id: conversation.id, agent: $0.agent, native: $0.native, pid: pid,
-                    environment: environments[conversation.id] ?? [:], placed: placeTracker?.places[conversation.id] != nil)
-            }
+        (directory.conversations + directory.disconnected).compactMap(placeQuery)
+    }
+
+    private func placeQuery(_ conversation: AgentConversation) -> AgentPlaceQuery? {
+        guard let pid = conversation.pid else { return nil }
+        return AgentSessionID.split(conversation.id).map {
+            AgentPlaceQuery(
+                id: conversation.id, agent: $0.agent, native: $0.native, pid: pid,
+                environment: environments[conversation.id] ?? [:], placed: placeTracker?.places[conversation.id] != nil)
         }
     }
 
@@ -437,7 +460,7 @@ final class AgentHub {
     }
 
     func handle(of id: String) -> String? {
-        directory.conversations.first { $0.id == id }?.handle
+        directory.listed(id: id)?.handle
     }
 
     var agentNames: [String: String] {
@@ -445,7 +468,7 @@ final class AgentHub {
     }
 
     func kind(of id: String) -> AgentKind? {
-        guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return nil }
+        guard let conversation = directory.listed(id: id) else { return nil }
         return discoveries.first { $0.kind.id == conversation.runningAgent }?.kind
     }
 
@@ -1135,7 +1158,7 @@ final class AgentHub {
     }
 
     private func knowsProcess(_ pid: Int) -> Bool {
-        lastScan.values.contains { $0.contains { $0.pid == pid } }
+        !sessionsRunning(pid).isEmpty
     }
 
     var processAgents: Set<String> {
@@ -1151,21 +1174,20 @@ final class AgentHub {
         var changed = false
         for (agent, natives) in Dictionary(grouping: sessions.compactMap(AgentSessionID.split), by: \.agent) {
             guard let discovery = discoveries.first(where: { $0.kind.id == agent }) else { continue }
-            guard var listed = lastScan[agent] else {
+            guard lastScan[agent] != nil else {
                 unlisted.insert(agent)
                 continue
             }
-            let index = Dictionary(listed.indices.map { (listed[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
             for (_, native) in natives {
-                guard let current = discovery.listed(native), let at = index[native] else {
+                guard let current = discovery.listed(native), let at = scanIndex[agent]?[native]?.first else {
                     unlisted.insert(agent)
                     continue
                 }
-                guard listed[at] != current else { continue }
-                listed[at] = current
+                guard lastScan[agent]?[at] != current else { continue }
+                if lastScan[agent]?[at].pid != current.pid { scannedPids = nil }
+                lastScan[agent]?[at] = current
                 changed = true
             }
-            lastScan[agent] = listed
         }
         if !unlisted.isEmpty { requestScan(rereadingTitles: false, agents: unlisted, reusingProcesses: true) }
         return changed
@@ -1299,7 +1321,9 @@ final class AgentHub {
         var rememberedRunning: Set<String>
     }
 
-    private var built: (inputs: RosterInputs, revision: Int)?
+    private var built: (inputs: RosterInputs, revision: Int, positions: [String: Int], ids: Set<String>)?
+    var refreshesRowsAlone = true
+    private(set) var fullRefreshes = 0
     private(set) var rosterRebuilds = 0
     private(set) var attentionPasses = 0
 
@@ -1358,33 +1382,136 @@ final class AgentHub {
         return aligned == was
     }
 
+    private static func sameOutside(
+        _ ids: Set<String>, _ was: Set<String>, _ answered: Set<String>, live: (String) -> Bool
+    ) -> Bool {
+        for id in was where !ids.contains(id) && !live(id) { return false }
+        var now = 0
+        for id in answered where !ids.contains(id) && live(id) { now += 1 }
+        return now == was.count - was.intersection(ids).count
+    }
+
+    private func nativeName(of entry: AgentSession, id: String) -> String? {
+        if let reported = connectorNames[id], !Self.isGenerated(reported, entry.title) { return reported }
+        return entry.explicitName ?? entry.title.explicitName
+    }
+
     private static func row(for entry: AgentSession, id: String, in inputs: RosterInputs) -> AgentDirectory.Row {
+        row(for: entry, live: inputs.live.contains(id), title: inputs.titles[id], unreadSince: inputs.unreadSince[id])
+    }
+
+    private static func row(for entry: AgentSession, live: Bool, title: String?, unreadSince: Date?) -> AgentDirectory.Row {
         AgentDirectory.Row(
-            state: entry.state, connectorLive: inputs.live.contains(id), title: inputs.titles[id], setup: entry.setup,
-            placeUnreadSince: inputs.unreadSince[id], host: entry.host, innerAgent: entry.innerAgent)
+            state: entry.state, connectorLive: live, title: title, setup: entry.setup,
+            placeUnreadSince: unreadSince, host: entry.host, innerAgent: entry.innerAgent)
     }
 
     func refresh(namesReportedFor: Set<String> = [], scannedAt: [String: Date] = [:]) {
         withLiveness { rebuild(namesReportedFor: namesReportedFor, scannedAt: scannedAt) }
     }
 
+    private func refresh(rows ids: Set<String>, namesReportedFor: Set<String> = []) {
+        withLiveness {
+            guard refreshesRowsAlone, !ids.isEmpty, refreshedAlone(ids) else {
+                return rebuild(namesReportedFor: namesReportedFor, scannedAt: [:])
+            }
+        }
+    }
+
+    private func refreshedAlone(_ ids: Set<String>) -> Bool {
+        guard let planned = rowsAlone(ids) else { return false }
+        let before = directory.revision
+        let problemsBefore = shownProblems
+        var changed: [String: AgentDirectory.Row] = [:]
+        for plan in planned {
+            built?.inputs.entries[plan.index] = plan.entry
+            built?.inputs.titles[plan.id] = plan.title
+            if plan.live { built?.inputs.live.insert(plan.id) } else { built?.inputs.live.remove(plan.id) }
+            if placeTracker != nil { built?.inputs.unreadSince[plan.id] = plan.unreadSince }
+            if plan.row != plan.was { changed[plan.id] = plan.row }
+        }
+        if !changed.isEmpty { directory.patch(changed) }
+        built?.revision = directory.revision
+        pruneHostFollows(listed: nil)
+        placeTracker?.notice(ids.compactMap { id in directory.conversation(id: id).flatMap(placeQuery) })
+        sendLabels(for: ids)
+        let stale = now().addingTimeInterval(-Self.runningGrace)
+        running = running.filter { directory.listed(id: $0.key)?.state != .idle || $0.value > stale }
+        releaseHeld()
+        reconcileAttention(changed: ids)
+        shownProblems = discoveryProblems
+        if directory.revision != before || discoveryProblems != problemsBefore { onChange?() }
+        return true
+    }
+
+    private struct RowPlan {
+        let id: String
+        let index: Int
+        let entry: AgentSession
+        let title: String?
+        let live: Bool
+        let unreadSince: Date?
+        let row: AgentDirectory.Row
+        let was: AgentDirectory.Row
+    }
+
+    private func rowsAlone(_ ids: Set<String>) -> [RowPlan]? {
+        guard let built, built.revision == directory.revision, namesNotSaved == nil, let liveness else { return nil }
+        let hidden = Set(inHosts.keys).union(filed.values.map(\.session))
+        let hosting = Set(inHosts.values)
+        let answered = liveness.live.sessions
+        let ending = liveness.retained.contains { session in
+            !answered.contains(session) && directory.conversation(id: session) == nil
+                && !(AgentSessionID.agent(of: session).map { scannedIds[$0]?.contains(session) == true } ?? false)
+        }
+        guard !ending, built.ids.isSubset(of: liveness.asked.sessions) else { return nil }
+        let liveNow = { (id: String) in built.ids.contains(id) && answered.contains(id) && !built.inputs.excluded.contains(id) }
+        guard Self.sameOutside(ids, built.inputs.live, answered, live: liveNow) else { return nil }
+        var planned: [RowPlan] = []
+        for id in ids {
+            guard let (agent, native) = AgentSessionID.split(id), discoveries.contains(where: { $0.kind.id == agent }),
+                  !hidden.contains(id), !hosting.contains(id), let index = built.positions[id],
+                  let entry = Self.newestOfEach(scannedEntries(agent, native)).first
+            else { return nil }
+            let was = built.inputs.entries[index]
+            guard Self.sameNames(was, entry), exclusions.excludes(id) == built.inputs.excluded.contains(id),
+                  registryNames[id] == .some(entry.explicitName)
+            else { return nil }
+            let name = nativeName(of: entry, id: id)
+            guard built.inputs.nativeNames[id] == .some(name) else { return nil }
+            var unreadSince = built.inputs.unreadSince[id]
+            if let tracker = placeTracker {
+                let hostListed = lastExtras.values.contains { $0.listed.contains(id) }
+                let unplaced = !hostListed && tracker.places[id] == nil && !tracker.unchecked([id]).isEmpty
+                guard unplaced == built.inputs.unplaced.contains(id) else { return nil }
+                unreadSince = tracker.failingSince[id]
+            }
+            let title = name ?? entry.title.generatedTitle
+            let live = liveNow(id)
+            planned.append(RowPlan(
+                id: id, index: index, entry: entry, title: title, live: live, unreadSince: unreadSince,
+                row: Self.row(for: entry, live: live, title: title, unreadSince: unreadSince),
+                was: Self.row(for: was, id: id, in: built.inputs)))
+        }
+        return planned
+    }
+
+
     private func retitle(_ native: String, as title: AgentTitle, agent: String) {
-        guard var listed = lastScan[agent], listed.contains(where: { $0.id == native }) else {
+        guard let positions = scanIndex[agent]?[native], !positions.isEmpty else {
             requestScan(rereadingTitles: false, agents: [agent], reusingProcesses: true)
             return
         }
-        guard listed.contains(where: { $0.id == native && $0.title != title }) else { return }
-        for index in listed.indices where listed[index].id == native { listed[index].title = title }
-        lastScan[agent] = listed
-        refresh()
+        guard positions.contains(where: { lastScan[agent]?[$0].title != title }) else { return }
+        for index in positions { lastScan[agent]?[index].title = title }
+        refresh(rows: [AgentSessionID.make(agent: agent, native: native)])
     }
 
     private func listedFromMemory(_ sessions: Set<String>) -> Set<String> {
         var found: Set<String> = []
         for (agent, natives) in Dictionary(grouping: sessions.filter { filed[$0] == nil }.compactMap(AgentSessionID.split), by: \.agent) {
             guard let discovery = discoveries.first(where: { $0.kind.id == agent }) else { continue }
-            let scanned = Set((lastScan[agent] ?? []).map(\.id))
-            for (_, native) in natives where scanned.contains(native) && discovery.listed(native) != nil {
+            for (_, native) in natives where scanIndex[agent]?[native] != nil && discovery.listed(native) != nil {
                 found.insert(AgentSessionID.make(agent: agent, native: native))
             }
         }
@@ -1393,10 +1520,12 @@ final class AgentHub {
 
     private func owns(_ pid: Int, _ session: String) -> Bool {
         guard let (agent, native) = AgentSessionID.split(session) else { return knowsProcess(pid) }
-        return knowsProcess(pid) && !(lastScan[agent] ?? []).contains { $0.pid == pid && $0.id != native }
+        let running = sessionsRunning(pid)
+        return !running.isEmpty && !running.contains { AgentSessionID.agent(of: $0) == agent && AgentSessionID.native($0) != native }
     }
 
     private func rebuild(namesReportedFor: Set<String>, scannedAt: [String: Date]) {
+        fullRefreshes += 1
         let before = directory.revision
         let problemsBefore = shownProblems
         var entries: [AgentSession] = []
@@ -1425,12 +1554,7 @@ final class AgentHub {
                     connectorNames[id] = nil
                 }
                 registryNames[id] = .some(entry.explicitName)
-                let native: String?
-                if let reported = connectorNames[id], !Self.isGenerated(reported, entry.title) {
-                    native = reported
-                } else {
-                    native = entry.explicitName ?? entry.title.explicitName
-                }
+                let native = nativeName(of: entry, id: id)
                 nativeNames[id] = .some(native)
                 shown[id] = native ?? entry.title.generatedTitle
             }
@@ -1459,7 +1583,10 @@ final class AgentHub {
                     running: { [weak self] saved in running[saved] ?? self?.stillRunning(saved) ?? false },
                     excluded: inputs.excluded, places: inputs.places, unplaced: inputs.unplaced, unreadSince: inputs.unreadSince)
             }
-            built = (inputs, directory.revision)
+            let positions = Dictionary(
+                inputs.entries.enumerated().map { (AgentSessionID.make(agent: $0.element.agent, native: $0.element.id), $0.offset) },
+                uniquingKeysWith: { first, _ in first })
+            built = (inputs, directory.revision, positions, Set(positions.keys))
         }
         let reported = namesNotSaved
         rememberNames()
@@ -1567,7 +1694,7 @@ final class AgentHub {
         }
     }
 
-    private func reconcileAttention() {
+    private func reconcileAttention(changed: Set<String>? = nil) {
         attentionPasses += 1
         let tracked = Set(attention.keys).union(awaitingResult.keys)
         for session in Set(attention.keys).union(goneSince.keys).union(awaitedHandles.keys) where awaitingResult[session] == nil {
@@ -1576,7 +1703,7 @@ final class AgentHub {
             awaitedHandles[session] = nil
         }
         for session in Array(awaitingResult.keys) {
-            let conversation = directory.conversations.first { $0.id == session }
+            let conversation = directory.listed(id: session)
             if let conversation { awaitedHandles[session] = conversation.handle }
             let wanted: AgentAttention?
             if let conversation, conversation.connectorLive {
@@ -1604,16 +1731,29 @@ final class AgentHub {
                 awaitedHandles[session] = nil
             }
         }
-        clearReturned(except: tracked)
+        clearReturned(except: tracked, changed: changed)
     }
 
-    private func clearReturned(except tracked: Set<String>) {
-        let live = Set(directory.conversations.filter(\.connectorLive).map(\.id))
-        for session in live.subtracting(liveSessions).subtracting(tracked) {
-            onAttention?(session, handle(of: session) ?? "", nil, false)
+    private func clearReturned(except tracked: Set<String>, changed: Set<String>?) {
+        guard let changed else {
+            let live = Set(directory.conversations.filter(\.connectorLive).map(\.id))
+            for session in live.subtracting(liveSessions).subtracting(tracked) {
+                onAttention?(session, handle(of: session) ?? "", nil, false)
+            }
+            liveSessions = live
+            waitingPrompts = waitingPrompts.filter { live.contains($0.key) || liveSession($0.key) }
+            return
         }
-        liveSessions = live
-        waitingPrompts = waitingPrompts.filter { live.contains($0.key) || liveSession($0.key) }
+        for session in changed {
+            guard directory.listed(id: session)?.connectorLive == true else {
+                liveSessions.remove(session)
+                if waitingPrompts[session] != nil, !liveSession(session) { waitingPrompts[session] = nil }
+                continue
+            }
+            if liveSessions.insert(session).inserted, !tracked.contains(session) {
+                onAttention?(session, handle(of: session) ?? "", nil, false)
+            }
+        }
     }
 
     private func forget(_ ended: Set<String>) {
@@ -1679,8 +1819,10 @@ final class AgentHub {
         return "\u{201C}\(name)\u{201D} \u{00B7} Update: \(reload)"
     }
 
-    private func sendLabels() {
-        for conversation in directory.conversations where conversation.connectorLive {
+    private func sendLabels(for ids: Set<String>? = nil) {
+        let conversations = ids.map { ids in ids.compactMap { directory.listed(id: $0) }.sorted { $0.handle < $1.handle } }
+            ?? directory.conversations
+        for conversation in conversations where conversation.connectorLive {
             let holder = holder(of: conversation.id)
             guard let holder, connectors[holder]?.features.contains("label") == true else { continue }
             let reload = runsOlderConnector(conversation, holder: holder) ? kind(of: conversation.id).map(Self.updateStep) : nil
@@ -1695,7 +1837,7 @@ final class AgentHub {
         _ text: String, to id: String, request: String? = nil, images: [String] = [], inFront: Bool = false, released: Bool = false
     ) async -> AgentReceipt {
         if let source = startingHost(id) { return await start(text, through: source, request: request ?? makeId(), inFront: inFront) }
-        let conversation = directory.conversations.first { $0.id == id }
+        let conversation = directory.listed(id: id)
         if released, let request, exclusions.excludes(id) || conversation.flatMap(deliveringHost(of:)) == nil { outbox.finish(request) }
         if exclusions.excludes(id) { return .notSent(disconnected.first { $0.id == id }?.handle, reason: .disconnected) }
         guard let conversation else { return .notSent(nil, reason: .conversationEnded) }
@@ -1904,7 +2046,11 @@ final class AgentHub {
     private func settle(_ named: Named) {
         let unlisted = named.newProcess ? named.sessions : named.sessions.subtracting(listedFromMemory(named.sessions))
         _ = relist(named.sessions.subtracting(unlisted))
-        refresh(namesReportedFor: named.sessions)
+        if unlisted.isEmpty {
+            refresh(rows: named.sessions, namesReportedFor: named.sessions)
+        } else {
+            refresh(namesReportedFor: named.sessions)
+        }
         if !unlisted.isEmpty {
             requestScan(rereadingTitles: true, agents: agents(of: unlisted), reusingProcesses: !named.newProcess)
         }
@@ -1970,7 +2116,7 @@ final class AgentHub {
             waitingPrompts[session] = prompt
             let revision = directory.revision
             let sessions = Set([session] + [filed[session]?.session].compactMap { $0 })
-            if relist(sessions) { refresh() }
+            if relist(sessions) { refresh(rows: sessions) }
             if changed, directory.revision == revision { onChange?() }
         case .notify(let session, let turn, let on):
             _ = notify(session: session, turn: turn, on: on)
@@ -2084,7 +2230,7 @@ final class AgentHub {
             running[session] = now()
             turns[session] = turn
             let sessions = Set([session] + [filed[session]?.session].compactMap { $0 })
-            if relist(sessions) { refresh() }
+            if relist(sessions) { refresh(rows: sessions) }
         case .turnComplete(let session, let reason, let answer, let after, let turn):
             let hosted = hosts.contains { $0.kind.id == AgentSessionID.agent(of: session) }
             let ended = turn ?? (hosted ? turns[session] : nil)
@@ -2131,9 +2277,11 @@ final class AgentHub {
             if reason == "aborted" { outbox.noteInterrupted(conversation: session) }
             let sessions = Set([session] + [filed[session]?.session].compactMap { $0 })
             _ = relist(sessions)
-            refresh()
+            refresh(rows: sessions)
         }
-        if named == nil, reconciling, attentionPasses == passes { reconcileAttention() }
+        if named == nil, reconciling, attentionPasses == passes {
+            reconcileAttention(changed: Set([event.session, event.session.flatMap { filed[$0]?.session }].compactMap { $0 }))
+        }
         return named
     }
 
@@ -2601,14 +2749,15 @@ final class AgentHub {
         return nil
     }
 
-    private func pruneHostFollows(listed: Set<String>) {
+    private func pruneHostFollows(listed: Set<String>?) {
         let at = now()
-        hostFollows = hostFollows.filter { listed.contains($0.key) }.mapValues { follows in
+        let listedNow = { (id: String) in listed?.contains(id) ?? true }
+        hostFollows = hostFollows.filter { listedNow($0.key) }.mapValues { follows in
             follows.filter { follow in follow.expires.map { $0 > at } ?? true }
         }
-        namedTurns = namedTurns.filter { listed.contains($0.key) }
-        continuing = continuing.filter { listed.contains($0.key) && at.timeIntervalSince($0.value.at) <= Self.continuationWindow }
-        endedTurns = endedTurns.filter { listed.contains($0.key) }.mapValues { turns in
+        namedTurns = namedTurns.filter { listedNow($0.key) }
+        continuing = continuing.filter { listedNow($0.key) && at.timeIntervalSince($0.value.at) <= Self.continuationWindow }
+        endedTurns = endedTurns.filter { listedNow($0.key) }.mapValues { turns in
             turns.filter { at.timeIntervalSince($0.at) < Self.endedTurnMemory }
         }
         let following = Set(hostFollows.values.joined().map(\.request))
@@ -2695,7 +2844,7 @@ final class AgentHub {
     }
 
     private func state(of id: String) -> AgentLiveState? {
-        guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return nil }
+        guard let conversation = directory.listed(id: id) else { return nil }
         if let (source, _) = deliveringHost(of: conversation), source.host.queuesInHub { return conversation.state.named(by: waitingPrompts[id]) }
         guard conversation.connectorLive else { return nil }
         if handingOff[id] != nil { return .working }
@@ -2920,7 +3069,7 @@ final class AgentHub {
     }
 
     private func busyAndFree(_ id: String) -> Bool {
-        guard handingOff[id] == nil, let conversation = directory.conversations.first(where: { $0.id == id }), conversation.connectorLive
+        guard handingOff[id] == nil, let conversation = directory.listed(id: id), conversation.connectorLive
         else { return false }
         return conversation.state == .working || (conversation.state == .idle && running[id] != nil)
     }
