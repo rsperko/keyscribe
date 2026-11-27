@@ -12,6 +12,28 @@ final class TapClock {
 }
 
 @MainActor
+final class TapTimers {
+    private var due: [(at: TimeInterval, work: @MainActor () -> Void)] = []
+    private let clock: TapClock
+
+    init(_ clock: TapClock) { self.clock = clock }
+
+    func schedule(_ delay: TimeInterval, _ work: @escaping @MainActor () -> Void) {
+        due.append((clock.now + delay, work))
+    }
+
+    func run(through time: TimeInterval) {
+        while let next = due.indices.filter({ due[$0].at <= time }).min(by: { due[$0].at < due[$1].at }) {
+            let timer = due.remove(at: next)
+            let now = clock.now
+            clock.now = max(now, timer.at)
+            timer.work()
+            clock.now = max(now, clock.now)
+        }
+    }
+}
+
+@MainActor
 @Suite(.serialized)
 struct HotkeyTapThreadTests {
     private static let base: TimeInterval = 1_000
@@ -172,17 +194,22 @@ struct HotkeyTapThreadTests {
             for (style, expected) in cell.expected {
                 for stalled in [false, true] {
                     let clock = TapClock()
+                    let timers = TapTimers(clock)
                     var edges: [String] = []
-                    let m = try monitor(cell.key, style: style, clock: clock, record: { edges.append($0) })
+                    let m = try monitor(
+                        cell.key, style: style, clock: clock, record: { edges.append($0) }, schedule: timers.schedule)
                     if stalled {
                         #expect(deliverStalled(cell.steps, held: cell.held, to: m, clock: clock))
+                        timers.run(through: clock.now)
                     } else {
                         for step in cell.steps {
+                            timers.run(through: Self.base + step.at)
                             clock.now = Self.base + step.at
                             let (type, event) = event(step, held: cell.held)
                             m.received(type: type, event: event)
                             await drain()
                         }
+                        timers.run(through: Self.base + (cell.steps.last?.at ?? 0) + 0.3)
                     }
                     await drain { edges == expected }
                     #expect(edges == expected, "\(cell.name), \(style), \(stalled ? "main blocked" : "main live")")
