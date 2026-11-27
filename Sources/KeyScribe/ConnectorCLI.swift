@@ -59,6 +59,7 @@ enum ConnectorCLI {
         case .status(let status): "\(status)"
         case .failed(let message): "failed: \(message)"
         case .broken(let message): "broken: \(message)"
+        case .needsUser(let message): "needs you: \(message)"
         case .unconfirmed(let message): "unconfirmed: \(message)"
         case .removalUnfinished(let message): "removal unfinished\(message.map { ": " + $0 } ?? "")"
         case .toolTooOld(let version): "tool too old: \(version)"

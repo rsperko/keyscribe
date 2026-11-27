@@ -1462,7 +1462,11 @@ every rule above applies to it, with these sharpenings:
   `tell_me_when_done` tool as an auto-approved MCP server; its one wait is bounded and a timeout promises nothing.
   On the default Codex model when the tool was added, it is called when the user names the app; "tell me out loud"
   alone may make the model reach for another tool. Codex runs the hooks only after the user trusts them with
-  `/hooks`, and Settings reads that trust from the app server. Status changes, a cleared approval and the agent's
+  `/hooks`, and Settings reads that trust from the app server. Untrusted hooks are a step only the user can take
+  (`AgentConnectorModel.State.needsUser`): Settings offers Check Again rather than Repair, and upkeep never reinstalls
+  for it. `/hooks` lists hooks by event with a review count, never by plugin name, so the copy names the keys it takes
+  (measured with codex-cli 0.172.0 on 2026-11-27: `t` trusts all, Return reviews an event, and a new session asks
+  at startup). Status changes, a cleared approval and the agent's
   last words for a prompt reach the hub as they happen (`AgentHost.watch`). Each conversation is joined to the
   `codex` process whose terminal pane title carries its thread id, through the `thread-id` title item the install
   adds (`CodexPaneTitle`, `TerminalTitleReader`), so Open and in front use the same terminal routes agents use.

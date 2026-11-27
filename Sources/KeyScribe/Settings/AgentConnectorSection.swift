@@ -422,6 +422,10 @@ private struct ConnectorFolderRow: View {
                 Button("Repair") { Task { await setup.update() } }
                     .accessibilityLabel("Repair \(setupName)")
                     .accessibilityIdentifier(AccessibilityID.Mode.Agents.update)
+            case .needsUser:
+                Button("Check Again") { Task { await setup.retry() } }
+                    .accessibilityLabel("Check \(setupName) again")
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.tryAgain)
             case .removalUnfinished:
                 Button("Finish Uninstalling") { Task { await setup.remove() } }
                     .accessibilityLabel("Finish uninstalling \(setupName)")
@@ -443,7 +447,7 @@ private struct ConnectorFolderRow: View {
             }
         case .toolTooOld(let found):
             IssueText(setup.copy.toolTooOldAdvice(found), severity: .advisory)
-        case .unavailable, .failed, .broken, .unconfirmed:
+        case .unavailable, .failed, .broken, .needsUser, .unconfirmed:
             if let message = setup.failureMessage { IssueText(message) }
         case .status(.disabled):
             IssueText(setup.copy.disabledAdvice, severity: .advisory)
@@ -469,7 +473,7 @@ extension ConnectorSetupModel {
         case .unavailable: "Unavailable"
         case .failed, .unconfirmed: "Something went wrong"
         case .removalUnfinished: "Uninstall not finished"
-        case .broken: "Not working"
+        case .broken, .needsUser: "Not working"
         case .status(.ready): "Installed"
         case .status(.notInstalled): "Not installed"
         case .status(.outdated): "Update available"
@@ -482,7 +486,7 @@ extension ConnectorSetupModel {
     var failureMessage: String? {
         switch state {
         case .unavailable: copy.unavailable
-        case .failed(let message), .broken(let message), .unconfirmed(let message): message.isEmpty ? copy.noReason : message
+        case .failed(let message), .broken(let message), .needsUser(let message), .unconfirmed(let message): message.isEmpty ? copy.noReason : message
         case .removalUnfinished(let message): message.flatMap { $0.isEmpty ? nil : $0 } ?? copy.removalUnfinishedAdvice
         default: nil
         }

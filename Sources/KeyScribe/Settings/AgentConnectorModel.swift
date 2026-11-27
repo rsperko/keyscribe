@@ -215,7 +215,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     var isInstalled: Bool {
         switch state {
-        case .status(.ready), .status(.outdated), .status(.disabled), .broken, .unconfirmed: true
+        case .status(.ready), .status(.outdated), .status(.disabled), .broken, .needsUser, .unconfirmed: true
         default: false
         }
     }
@@ -226,7 +226,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     var hasError: Bool {
         switch state {
-        case .unavailable, .failed, .removalUnfinished, .broken, .unconfirmed: true
+        case .unavailable, .failed, .removalUnfinished, .broken, .needsUser, .unconfirmed: true
         default: false
         }
     }
@@ -392,6 +392,7 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
         case removalUnfinished(String?)
         case failed(String)
         case broken(String)
+        case needsUser(String)
         case unconfirmed(String)
     }
 

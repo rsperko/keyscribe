@@ -1039,6 +1039,8 @@ struct AgentsSettingsModelTests {
         let bundledVersion: String? = "1"
         let defaultFolder: URL
         var installed = false
+        var found: AgentConnectorModel.State?
+        private(set) var updates = 0
         private(set) var toolsSeen: [String] = []
 
         init(defaultFolder: URL) { self.defaultFolder = defaultFolder }
@@ -1050,15 +1052,41 @@ struct AgentsSettingsModelTests {
         func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State {
             toolsSeen.append(tool)
             if target.removing { return installed ? .removalUnfinished(nil) : .status(.notInstalled) }
-            return installed ? .status(.ready) : .status(.notInstalled)
+            return installed ? found ?? .status(.ready) : .status(.notInstalled)
         }
         func install(tool: String, target: ConnectorTarget) async throws {
             toolsSeen.append(tool)
             installed = true
         }
-        func update(tool: String, target: ConnectorTarget) async throws { installed = true }
+        func update(tool: String, target: ConnectorTarget) async throws {
+            updates += 1
+            installed = true
+        }
         func uninstall(tool: String, target: ConnectorTarget) async throws { installed = false }
         func uninstallWithoutTool(target: ConnectorTarget) async throws { installed = false }
+    }
+
+    @Test func aStepOnlyTheUserCanTakeInTheAgentIsCheckedAgainNeverRepaired() async {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-folder-connector-\(UUID().uuidString)")
+        let folder = dir.appendingPathComponent("home/.folder", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let connector = FolderConnector(defaultFolder: folder)
+        let model = AgentsSettingsModel(describeTerminal: Terminals().describe, agentsDir: dir, connectors: [connector])
+        await model.refresh()
+        await setup(model).install()
+        connector.found = .needsUser("Trust the hooks in the agent.")
+        await setup(model).refresh()
+        #expect(setup(model).isInstalled)
+        #expect(setup(model).hasError)
+        #expect(setup(model).statusText == "Not working")
+        #expect(setup(model).failureMessage == "Trust the hooks in the agent.")
+        await model.connectors[0].maintain()
+        #expect(connector.updates == 0)
+        #expect(setup(model).state == .needsUser("Trust the hooks in the agent."))
+        connector.found = nil
+        await setup(model).retry()
+        #expect(setup(model).state == .status(.ready))
+        #expect(connector.updates == 0)
     }
 
     @Test func aConnectorThatRunsNoProgramInstallsChecksAndRemovesWithoutLookingForOne() async {

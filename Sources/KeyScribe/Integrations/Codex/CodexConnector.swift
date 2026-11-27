@@ -123,7 +123,7 @@ final class CodexConnector: AgentConnector {
         case .unreadable, .unsupported: return .broken(Self.titleUnreadable)
         }
         switch await trust(target.folder.path, layout.pluginId) {
-        case .needsTrust: return .broken(Self.needsTrust)
+        case .needsTrust: return .needsUser(Self.needsTrust)
         case .absent: return .broken(Self.hooksNotListed)
         case .trusted, .unreadable, nil: return .status(.ready)
         }
@@ -138,7 +138,7 @@ final class CodexConnector: AgentConnector {
     nonisolated static let hooksNotListed =
         "Codex\u{2019}s app server doesn\u{2019}t list the plugin\u{2019}s hooks, so its turns may not be reported. Choose Update to add the plugin again."
     nonisolated static let needsTrust =
-        "Codex hasn\u{2019}t trusted the plugin\u{2019}s hooks yet. In Codex, type /hooks and trust the \(Branding.appName) hooks."
+        "Codex won\u{2019}t run the plugin\u{2019}s hooks until you trust them. In Codex, type /hooks and press t to trust all, or press Return to review the events marked for review; a new Codex session also asks when it starts. Then choose Check Again."
 
     func install(tool: String, target: ConnectorTarget) async throws {
         guard let script else { throw AgentConnectorError(message: copy.unavailable) }

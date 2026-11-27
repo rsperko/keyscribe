@@ -292,11 +292,9 @@ struct CodexConnectorTests {
         let rig = try rig()
         try await installed(rig)
         rig.trust.result = .needsTrust
-        guard case .broken(let why) = await rig.connector.check(tool: "/x/codex", target: rig.target) else {
-            Issue.record("not broken")
-            return
-        }
-        #expect(why.contains("/hooks"))
+        #expect(await rig.connector.check(tool: "/x/codex", target: rig.target) == .needsUser(CodexConnector.needsTrust))
+        #expect(CodexConnector.needsTrust.contains("/hooks"))
+        #expect(CodexConnector.needsTrust.contains("press t"))
     }
 
     @Test func aTitleItemRemovedByHandNeedsRepairAndCheckingNeverPutsItBack() async throws {

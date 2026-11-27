@@ -2473,7 +2473,9 @@ thread storage, and is otherwise refused as not a bb data folder. The folder a b
 open uses is the default, which **Connect…** offers; otherwise the usual folder. For Codex, one row per Codex home: `~/.codex`
 and any folder `CODEX_HOME` names in the login shell, with **Add Folder…** for others. Its consent sheet says the
 install adds the `thread-id` item to the home's terminal title (the connector copy's `installNote`). Its row reads
-broken, with the reason, while Codex has not trusted the plugin's hooks (type `/hooks` in Codex), while the title
+**Not working**, with the reason, while Codex has not trusted the plugin's hooks: the reason says how to trust them in
+`/hooks`, and the action is **Check Again**, never Repair, since only the user can grant that trust and reinstalling
+does not; startup upkeep leaves such a row alone. It reads broken, with the reason, while the title
 item the install added is missing (**Update** puts it back; nothing else does), or while `config.toml` cannot be
 read; Codex's app server not running reads as that, never as no conversations. The host is on exactly while any of
 its setups is enrolled; its id in `agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host
